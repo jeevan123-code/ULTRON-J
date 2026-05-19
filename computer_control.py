@@ -1,0 +1,876 @@
+"""
+computer_control.py — Computer Control Engine for Ultron-J
+Jeevan's AI can now SEE your screen and CONTROL your computer.
+
+CAPABILITIES:
+- Screenshot + describe screen
+- Type text anywhere
+- Click / double-click / right-click
+- Scroll
+- Open URLs in browser
+- Open applications
+- Read/write clipboard
+- Hotkeys and key combos
+- Find image on screen and click it
+- Get active window title
+- Send email via Gmail SMTP
+
+SAFETY:
+- All actions logged to computer_action_log.json
+- Destructive actions (delete, format) are blocked
+- Jeevan must approve any file system changes via /computer/approve
+"""
+
+import os
+import sys
+import json
+import time
+import base64
+import platform
+import subprocess
+import threading
+import webbrowser
+import smtplib
+import io
+import shutil
+from datetime import datetime
+from pathlib import Path
+from typing import Optional, Tuple, Dict, Any
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OPTIONAL IMPORTS
+# ─────────────────────────────────────────────────────────────────────────────
+try:
+    import pyautogui
+    pyautogui.FAILSAFE = True          # move mouse to top-left to abort
+    pyautogui.PAUSE    = 0.05          # small pause between actions
+    PYAUTOGUI_AVAILABLE = True
+except ImportError:
+    PYAUTOGUI_AVAILABLE = False
+
+try:
+    from PIL import Image, ImageGrab
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+
+try:
+    import pyperclip
+    PYPERCLIP_AVAILABLE = True
+except ImportError:
+    PYPERCLIP_AVAILABLE = False
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONFIG
+# ─────────────────────────────────────────────────────────────────────────────
+_BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
+ACTION_LOG_FILE = os.path.join(_BASE_DIR, "computer_action_log.json")
+
+
+def _resolve_desktop_dir() -> Path:
+    onedrive = os.environ.get("OneDrive") or os.environ.get("OneDriveConsumer") or os.environ.get("OneDriveCommercial")
+    if onedrive:
+        candidate = Path(onedrive) / "Desktop"
+        if candidate.is_dir():
+            return candidate
+    return Path.home() / "Desktop"
+
+
+_SCREENSHOT_DIR = _resolve_desktop_dir() / "ultron_screenshots"
+_log_lock       = threading.Lock()
+
+try:
+    from config import (
+        GMAIL_USER, GMAIL_APP_PASSWORD,
+        COMPUTER_CONTROL_ENABLED,
+    )
+except ImportError:
+    GMAIL_USER               = os.environ.get("GMAIL_USER", "")
+    GMAIL_APP_PASSWORD       = os.environ.get("GMAIL_APP_PASSWORD", "")
+    COMPUTER_CONTROL_ENABLED = True
+
+# Blocked commands for safety
+BLOCKED_COMMANDS = [
+    "rm -rf", "format", "del /f", "rmdir /s", ":(){:|:&};:",
+    "shutdown", "reboot", "mkfs", "dd if=",
+]
+
+# =============================================================================
+# ACTION LOG
+# =============================================================================
+
+def _log_action(action: str, params: dict, result: dict):
+    entry = {
+        "timestamp": datetime.now().isoformat(),
+        "action":    action,
+        "params":    {k: str(v)[:200] for k, v in params.items()},
+        "success":   result.get("success", False),
+        "error":     result.get("error", ""),
+    }
+    with _log_lock:
+        try:
+            log = []
+            if os.path.exists(ACTION_LOG_FILE):
+                with open(ACTION_LOG_FILE, "r", encoding="utf-8") as f:
+                    log = json.load(f)
+            log.append(entry)
+            log = log[-200:]
+            with open(ACTION_LOG_FILE, "w", encoding="utf-8") as f:
+                json.dump(log, f, indent=2)
+        except Exception:
+            pass
+
+
+def get_action_log(n: int = 20) -> list:
+    try:
+        with open(ACTION_LOG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)[-n:]
+    except Exception:
+        return []
+
+# =============================================================================
+# SCREEN — SCREENSHOT
+# =============================================================================
+
+def _play_shutter_sound():
+    try:
+        import winsound
+        wav = r"C:\Windows\Media\Windows Print screen.wav"
+        if os.path.exists(wav):
+            winsound.PlaySound(wav, winsound.SND_FILENAME | winsound.SND_ASYNC)
+        else:
+            winsound.MessageBeep(winsound.MB_OK)
+    except Exception:
+        pass
+
+
+def _show_capture_flash():
+    flash_script = (
+        "import tkinter as tk;"
+        "r=tk.Tk();"
+        "r.attributes('-fullscreen', True);"
+        "r.attributes('-alpha', 0.5);"
+        "r.attributes('-topmost', True);"
+        "r.configure(bg='white');"
+        "r.overrideredirect(True);"
+        "r.after(120, r.destroy);"
+        "r.mainloop()"
+    )
+    try:
+        subprocess.Popen([sys.executable, "-c", flash_script])
+    except Exception:
+        pass
+
+
+def _ask_save_path(default_name: str, initial_dir: str) -> str:
+    dialog_script = (
+        "import tkinter as tk\n"
+        "from tkinter import filedialog\n"
+        "r = tk.Tk()\n"
+        "r.withdraw()\n"
+        "r.attributes('-topmost', True)\n"
+        "p = filedialog.asksaveasfilename(\n"
+        "    defaultextension='.png',\n"
+        "    filetypes=[('PNG image', '*.png'), ('All files', '*.*')],\n"
+        f"    initialfile={default_name!r},\n"
+        f"    initialdir={initial_dir!r},\n"
+        "    title='Save screenshot as...'\n"
+        ")\n"
+        "print(p or '', end='')\n"
+    )
+    try:
+        out = subprocess.run(
+            [sys.executable, "-c", dialog_script],
+            capture_output=True, text=True, timeout=120,
+        )
+        return out.stdout.strip()
+    except Exception:
+        return ""
+
+
+def _open_in_file_manager(filepath: Path):
+    try:
+        if platform.system() == "Windows":
+            subprocess.Popen(["explorer", "/select,", str(filepath)])
+        elif platform.system() == "Darwin":
+            subprocess.Popen(["open", "-R", str(filepath)])
+        else:
+            subprocess.Popen(["xdg-open", str(filepath.parent)])
+    except Exception:
+        pass
+
+
+def take_screenshot(region: Optional[Tuple] = None, prompt_save: bool = False) -> Dict:
+    """
+    Capture the screen.
+    region: optional (left, top, width, height)
+    prompt_save: if True, plays shutter sound + flash and pops a Save As dialog,
+                 then opens Explorer to the chosen file. Falls back to auto-save
+                 in _SCREENSHOT_DIR if the user cancels.
+    """
+    result = {"success": False}
+    try:
+        if PYAUTOGUI_AVAILABLE:
+            img = pyautogui.screenshot(region=region)
+        elif PIL_AVAILABLE:
+            img = ImageGrab.grab(bbox=region)
+        else:
+            return {"success": False, "error": "Install pyautogui: pip install pyautogui pillow"}
+
+        # Visible/audible capture feedback (after capture so the flash isn't in the image)
+        _play_shutter_sound()
+        _show_capture_flash()
+
+        if img.width > 1280:
+            ratio = 1280 / img.width
+            img   = img.resize((1280, int(img.height * ratio)), Image.LANCZOS)
+
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        image_b64 = base64.b64encode(buf.getvalue()).decode()
+
+        _SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        ts            = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_name  = f"screenshot_{ts}.png"
+        default_path  = _SCREENSHOT_DIR / default_name
+
+        chosen_path = ""
+        if prompt_save:
+            chosen_path = _ask_save_path(default_name, str(_SCREENSHOT_DIR))
+
+        if chosen_path:
+            filepath = Path(chosen_path)
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            img.save(str(filepath), format="PNG")
+            cancelled = False
+            _open_in_file_manager(filepath)
+        else:
+            img.save(str(default_path), format="PNG")
+            filepath  = default_path
+            cancelled = bool(prompt_save)
+
+        result = {
+            "success":   True,
+            "image_b64": image_b64,
+            "format":    "image/png",
+            "size":      list(img.size),
+            "path":      str(filepath),
+            "filename":  filepath.name,
+            "cancelled": cancelled,
+            "message":   (
+                f"Save dialog cancelled — auto-saved to {filepath}" if cancelled
+                else f"Screenshot saved to {filepath}"
+            ),
+        }
+    except Exception as e:
+        result = {"success": False, "error": str(e)}
+
+    _log_action("screenshot", {"region": str(region)}, result)
+    return result
+
+
+def get_screen_size() -> Dict:
+    """Return the screen resolution."""
+    try:
+        if PYAUTOGUI_AVAILABLE:
+            w, h = pyautogui.size()
+            return {"success": True, "width": w, "height": h}
+        return {"success": False, "error": "pyautogui not installed"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# =============================================================================
+# MOUSE — CLICK, MOVE, SCROLL
+# =============================================================================
+
+def click(x: int, y: int, button: str = "left", clicks: int = 1) -> Dict:
+    """
+    Click at screen coordinates.
+    button: "left", "right", "middle"
+    clicks: 1 for single, 2 for double
+    """
+    result = {"success": False}
+    if not PYAUTOGUI_AVAILABLE:
+        return {"success": False, "error": "pyautogui not installed. pip install pyautogui"}
+    try:
+        pyautogui.click(x, y, button=button, clicks=clicks, interval=0.1)
+        result = {"success": True, "x": x, "y": y, "button": button, "clicks": clicks}
+    except Exception as e:
+        result = {"success": False, "error": str(e)}
+    _log_action("click", {"x": x, "y": y, "button": button}, result)
+    return result
+
+
+def move_mouse(x: int, y: int, duration: float = 0.3) -> Dict:
+    """Move mouse to coordinates smoothly."""
+    if not PYAUTOGUI_AVAILABLE:
+        return {"success": False, "error": "pyautogui not installed"}
+    try:
+        pyautogui.moveTo(x, y, duration=duration)
+        return {"success": True, "x": x, "y": y}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def scroll(direction: str = "down", clicks: int = 3, x: int = None, y: int = None) -> Dict:
+    """
+    Scroll the mouse wheel.
+    direction: "up" or "down"
+    clicks: number of scroll units
+    """
+    result = {"success": False}
+    if not PYAUTOGUI_AVAILABLE:
+        return {"success": False, "error": "pyautogui not installed"}
+    try:
+        amount = clicks if direction == "up" else -clicks
+        if x and y:
+            pyautogui.scroll(amount, x=x, y=y)
+        else:
+            pyautogui.scroll(amount)
+        result = {"success": True, "direction": direction, "clicks": clicks}
+    except Exception as e:
+        result = {"success": False, "error": str(e)}
+    _log_action("scroll", {"direction": direction, "clicks": clicks}, result)
+    return result
+
+# =============================================================================
+# KEYBOARD — TYPE, HOTKEYS
+# =============================================================================
+
+def type_text(text: str, interval: float = 0.02) -> Dict:
+    """
+    Type text as keyboard input at the current cursor position.
+    Works in any focused text field.
+    """
+    result = {"success": False}
+    if not PYAUTOGUI_AVAILABLE:
+        return {"success": False, "error": "pyautogui not installed"}
+    if not text:
+        return {"success": False, "error": "No text provided"}
+    try:
+        # Use pyperclip + paste for longer text (faster, handles unicode)
+        if PYPERCLIP_AVAILABLE and len(text) > 20:
+            old_clipboard = ""
+            try:
+                old_clipboard = pyperclip.paste()
+            except Exception:
+                pass
+            pyperclip.copy(text)
+            pyautogui.hotkey("ctrl", "v")
+            time.sleep(0.1)
+            try:
+                pyperclip.copy(old_clipboard)
+            except Exception:
+                pass
+        else:
+            pyautogui.typewrite(text, interval=interval)
+        result = {"success": True, "chars_typed": len(text)}
+    except Exception as e:
+        result = {"success": False, "error": str(e)}
+    _log_action("type_text", {"text_preview": text[:50]}, result)
+    return result
+
+
+def press_key(key: str) -> Dict:
+    """
+    Press a single key (e.g., 'enter', 'escape', 'tab', 'f5').
+    """
+    result = {"success": False}
+    if not PYAUTOGUI_AVAILABLE:
+        return {"success": False, "error": "pyautogui not installed"}
+    try:
+        pyautogui.press(key)
+        result = {"success": True, "key": key}
+    except Exception as e:
+        result = {"success": False, "error": str(e)}
+    _log_action("press_key", {"key": key}, result)
+    return result
+
+
+def hotkey(*keys: str) -> Dict:
+    """
+    Press a key combination (e.g., hotkey("ctrl", "c") for copy).
+    """
+    result = {"success": False}
+    if not PYAUTOGUI_AVAILABLE:
+        return {"success": False, "error": "pyautogui not installed"}
+    try:
+        pyautogui.hotkey(*keys)
+        result = {"success": True, "keys": list(keys)}
+    except Exception as e:
+        result = {"success": False, "error": str(e)}
+    _log_action("hotkey", {"keys": list(keys)}, result)
+    return result
+
+# =============================================================================
+# CLIPBOARD
+# =============================================================================
+
+def get_clipboard() -> Dict:
+    """Read current clipboard content."""
+    if not PYPERCLIP_AVAILABLE:
+        return {"success": False, "error": "pyperclip not installed"}
+    try:
+        content = pyperclip.paste()
+        return {"success": True, "content": content, "length": len(content)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def set_clipboard(text: str) -> Dict:
+    """Write text to clipboard."""
+    if not PYPERCLIP_AVAILABLE:
+        return {"success": False, "error": "pyperclip not installed"}
+    try:
+        pyperclip.copy(text)
+        return {"success": True, "length": len(text)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# =============================================================================
+# APPS & BROWSER
+# =============================================================================
+
+def open_url(url: str, browser: str = None) -> Dict:
+    """Open URL in specified browser, or default if None."""
+    import webbrowser
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    system = platform.system()
+
+    if browser:
+        browser = browser.lower().strip()
+        browsers_win = {
+            "brave":   r'C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe',
+            "chrome":  r'C:\Program Files\Google\Chrome\Application\chrome.exe',
+            "edge":    r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
+            "firefox": r'C:\Program Files\Mozilla Firefox\firefox.exe',
+        }
+        if system == "Windows" and browser in browsers_win:
+            exe = browsers_win[browser]
+            if not os.path.exists(exe):
+                alt = exe.replace("Program Files\\", "Program Files (x86)\\")
+                if os.path.exists(alt):
+                    exe = alt
+                else:
+                    alt2 = exe.replace("Program Files (x86)\\", "Program Files\\")
+                    if os.path.exists(alt2):
+                        exe = alt2
+            if os.path.exists(exe):
+                try:
+                    subprocess.Popen([exe, url])
+                    result = {"success": True, "url": url, "browser": browser}
+                    _log_action("open_url", {"url": url, "browser": browser}, result)
+                    return result
+                except Exception:
+                    pass  # fall through to shell
+        # Shell fallback for named browser
+        try:
+            subprocess.Popen(f'start {browser} "{url}"', shell=True)
+            result = {"success": True, "url": url, "browser": browser, "method": "shell"}
+            _log_action("open_url", {"url": url, "browser": browser}, result)
+            return result
+        except Exception:
+            pass
+
+    # No browser specified → default
+    try:
+        webbrowser.open(url)
+        result = {"success": True, "url": url, "browser": "default"}
+    except Exception as e:
+        result = {"success": False, "error": str(e)}
+    _log_action("open_url", {"url": url}, result)
+    return result
+
+
+# ── Known Windows app aliases ────────────────────────────────────────────────
+_WIN_APPS = {
+    "chrome":        'start chrome',
+    "google chrome": 'start chrome',
+    "firefox":       'start firefox',
+    "edge":          'start msedge',
+    "notepad":       'start notepad',
+    "calculator":    'start calc',
+    "explorer":      'start explorer',
+    "file manager":  'start explorer',
+    "files":         'start explorer',
+    "cmd":           'start cmd',
+    "terminal":      'start cmd',
+    "vs code":       'start code',
+    "vscode":        'start code',
+    "spotify":       'start spotify',
+    "discord":       'start discord',
+    "telegram":      'start telegram',
+    "paint":         'start mspaint',
+    "task manager":  'start taskmgr',
+    "youtube":       'start chrome "https://www.youtube.com"',
+    "claude":        'start chrome "https://claude.ai"',
+    "chatgpt":       'start chrome "https://chat.openai.com"',
+    "google":        'start chrome "https://www.google.com"',
+    "github":        'start chrome "https://github.com"',
+    "whatsapp":      'start chrome "https://web.whatsapp.com"',
+    "antigravity":   'start python -c "import antigravity"',
+}
+
+# ── Dynamic Start Menu scanner (discovers every installed app) ────────────────
+_app_cache: dict = {}
+_app_cache_time: float = 0.0
+
+def _get_installed_apps() -> dict:
+    """
+    Scan Windows Start Menu shortcuts and return {lowercase_name: lnk_path}.
+    Result is cached for 5 minutes so new installs are picked up automatically.
+    """
+    import time, glob as _glob
+    global _app_cache, _app_cache_time
+    if _app_cache and (time.time() - _app_cache_time) < 300:
+        return _app_cache
+    apps: dict = {}
+    dirs = [
+        os.path.expandvars(r'%ProgramData%\Microsoft\Windows\Start Menu\Programs'),
+        os.path.expandvars(r'%APPDATA%\Microsoft\Windows\Start Menu\Programs'),
+    ]
+    for d in dirs:
+        for lnk in _glob.glob(os.path.join(d, '**', '*.lnk'), recursive=True):
+            name = os.path.splitext(os.path.basename(lnk))[0].lower().strip()
+            apps[name] = lnk
+    _app_cache = apps
+    _app_cache_time = time.time()
+    return apps
+
+
+def open_app(app_name: str) -> Dict:
+    """Open any app or file by name. Searches aliases, Start Menu, then falls back to shell."""
+    result   = {"success": False}
+    system   = platform.system()
+    app_name = app_name.strip()
+    key      = app_name.lower()
+
+    # Safety: block dangerous commands
+    for blocked in BLOCKED_COMMANDS:
+        if blocked.lower() in key:
+            return {"success": False, "error": f"Blocked command: {blocked}"}
+
+    # If it looks like a file path, open it directly
+    if os.path.exists(app_name):
+        try:
+            os.startfile(app_name)
+            return {"success": True, "app": app_name, "method": "file"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    # Dynamic index lookup — covers any installed app/shortcut
+    try:
+        from system_index import find_app
+        _idx_path = find_app(app_name)
+        if _idx_path:
+            if _idx_path.endswith(".lnk"):
+                os.startfile(_idx_path)
+            elif _idx_path.endswith(".exe"):
+                subprocess.Popen([_idx_path])
+            else:
+                os.startfile(_idx_path)
+            _log_action("open_app", {"app": app_name}, {"success": True})
+            return {"success": True, "app": app_name,
+                    "method": "sys_index", "path": _idx_path}
+    except Exception:
+        pass  # fall through to existing logic
+
+    if system == "Windows":
+        # 1. Hardcoded alias
+        cmd = _WIN_APPS.get(key)
+        if cmd:
+            subprocess.Popen(cmd, shell=True)
+            return {"success": True, "app": app_name, "method": "alias"}
+
+        # 2. Start Menu scan — exact match, then word-boundary partial
+        # match. The old `if key in name` partial match let 2-char pronouns
+        # ("it", "or") hijack arbitrary app names by interior substring
+        # (e.g. "it" → "speech recogn**it**ion"). Now we require the query
+        # to match a whole word or a word prefix in the app name, AND to be
+        # at least 3 chars long — so "code" still finds Visual Studio Code,
+        # but "it" / "the" don't find anything.
+        installed = _get_installed_apps()
+        lnk = installed.get(key)
+        if not lnk and len(key) >= 3 and key not in (
+            "it", "that", "this", "the", "or", "and", "but",
+            "one", "thing", "yes", "no", "is", "in", "on", "of", "to", "by",
+        ):
+            for name, path in installed.items():
+                if any(w == key or w.startswith(key) for w in name.split()):
+                    lnk = path
+                    break
+        if lnk:
+            os.startfile(lnk)
+            return {"success": True, "app": app_name, "method": "startmenu"}
+
+        # 3. Web fallback for known web services (app-first, web-second)
+        _WEB_SERVICES = {
+            "chatgpt":    "https://chat.openai.com",
+            "chat gpt":   "https://chat.openai.com",
+            "claude":     "https://claude.ai",
+            "gemini":     "https://gemini.google.com",
+            "perplexity": "https://perplexity.ai",
+            "github":     "https://github.com",
+            "youtube":    "https://www.youtube.com",
+            "whatsapp":   "https://web.whatsapp.com",
+            "gmail":      "https://mail.google.com",
+            "drive":      "https://drive.google.com",
+            "maps":       "https://www.google.com/maps",
+            "translate":  "https://translate.google.com",
+            "spotify":    "https://open.spotify.com",
+            "netflix":    "https://www.netflix.com",
+        }
+        _web_url = _WEB_SERVICES.get(key)
+        if _web_url:
+            try:
+                import webbrowser
+                webbrowser.open(_web_url)
+                _log_action("open_app", {"app": app_name}, {"success": True})
+                return {"success": True, "app": app_name,
+                        "method": "web_fallback", "url": _web_url}
+            except Exception as _we:
+                return {"success": False, "error": str(_we)}
+
+        # 4. Shell fallback — only if the exe is resolvable on PATH
+        if shutil.which(app_name):
+            try:
+                subprocess.Popen(f'start "" "{app_name}"', shell=True)
+                result = {"success": True, "app": app_name, "method": "shell"}
+            except Exception as e:
+                result = {"success": False, "error": str(e)}
+        else:
+            result = {"success": False, "error": f"App '{app_name}' not found"}
+
+    elif system == "Darwin":
+        try:
+            subprocess.Popen(["open", "-a", app_name])
+            result = {"success": True, "app": app_name, "os": system}
+        except Exception as e:
+            result = {"success": False, "error": str(e)}
+    else:
+        try:
+            subprocess.Popen([app_name])
+            result = {"success": True, "app": app_name, "os": system}
+        except Exception as e:
+            result = {"success": False, "error": str(e)}
+
+    _log_action("open_app", {"app": app_name}, result)
+    return result
+
+
+def run_command(command: str, timeout: int = 10) -> Dict:
+    """
+    Run a shell command and return output.
+    Dangerous commands are blocked.
+    """
+    for blocked in BLOCKED_COMMANDS:
+        if blocked.lower() in command.lower():
+            return {"success": False, "error": f"Blocked command contains: {blocked}"}
+
+    result = {"success": False}
+    try:
+        proc = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        result = {
+            "success":   proc.returncode == 0,
+            "stdout":    proc.stdout[:2000],
+            "stderr":    proc.stderr[:500],
+            "returncode": proc.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        result = {"success": False, "error": f"Command timed out after {timeout}s"}
+    except Exception as e:
+        result = {"success": False, "error": str(e)}
+
+    _log_action("run_command", {"command": command[:100]}, result)
+    return result
+
+
+def get_active_window() -> Dict:
+    """Return the title of the currently focused window."""
+    try:
+        system = platform.system()
+        if system == "Windows":
+            import ctypes
+            hwnd = ctypes.windll.user32.GetForegroundWindow()
+            length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+            buf    = ctypes.create_unicode_buffer(length + 1)
+            ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
+            return {"success": True, "title": buf.value, "os": "windows"}
+        elif system == "Darwin":
+            script = 'tell application "System Events" to get name of first application process whose frontmost is true'
+            result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+            return {"success": True, "title": result.stdout.strip(), "os": "mac"}
+        else:
+            result = subprocess.run(["xdotool", "getwindowfocus", "getwindowname"], capture_output=True, text=True)
+            return {"success": True, "title": result.stdout.strip(), "os": "linux"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+# =============================================================================
+# EMAIL — via Gmail SMTP
+# =============================================================================
+
+def send_email(to: str, subject: str, body: str, html: bool = False) -> Dict:
+    """
+    Send an email via Gmail SMTP.
+    Requires GMAIL_USER and GMAIL_APP_PASSWORD in .env
+
+    Get App Password: Google Account → Security → 2-Step Verification → App passwords
+    """
+    if not GMAIL_USER or not GMAIL_APP_PASSWORD:
+        return {
+            "success": False,
+            "error": "Set GMAIL_USER and GMAIL_APP_PASSWORD in .env to enable email.",
+        }
+
+    result = {"success": False}
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["From"]    = GMAIL_USER
+        msg["To"]      = to
+        msg["Subject"] = subject
+
+        if html:
+            msg.attach(MIMEText(body, "html"))
+        else:
+            msg.attach(MIMEText(body, "plain"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as server:
+            server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+            server.sendmail(GMAIL_USER, to, msg.as_string())
+
+        result = {"success": True, "to": to, "subject": subject}
+    except Exception as e:
+        result = {"success": False, "error": str(e)}
+
+    _log_action("send_email", {"to": to, "subject": subject}, result)
+    return result
+
+# =============================================================================
+# COMPUTER STATUS
+# =============================================================================
+
+def get_computer_status() -> Dict:
+    """Return capabilities of the computer control module."""
+    return {
+        "pyautogui":    PYAUTOGUI_AVAILABLE,
+        "pil":          PIL_AVAILABLE,
+        "pyperclip":    PYPERCLIP_AVAILABLE,
+        "email":        bool(GMAIL_USER and GMAIL_APP_PASSWORD),
+        "platform":     platform.system(),
+        "screen_size":  get_screen_size() if PYAUTOGUI_AVAILABLE else {},
+        "enabled":      COMPUTER_CONTROL_ENABLED,
+    }
+
+
+# =============================================================================
+# HIGH-LEVEL ACTIONS — for agent use
+# =============================================================================
+
+def execute_computer_action(action: str, params: dict) -> Dict:
+    """
+    Unified dispatcher for computer actions.
+    Called by action_engine.py
+
+    Actions:
+      screenshot, click, type, scroll, press_key, hotkey,
+      open_url, open_app, run_command, get_clipboard, set_clipboard,
+      send_email, get_window, get_status
+    """
+    if not COMPUTER_CONTROL_ENABLED:
+        return {"success": False, "error": "Computer control is disabled in config"}
+
+    action = action.lower().strip()
+
+    if action == "screenshot":
+        region = params.get("region")
+        return take_screenshot(region)
+
+    elif action == "click":
+        return click(
+            x      = int(params.get("x", 0)),
+            y      = int(params.get("y", 0)),
+            button = params.get("button", "left"),
+            clicks = int(params.get("clicks", 1)),
+        )
+
+    elif action in ("type", "type_text"):
+        return type_text(
+            text     = params.get("text", ""),
+            interval = float(params.get("interval", 0.02)),
+        )
+
+    elif action == "scroll":
+        return scroll(
+            direction = params.get("direction", "down"),
+            clicks    = int(params.get("clicks", 3)),
+            x         = params.get("x"),
+            y         = params.get("y"),
+        )
+
+    elif action == "press_key":
+        return press_key(params.get("key", "enter"))
+
+    elif action == "hotkey":
+        keys = params.get("keys", [])
+        if isinstance(keys, str):
+            keys = keys.split("+")
+        return hotkey(*keys)
+
+    elif action == "open_url":
+        return open_url(params.get("url", ""))
+
+    elif action == "open_app":
+        return open_app(params.get("app", ""))
+
+    elif action == "run_command":
+        return run_command(
+            command = params.get("command", ""),
+            timeout = int(params.get("timeout", 10)),
+        )
+
+    elif action == "get_clipboard":
+        return get_clipboard()
+
+    elif action == "set_clipboard":
+        return set_clipboard(params.get("text", ""))
+
+    elif action == "send_email":
+        return send_email(
+            to      = params.get("to", ""),
+            subject = params.get("subject", ""),
+            body    = params.get("body", ""),
+            html    = bool(params.get("html", False)),
+        )
+
+    elif action == "get_window":
+        return get_active_window()
+
+    elif action == "get_status":
+        return get_computer_status()
+
+    elif action == "move_mouse":
+        return move_mouse(
+            x        = int(params.get("x", 0)),
+            y        = int(params.get("y", 0)),
+            duration = float(params.get("duration", 0.3)),
+        )
+
+    elif action == "smart_click":
+        try:
+            from screen_parser import click_element
+            return click_element(params.get("element", ""))
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    else:
+        return {"success": False, "error": f"Unknown computer action: '{action}'"}

@@ -1,0 +1,154 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|██████████| 103/103 [00:00<00:00, 3819.85it/s]
+[vector_store] Backend: chromadb + sentence-transformers (ready).
+[distiller] loop started — interval=6h
+[evolution] loop started — interval=12h
+[proactive] loop started — interval=30min
+[predictive] monitor started — interval=60s
+[skill_learner] loop started — interval=6h
+[app] Ultimate loops started: {'distiller': True, 'evolution': True, 'proactive': True, 'predictive': True, 'skill_learner': True}
+[BeyondJarvis] All routes registered OK
+[app] Beyond JARVIS routes registered (+27 endpoints)
+[app] computer_routes registered (+5 endpoints)
+[app] voice_routes registered (+8 endpoints)
+[app] system_routes registered (+13 endpoints)
+[app] loop_routes registered (+23 endpoints)
+
+============================================================
+  Ultron-J v2.0-ULTIMATE — Autonomous AI for Jeevan
+  Location: Hyderabad, Telangana, India
+============================================================
+
+[Intelligence Core] Initializing...
+[Intelligence Core] Jeevan model initialized.
+[Intelligence Core] Ready. World State + Jeevan Model + ReAct active.
+[Monitor] System change monitor started.
+[Heartbeat] Autonomous heartbeat started.
+[Monitor] All background monitors started.
+[+] System monitor started
+[Perception] File watcher and clipboard monitor started.
+[+] Perception engine started (file watcher + clipboard)
+[Ultron-J] Autonomous loop started. Watching.
+[+] Autonomous agent loop started
+[2026-05-19 23:36:36] [SleepGuard] Sleep prevention started on Linux
+[+] Sleep preventer started (OS stays awake while Ultron runs)
+[+] Voice engine ready — TTS: edge | STT: none
+    Voice UI at: http://localhost:5000/voice
+[+] Claude.ai loop  — /claude_loop/*
+[+] Visual verify   — /verify/*
+[+] Self-modify      — /self_modify/*
+[+] App control      — /app_control/*
+[+] Code extractor  — /code_extract/*
+
+[+] All systems online. Ultron-J is watching.
+
+    Chat UI  at: http://localhost:5000
+    Voice UI at: http://localhost:5000/voice
+
+[+] System index refresher started
+[ActivityTracker] failed: No module named 'pynput'
+[!] Activity tracker: pynput not available — pip install pynput
+[+] Code indexer started (semantic search over project .py files)
+[ScreenEngine] Monitor started - interval=3.0s, OCR=Y, PIL=Y
+[+] Screen monitor: OCR=True PIL=True running=True
+[+] Beyond JARVIS background services started
+
+[+] Environment key status:
+    [OK ] groq          -  primary cloud LLM
+    [OK ] gemini        -  cloud LLM fallback #1
+    [OK ] openrouter    -  cloud LLM fallback #2
+    [OK ] tavily        -  web search / news
+    [!! ] elevenlabs    -  premium TTS voice
+    [!! ] openai        -  Whisper STT + OpenAI TTS
+    [!! ] gmail         -  send_email action
+    [!! ] picovoice     -  passive wake-word
+    [!! ] telegram      -  mobile bridge
+
+[!] Missing keys: elevenlabs, openai, gmail, picovoice, telegram
+    Affected features will be unavailable until added to .env
+
+ * Serving Flask app 'app'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.0.103:5000
+[33mPress CTRL+C to quit[0m
+[2026-05-19 23:36:56,810] ERROR in app: Exception on / [GET]
+Traceback (most recent call last):
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/app.py", line 373, in index
+    return render_template("index.html")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/flask/templating.py", line 150, in render_template
+    template = app.jinja_env.get_or_select_template(template_name_or_list)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/jinja2/environment.py", line 1087, in get_or_select_template
+    return self.get_template(template_name_or_list, parent, globals)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/jinja2/environment.py", line 1016, in get_template
+    return self._load_template(name, globals)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/jinja2/environment.py", line 975, in _load_template
+    template = self.loader.load(self, name, self.make_globals(globals))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/jinja2/loaders.py", line 126, in load
+    source, filename, uptodate = self.get_source(environment, name)
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/flask/templating.py", line 66, in get_source
+    return self._get_source_fast(environment, template)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/flask/templating.py", line 100, in _get_source_fast
+    raise TemplateNotFound(template)
+jinja2.exceptions.TemplateNotFound: index.html
+127.0.0.1 - - [19/May/2026 23:36:56] "[35m[1mGET / HTTP/1.1[0m" 500 -
+[2026-05-19 23:37:38,904] ERROR in app: Exception on / [GET]
+Traceback (most recent call last):
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/app.py", line 373, in index
+    return render_template("index.html")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/flask/templating.py", line 150, in render_template
+    template = app.jinja_env.get_or_select_template(template_name_or_list)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/jinja2/environment.py", line 1087, in get_or_select_template
+    return self.get_template(template_name_or_list, parent, globals)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/jinja2/environment.py", line 1016, in get_template
+    return self._load_template(name, globals)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/jinja2/environment.py", line 975, in _load_template
+    template = self.loader.load(self, name, self.make_globals(globals))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/jinja2/loaders.py", line 126, in load
+    source, filename, uptodate = self.get_source(environment, name)
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/flask/templating.py", line 66, in get_source
+    return self._get_source_fast(environment, template)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeevan/ULTRON_WEB/.venv/lib/python3.12/site-packages/flask/templating.py", line 100, in _get_source_fast
+    raise TemplateNotFound(template)
+jinja2.exceptions.TemplateNotFound: index.html
+127.0.0.1 - - [19/May/2026 23:37:38] "[35m[1mGET / HTTP/1.1[0m" 500 -
