@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ultron-J — Voice</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--blue:#3b82f6;--blue-glow:rgba(59,130,246,0.35);--blue-dim:rgba(59,130,246,0.12);--gray:#9ca3af;--border:rgba(255,255,255,0.08);--red:#ef4444;--red-glow:rgba(239,68,68,0.35)}
+body{background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',sans-serif;height:100vh;overflow:hidden;display:flex;flex-direction:column}
+
+/* Navbar */
+#navbar{display:flex;align-items:center;justify-content:space-between;padding:0 24px;height:54px;background:rgba(0,0,0,0.82);border-bottom:1px solid var(--border);backdrop-filter:blur(24px);flex-shrink:0;z-index:10}
+#logo{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:600;letter-spacing:0.06em}
+#nav-links{display:flex;gap:4px}
+.nav-btn{padding:5px 14px;border-radius:100px;border:none;background:transparent;color:var(--gray);font-size:13px;font-weight:500;cursor:pointer;transition:all 0.2s;font-family:inherit;text-decoration:none;display:flex;align-items:center}
+.nav-btn:hover{color:#fff}
+.nav-btn.active{background:var(--blue-dim);color:var(--blue)}
+#provider-dot{display:flex;align-items:center;gap:7px;font-size:12px;color:#fff}
+.pdot{width:6px;height:6px;border-radius:50%;background:var(--blue);box-shadow:0 0 6px var(--blue)}
+
+/* Main layout */
+#main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:32px;padding:24px;position:relative}
+
+/* Orb */
+#orb-wrap{position:relative;width:160px;height:160px;cursor:pointer;user-select:none;flex-shrink:0}
+#orb{width:160px;height:160px;border-radius:50%;background:radial-gradient(circle at 38% 38%, rgba(59,130,246,0.18) 0%, rgba(0,0,0,0) 70%);border:1.5px solid rgba(59,130,246,0.25);position:relative;transition:border-color 0.3s;display:flex;align-items:center;justify-content:center}
+#orb-icon{font-size:48px;line-height:1;transition:transform 0.3s}
+#orb-ring1,#orb-ring2,#orb-ring3{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(59,130,246,0.08);animation:none}
+
+/* Recording state */
+.recording #orb{border-color:rgba(239,68,68,0.6);box-shadow:0 0 40px rgba(239,68,68,0.2)}
+.recording #orb-ring1{border-color:rgba(239,68,68,0.25);animation:pulse-ring 1.2s ease-out infinite}
+.recording #orb-ring2{border-color:rgba(239,68,68,0.15);animation:pulse-ring 1.2s ease-out 0.4s infinite}
+.recording #orb-ring3{border-color:rgba(239,68,68,0.08);animation:pulse-ring 1.2s ease-out 0.8s infinite}
+.recording #orb-icon{transform:scale(1.1)}
+
+/* Processing state */
+.processing #orb{border-color:rgba(59,130,246,0.5);box-shadow:0 0 40px rgba(59,130,246,0.15)}
+.processing #orb-ring1{border-color:rgba(59,130,246,0.2);animation:spin 2s linear infinite}
+.processing #orb-ring2{border-color:rgba(59,130,246,0.12);animation:spin-r 3s linear infinite}
+.processing #orb-ring3{border-color:rgba(59,130,246,0.06);animation:spin 4s linear infinite}
+
+/* Speaking state */
+.speaking #orb{border-color:rgba(59,130,246,0.7);box-shadow:0 0 60px rgba(59,130,246,0.25)}
+.speaking #orb-ring1{border-color:rgba(59,130,246,0.3);animation:breathe 0.8s ease-in-out infinite alternate}
+.speaking #orb-ring2{border-color:rgba(59,130,246,0.18);animation:breathe 1.2s ease-in-out infinite alternate}
+.speaking #orb-ring3{border-color:rgba(59,130,246,0.08);animation:breathe 1.6s ease-in-out infinite alternate}
+
+@keyframes pulse-ring{0%{transform:scale(1);opacity:1}100%{transform:scale(1.5);opacity:0}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes spin-r{to{transform:rotate(-360deg)}}
+@keyframes breathe{from{transform:scale(1)}to{transform:scale(1.18)}}
+
+/* Status label */
+#status-label{font-size:13px;color:var(--gray);letter-spacing:0.08em;text-transform:uppercase;height:18px;transition:all 0.3s}
+
+/* Hint */
+#hint{font-size:12px;color:rgba(255,255,255,0.2);margin-top:-16px}
+
+/* Transcript panel */
+.tx-row{display:flex;flex-direction:column;gap:4px;padding:14px 18px;border-radius:12px;animation:fadeUp 0.22s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.tx-row.user{background:var(--blue-dim);border:1px solid rgba(59,130,246,0.18);align-self:flex-end;max-width:85%}
+.tx-row.ultron{background:rgba(255,255,255,0.03);border:1px solid var(--border);align-self:flex-start;max-width:85%}
+.tx-label{font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--gray);margin-bottom:2px}
+.tx-label.u{color:var(--blue)}
+.tx-text{font-size:15px;line-height:1.55;color:#fff}
+.tx-conf{font-size:11px;color:rgba(255,255,255,0.25);margin-top:4px}
+
+/* Error toast */
+#error-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#1a1a1a;border:1px solid rgba(239,68,68,0.4);color:#f87171;padding:10px 20px;border-radius:10px;font-size:13px;transition:transform 0.3s;z-index:100;white-space:nowrap}
+#error-toast.show{transform:translateX(-50%) translateY(0)}
+
+/* Scrollable transcript */
+#transcript-scroll{width:100%;max-width:640px;max-height:calc(100vh - 320px);overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+#transcript-scroll::-webkit-scrollbar{width:3px}
+#transcript-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:2px}
+</style>
+</head>
+<body>
+
+<div id="navbar">
+  <div id="logo">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#3b82f6" stroke-width="1.5"/><circle cx="12" cy="12" r="4" fill="#3b82f6"/></svg>
+    ULTRON-J
+  </div>
+  <div id="nav-links">
+    <a href="/" class="nav-btn">Chat</a>
+    <a href="/voice" class="nav-btn active">Voice</a>
+  </div>
+  <div id="provider-dot"><div class="pdot"></div><span id="provider-name">groq</span></div>
+</div>
+
+<div id="main">
+
+  <div id="orb-wrap" onclick="toggleRecording()" title="Click to speak">
+    <div id="orb-ring3"></div>
+    <div id="orb-ring2"></div>
+    <div id="orb-ring1"></div>
+    <div id="orb">
+      <div id="orb-icon">🎙️</div>
+    </div>
+  </div>
+
+  <div id="status-label">Tap to speak</div>
+  <div id="hint">Tap once to record — tap again to send</div>
+
+  <div id="transcript-scroll"></div>
+
+</div>
+
+<div id="error-toast"></div>
+
+<script>
+const orb = document.getElementById('orb-wrap');
+const statusLabel = document.getElementById('status-label');
+const transcriptScroll = document.getElementById('transcript-scroll');
+const errorToast = document.getElementById('error-toast');
+
+let mediaRecorder = null;
+let audioChunks = [];
+let stream = null;
+let state = 'idle';
+let currentAudio = null;
+
+function setState(s) {
+  state = s;
+  document.body.className = s === 'idle' ? '' : s;
+  const icons = {idle:'🎙️', recording:'⏹️', processing:'⚙️', speaking:'🔊'};
+  const labels = {idle:'Tap to speak', recording:'Recording… tap to stop', processing:'Thinking…', speaking:'Speaking…'};
+  document.getElementById('orb-icon').textContent = icons[s] || '🎙️';
+  statusLabel.textContent = labels[s] || '';
+}
+
+async function toggleRecording() {
+  if (state === 'processing' || state === 'speaking') return;
+  if (state === 'recording') { stopRecording(); return; }
+  await startRecording();
+}
+
+async function startRecording() {
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({audio:true});
+  } catch(e) {
+    showError('Mic access denied — allow microphone in browser settings');
+    return;
+  }
+  audioChunks = [];
+  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
+    : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
+  mediaRecorder = new MediaRecorder(stream, {mimeType});
+  mediaRecorder.ondataavailable = e => { if(e.data.size > 0) audioChunks.push(e.data); };
+  mediaRecorder.onstop = sendAudio;
+  mediaRecorder.start(100);
+  setState('recording');
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  setState('processing');
+}
+
+async function sendAudio() {
+  if (!audioChunks.length) { setState('idle'); return; }
+  const blob = new Blob(audioChunks, {type: mediaRecorder.mimeType || 'audio/webm'});
+  const fd = new FormData();
+  fd.append('audio', blob, 'recording.webm');
+
+  let resp;
+  try {
+    resp = await fetch('/api/voice/chat', {method:'POST', body:fd});
+  } catch(e) {
+    showError('Network error: ' + e.message);
+    setState('idle');
+    return;
+  }
+
+  if (!resp.ok) {
+    showError('Server error ' + resp.status);
+    setState('idle');
+    return;
+  }
+
+  const transcription = resp.headers.get('X-Transcription') || '';
+  const responseText  = resp.headers.get('X-Response-Text') || '';
+  const confidence    = resp.headers.get('X-Confidence') || '';
+
+  if (transcription) addBubble('user', transcription, confidence);
+  if (responseText)  addBubble('ultron', responseText);
+
+  const audioBlob = await resp.blob();
+  const audioUrl  = URL.createObjectURL(audioBlob);
+  setState('speaking');
+  currentAudio = new Audio(audioUrl);
+  currentAudio.onended = () => { setState('idle'); URL.revokeObjectURL(audioUrl); };
+  currentAudio.onerror = () => { setState('idle'); };
+  currentAudio.play().catch(() => setState('idle'));
+}
+
+function addBubble(role, text, conf) {
+  const row = document.createElement('div');
+  row.className = 'tx-row ' + role;
+  const label = document.createElement('div');
+  label.className = 'tx-label ' + (role === 'user' ? 'u' : '');
+  label.textContent = role === 'user' ? 'You' : 'Ultron-J';
+  const msg = document.createElement('div');
+  msg.className = 'tx-text';
+  msg.textContent = text;
+  row.appendChild(label);
+  row.appendChild(msg);
+  if (conf && role === 'user') {
+    const c = document.createElement('div');
+    c.className = 'tx-conf';
+    c.textContent = 'confidence ' + Math.round(conf * 100) + '%';
+    row.appendChild(c);
+  }
+  transcriptScroll.appendChild(row);
+  transcriptScroll.scrollTop = transcriptScroll.scrollHeight;
+}
+
+let toastTimer;
+function showError(msg) {
+  errorToast.textContent = msg;
+  errorToast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => errorToast.classList.remove('show'), 4000);
+}
+
+fetch('/status').then(r=>r.json()).then(d=>{
+  document.getElementById('provider-name').textContent = d.provider || 'groq';
+}).catch(()=>{});
+</script>
+</body>
+</html>

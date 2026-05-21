@@ -76,8 +76,8 @@ voice_bp = Blueprint("voice", __name__)
 
 @voice_bp.route("/voice")
 def voice_page():
-    from flask import redirect
-    return redirect("/")
+    """Serve the voice interface."""
+    return render_template("voice.html")
 
 
 @voice_bp.route("/api/voice/status", methods=["GET"])
