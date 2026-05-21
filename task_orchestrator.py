@@ -35,9 +35,11 @@ from code_tasks import (
     _active_builders,
 )
 from browser_tasks import (
-    _PREFERRED_BROWSER, _BROWSER_PATHS, _KNOWN_BROWSERS,
+    _PREFERRED_BROWSER, _WIN_BROWSER_PATHS as _BROWSER_PATHS, _KNOWN_BROWSERS,
     _launch_browser, _detect_browser_hint, _extract_play_query,
+    _youtube_play, _press_browser_key,
     handle_set_browser, handle_play_media, handle_pause_resume_media,
+    handle_media_next, handle_media_prev,
     handle_open_url, handle_volume_control,
 )
 from research_tasks import handle_search_web, handle_search_on_site, handle_open_and_search
@@ -249,6 +251,17 @@ _KNOWN_SITES = {
 }
 
 
+def _xdg_open(path: str) -> None:
+    """Cross-platform file/folder opener. Uses xdg-open on Linux, os.startfile on Windows."""
+    system = platform.system()
+    if system == "Windows":
+        os.startfile(path)
+    elif system == "Darwin":
+        subprocess.Popen(["open", path])
+    else:
+        subprocess.Popen(["xdg-open", path])
+
+
 def _resolve_site(name: str) -> Optional[str]:
     """Map a bare site name → URL. Stripping trailing 'and ...' clauses first."""
     if not name:
@@ -299,6 +312,11 @@ TASK_PATTERNS = {
     ],
     "search_on_site": [
         r"^search\s+(?:for\s+)?(.+?)\s+(?:on|in|using)\s+([\w\-\.]+)\s*$",  # (query, site)
+    ],
+
+    # ── Open a specific browser and play on YouTube (must precede open_app) ────
+    "open_and_play": [
+        r"^open\s+(brave|chrome|firefox|edge|opera|chromium)\s+and\s+(?:play|watch|listen\s+to)\s+(.+)$",
     ],
 
     # ── App launching ────────────────────────────────────────────────────────
@@ -373,6 +391,38 @@ TASK_PATTERNS = {
         r"\bset\s+(?:default\s+)?browser\s+to\s+(brave|chrome)\b",
         r"\bopen\s+(?:everything\s+)?(?:in|with)\s+(brave|chrome)\b",
     ],
+    # ── Close app by name ────────────────────────────────────────────────────
+    "close_app": [
+        r"^(?:close|quit|exit|kill|terminate)\s+(.+)$",
+    ],
+    # ── System controls ───────────────────────────────────────────────────────
+    "lock_screen": [
+        r"^(?:lock(?:\s+(?:the\s+)?(?:screen|computer|pc|laptop|system|my\s+(?:pc|computer|screen)))?|lock\s+it)$",
+    ],
+    "sleep_computer": [
+        r"^(?:sleep|suspend)(?:\s+(?:the\s+)?(?:computer|pc|laptop|system))?$",
+    ],
+    "empty_trash": [
+        r"^(?:empty|clear)\s+(?:the\s+)?(?:trash|recycle\s*bin|rubbish)$",
+    ],
+    "system_info": [
+        r"^(?:system|pc)\s+(?:info|information|status|stats)$",
+    ],
+    "brightness_up": [
+        r"^(?:brightness\s+up|increase\s+(?:the\s+)?brightness|screen\s+brighter)$",
+    ],
+    "brightness_down": [
+        r"^(?:brightness\s+down|(?:decrease|lower|dim)\s+(?:the\s+)?brightness|screen\s+dimmer)$",
+    ],
+    # ── Media navigation (must precede play_media) ───────────────────────────
+    "media_next": [
+        r"^(?:play\s+)?(?:the\s+)?next(?:\s+(?:video|track|song|one))?(?:\s+(?:on|in)\s+youtube)?$",
+        r"^skip(?:\s+(?:to\s+)?(?:the\s+|this\s+)?(?:next\s+)?(?:video|track|song))?(?:\s+(?:on|in)\s+youtube)?$",
+    ],
+    "media_prev": [
+        r"^(?:play\s+)?(?:the\s+)?(?:previous|prev)(?:\s+(?:video|track|song|one))?(?:\s+(?:on|in)\s+youtube)?$",
+        r"^(?:go\s+(?:back|to\s+(?:the\s+)?previous)|back)(?:\s+(?:video|track|song))?(?:\s+(?:on|in)\s+youtube)?$",
+    ],
     "play_media": [
         r"play\s+(.+?)\s+on\s+youtube",
         r"open\s+youtube\s+and\s+play\s+(.+)",
@@ -440,7 +490,7 @@ def classify_task(text: str) -> Dict[str, Any]:
 _LLM_SAFE_ACTIONS = {
     # task_orchestrator-native:
     "take_screenshot", "create_folder", "open_folder", "open_app", "open_url",
-    "search_web", "search_on_site", "open_and_search",
+    "search_web", "search_on_site", "open_and_search", "open_and_play",
     "play_media", "pause_media", "resume_media",
     "volume_control", "set_browser", "phone_screenshot",
     # action_engine read-only / low-impact additions:
@@ -874,6 +924,7 @@ def _llm_pick_action_uncached(text: str) -> Optional[Dict[str, Any]]:
         "Output exactly one JSON object and nothing else — no prose, no code "
         "fence. Use null when no action fits."
     )
+    _user_home = os.path.expanduser("~")
     prompt = (
         f"User said: {text!r}\n\n"
         f"Available actions:\n{manifest}\n\n"
@@ -884,7 +935,11 @@ def _llm_pick_action_uncached(text: str) -> Optional[Dict[str, Any]]:
         " - Use exactly the action_name as written above (snake_case).\n"
         " - params must be a JSON array of strings, in the order shown after the # comment.\n"
         " - Never invent an action that isn't in the list.\n"
-        " - For questions, small talk, or descriptive requests, return null."
+        " - For questions, small talk, or descriptive requests, return null.\n"
+        f" - This system runs Linux. Use Linux paths only (e.g. {_user_home}/Desktop/file.txt).\n"
+        f"   NEVER use Windows paths like C:\\\\Users\\\\... — the home directory is {_user_home}.\n"
+        f"   'Desktop' = {_user_home}/Desktop, 'Documents' = {_user_home}/Documents, "
+        f"'Downloads' = {_user_home}/Downloads."
     )
 
     try:
@@ -1114,7 +1169,26 @@ def orchestrate(text: str, session_id: str = "default") -> Dict[str, Any]:
                     "passthrough":  False,
                 }
             if pt in _LLM_HIGH_RISK_ACTIONS:
-                # Stage and ask — do NOT execute now.
+                # File-write actions (create_file, file_write, append_file) are
+                # auto-executed when the destination is inside the user's home
+                # tree (Desktop, Documents, Downloads, home itself).  Destructive
+                # or system-path operations still require explicit confirmation.
+                _auto_exec = False
+                if pt in ("create_file", "file_write", "append_file"):
+                    _dest = (pkw.get("path") or (picked["params"][0] if picked["params"] else ""))
+                    if _dest:
+                        try:
+                            from action_engine import _resolve_path as _rp
+                            _dest_abs = os.path.realpath(os.path.expanduser(_rp(_dest)))
+                            _home_abs = os.path.realpath(os.path.expanduser("~"))
+                            _auto_exec = _dest_abs.startswith(_home_abs + os.sep) or _dest_abs == _home_abs
+                        except Exception:
+                            pass
+
+                if _auto_exec:
+                    return _dispatch_via_action_engine(pt, pkw)
+
+                # All other high-risk actions: stage and ask.
                 _PENDING_CONFIRM[session_id] = {
                     "type":        pt,
                     "params":      picked["params"],
@@ -1147,11 +1221,17 @@ def orchestrate(text: str, session_id: str = "default") -> Dict[str, Any]:
     if t == "take_screenshot":
         try:
             from computer_control import take_screenshot
-            # prompt_save=False so the screenshot saves silently to the default
-            # ultron_screenshots/ folder. The previous prompt_save=True popped a
-            # blocking Save-As dialog that often appeared behind other windows
-            # and timed out the chat request before the auto-save fallback ran.
-            result = take_screenshot(prompt_save=False)
+            # Extract an explicit save path from the raw command if the user said
+            # "take a screenshot and save it to ~/Documents" or similar.
+            _raw_text = task.get("raw", "")
+            _save_path = None
+            _path_m = re.search(
+                r"(?:save|store|put)\s+(?:it\s+)?(?:to|on|in|at|into)\s+(.+?)(?:\s*$|\s+and\b)",
+                _raw_text, re.IGNORECASE,
+            )
+            if _path_m:
+                _save_path = _path_m.group(1).strip().strip('"\'')
+            result = take_screenshot(prompt_save=False, save_path=_save_path)
             result["action_taken"] = "screenshot"
             if not result.get("message"):
                 if result.get("success") and result.get("path"):
@@ -1173,6 +1253,19 @@ def orchestrate(text: str, session_id: str = "default") -> Dict[str, Any]:
     if t == "open_and_search":
         return handle_open_and_search(task)
 
+    # ── Open browser and play on YouTube ────────────────────────────────────
+    if t == "open_and_play":
+        browser = (task["params"][0] if task["params"] else "").strip().lower()
+        query   = (task["params"][1] if len(task["params"]) > 1 else "").strip()
+        if not query:
+            # Fallback: parse from raw text
+            raw = task.get("raw", "")
+            m = re.search(r"(?:play|watch|listen\s+to)\s+(.+)$", raw, re.IGNORECASE)
+            query = m.group(1).strip() if m else raw
+        result = _youtube_play(query, browser=browser)
+        result["query"] = query
+        return result
+
     # ── App / file / site launching ──────────────────────────────────────────
     # The captured token after "open" can describe any of: a file on disk, a
     # folder, a known website (optionally with a browser hint), a YouTube
@@ -1193,7 +1286,7 @@ def orchestrate(text: str, session_id: str = "default") -> Dict[str, Any]:
         file_path = _resolve_file_target(app_name)
         if file_path:
             try:
-                os.startfile(file_path)
+                _xdg_open(file_path)
                 return {
                     "success": True,
                     "action_taken": "open_file",
@@ -1212,7 +1305,7 @@ def orchestrate(text: str, session_id: str = "default") -> Dict[str, Any]:
         folder_path = _resolve_folder_target(app_name)
         if folder_path:
             try:
-                os.startfile(folder_path)
+                _xdg_open(folder_path)
                 return {
                     "success": True,
                     "action_taken": "open_folder",
@@ -1233,32 +1326,12 @@ def orchestrate(text: str, session_id: str = "default") -> Dict[str, Any]:
             full_text.lower(),
         ))
         if has_youtube and wants_play:
-            import urllib.parse
             query = _extract_play_query(full_text)
             if query:
                 browser = _detect_browser_hint(full_text)
-                encoded = urllib.parse.quote(query)
-                url = f"https://www.youtube.com/results?search_query={encoded}"
-                try:
-                    used = _launch_browser(url, browser=browser)
-                    time.sleep(4)
-                    try:
-                        import pyautogui
-                        pyautogui.press('tab')
-                        time.sleep(0.3)
-                        pyautogui.press('enter')
-                    except Exception:
-                        pass
-                    return {
-                        "success": True,
-                        "action_taken": "youtube_play",
-                        "message": f"Searching YouTube for '{query}' in {used} and playing first result",
-                        "query": query,
-                        "browser": used,
-                    }
-                except Exception as e:
-                    return {"success": False, "error": str(e),
-                            "action_taken": "youtube_play"}
+                result  = _youtube_play(query, browser=browser)
+                result["query"] = query
+                return result
 
         # ── 4. Known site (optionally with browser hint) ─────────────────
         site_url = _resolve_site(app_name) or _resolve_site(full_text)
@@ -1399,8 +1472,44 @@ def orchestrate(text: str, session_id: str = "default") -> Dict[str, Any]:
     if t in ("pause_media", "resume_media"):
         return handle_pause_resume_media(t)
 
+    if t == "media_next":
+        return handle_media_next()
+
+    if t == "media_prev":
+        return handle_media_prev()
+
     if t == "volume_control":
         return handle_volume_control(task, text)
+
+    # ── App/system controls ──────────────────────────────────────────────────
+    if t == "close_app":
+        from intent_router import _close_app
+        name = (task["params"][0] if task["params"] else text).strip()
+        return _close_app(name)
+
+    if t == "lock_screen":
+        from intent_router import _lock_screen
+        return _lock_screen()
+
+    if t == "sleep_computer":
+        from intent_router import _sleep_computer
+        return _sleep_computer()
+
+    if t == "empty_trash":
+        from intent_router import _empty_trash
+        return _empty_trash()
+
+    if t == "system_info":
+        from intent_router import _system_info
+        return _system_info()
+
+    if t == "brightness_up":
+        from intent_router import _brightness_ctrl
+        return _brightness_ctrl("up")
+
+    if t == "brightness_down":
+        from intent_router import _brightness_ctrl
+        return _brightness_ctrl("down")
 
     # ── Default: AI chat ─────────────────────────────────────────────────────
     return {

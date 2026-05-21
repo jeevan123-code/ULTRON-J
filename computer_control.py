@@ -202,24 +202,29 @@ def _open_in_file_manager(filepath: Path):
         pass
 
 
-def take_screenshot(region: Optional[Tuple] = None, prompt_save: bool = False) -> Dict:
+def take_screenshot(region: Optional[Tuple] = None, prompt_save: bool = False,
+                    save_path: str = None) -> Dict:
     """
     Capture the screen.
     region: optional (left, top, width, height)
-    prompt_save: if True, plays shutter sound + flash and pops a Save As dialog,
-                 then opens Explorer to the chosen file. Falls back to auto-save
-                 in _SCREENSHOT_DIR if the user cancels.
+    save_path: explicit file or directory path to save the screenshot to.
+               If it's a directory, a timestamped filename is used inside it.
+               If None, saves to ~/Desktop/ultron_screenshots/screenshot_TIMESTAMP.png.
+    prompt_save: if True and save_path is None, opens a Save As dialog (Windows only).
     """
     result = {"success": False}
     try:
-        if PYAUTOGUI_AVAILABLE:
+        img = None
+        if PIL_AVAILABLE:
+            try:
+                img = ImageGrab.grab(bbox=region)
+            except Exception:
+                img = None
+        if img is None and PYAUTOGUI_AVAILABLE:
             img = pyautogui.screenshot(region=region)
-        elif PIL_AVAILABLE:
-            img = ImageGrab.grab(bbox=region)
-        else:
-            return {"success": False, "error": "Install pyautogui: pip install pyautogui pillow"}
+        if img is None:
+            return {"success": False, "error": "Screenshot failed: install pillow (pip install pillow)"}
 
-        # Visible/audible capture feedback (after capture so the flash isn't in the image)
         _play_shutter_sound()
         _show_capture_flash()
 
@@ -231,25 +236,38 @@ def take_screenshot(region: Optional[Tuple] = None, prompt_save: bool = False) -
         img.save(buf, format="PNG", optimize=True)
         image_b64 = base64.b64encode(buf.getvalue()).decode()
 
-        _SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
-        ts            = datetime.now().strftime("%Y%m%d_%H%M%S")
-        default_name  = f"screenshot_{ts}.png"
-        default_path  = _SCREENSHOT_DIR / default_name
+        ts           = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_name = f"screenshot_{ts}.png"
 
-        chosen_path = ""
-        if prompt_save:
-            chosen_path = _ask_save_path(default_name, str(_SCREENSHOT_DIR))
-
-        if chosen_path:
-            filepath = Path(chosen_path)
-            filepath.parent.mkdir(parents=True, exist_ok=True)
+        # Resolve where to save
+        if save_path:
+            sp = Path(os.path.expandvars(os.path.expanduser(save_path)))
+            if sp.is_dir() or (not sp.suffix):
+                sp.mkdir(parents=True, exist_ok=True)
+                filepath = sp / default_name
+            else:
+                filepath = sp
+                filepath.parent.mkdir(parents=True, exist_ok=True)
             img.save(str(filepath), format="PNG")
             cancelled = False
-            _open_in_file_manager(filepath)
+        elif prompt_save:
+            _SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+            chosen = _ask_save_path(default_name, str(_SCREENSHOT_DIR))
+            if chosen:
+                filepath = Path(chosen)
+                filepath.parent.mkdir(parents=True, exist_ok=True)
+                img.save(str(filepath), format="PNG")
+                cancelled = False
+                _open_in_file_manager(filepath)
+            else:
+                filepath = _SCREENSHOT_DIR / default_name
+                img.save(str(filepath), format="PNG")
+                cancelled = True
         else:
-            img.save(str(default_path), format="PNG")
-            filepath  = default_path
-            cancelled = bool(prompt_save)
+            _SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+            filepath = _SCREENSHOT_DIR / default_name
+            img.save(str(filepath), format="PNG")
+            cancelled = False
 
         result = {
             "success":   True,
@@ -258,16 +276,13 @@ def take_screenshot(region: Optional[Tuple] = None, prompt_save: bool = False) -
             "size":      list(img.size),
             "path":      str(filepath),
             "filename":  filepath.name,
-            "cancelled": cancelled,
-            "message":   (
-                f"Save dialog cancelled — auto-saved to {filepath}" if cancelled
-                else f"Screenshot saved to {filepath}"
-            ),
+            "cancelled": cancelled if not save_path else False,
+            "message":   f"Screenshot saved to {filepath}",
         }
     except Exception as e:
         result = {"success": False, "error": str(e)}
 
-    _log_action("screenshot", {"region": str(region)}, result)
+    _log_action("screenshot", {"region": str(region), "save_path": save_path or ""}, result)
     return result
 
 
@@ -448,6 +463,13 @@ def open_url(url: str, browser: str = None) -> Dict:
             "edge":    r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
             "firefox": r'C:\Program Files\Mozilla Firefox\firefox.exe',
         }
+        browsers_linux = {
+            "brave":   ["brave-browser", "brave"],
+            "chrome":  ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"],
+            "firefox": ["firefox"],
+            "edge":    ["microsoft-edge", "microsoft-edge-stable"],
+            "opera":   ["opera"],
+        }
         if system == "Windows" and browser in browsers_win:
             exe = browsers_win[browser]
             if not os.path.exists(exe):
@@ -466,19 +488,33 @@ def open_url(url: str, browser: str = None) -> Dict:
                     return result
                 except Exception:
                     pass  # fall through to shell
-        # Shell fallback for named browser
-        try:
-            subprocess.Popen(f'start {browser} "{url}"', shell=True)
-            result = {"success": True, "url": url, "browser": browser, "method": "shell"}
-            _log_action("open_url", {"url": url, "browser": browser}, result)
-            return result
-        except Exception:
-            pass
+            try:
+                subprocess.Popen(f'start {browser} "{url}"', shell=True)
+                result = {"success": True, "url": url, "browser": browser, "method": "shell"}
+                _log_action("open_url", {"url": url, "browser": browser}, result)
+                return result
+            except Exception:
+                pass
+        elif system in ("Linux", "Darwin"):
+            candidates = browsers_linux.get(browser, [browser])
+            autoplay_flag = "--autoplay-policy=no-user-gesture-required"
+            chromium_family = {"brave", "chrome", "edge", "opera"}
+            for candidate in candidates:
+                if shutil.which(candidate):
+                    try:
+                        args = [candidate, autoplay_flag, url] if browser in chromium_family else [candidate, url]
+                        subprocess.Popen(args)
+                        result = {"success": True, "url": url, "browser": browser, "method": "exec"}
+                        _log_action("open_url", {"url": url, "browser": browser}, result)
+                        return result
+                    except Exception:
+                        pass
+            # Fall through to default if named browser not found
 
-    # No browser specified → default
+    # No browser specified (or named browser not found) → default
     try:
         webbrowser.open(url)
-        result = {"success": True, "url": url, "browser": "default"}
+        result = {"success": True, "url": url, "browser": browser or "default"}
     except Exception as e:
         result = {"success": False, "error": str(e)}
     _log_action("open_url", {"url": url}, result)
@@ -651,11 +687,62 @@ def open_app(app_name: str) -> Dict:
         except Exception as e:
             result = {"success": False, "error": str(e)}
     else:
-        try:
-            subprocess.Popen([app_name])
-            result = {"success": True, "app": app_name, "os": system}
-        except Exception as e:
-            result = {"success": False, "error": str(e)}
+        # Linux — resolve common app aliases first, then try the name directly.
+        _LINUX_APPS = {
+            "terminal":       ["gnome-terminal", "x-terminal-emulator", "xfce4-terminal", "xterm", "konsole", "tilix", "alacritty"],
+            "the terminal":   ["gnome-terminal", "x-terminal-emulator", "xfce4-terminal", "xterm", "konsole"],
+            "file manager":   ["nautilus", "thunar", "nemo", "dolphin"],
+            "files":          ["nautilus", "thunar", "nemo", "dolphin"],
+            "text editor":    ["gedit", "kate", "mousepad", "xed", "nano"],
+            "calculator":     ["gnome-calculator", "kcalc", "galculator"],
+            "task manager":   ["gnome-system-monitor", "htop", "ksysguard"],
+            "system monitor": ["gnome-system-monitor", "htop"],
+            "firefox":        ["firefox"],
+            "chrome":         ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"],
+            "brave":          ["brave-browser", "brave"],
+            "brave browser":  ["brave-browser", "brave"],
+            "vs code":        ["code"],
+            "vscode":         ["code"],
+            "discord":        ["discord"],
+            "spotify":        ["spotify"],
+            "vlc":            ["vlc"],
+            "gimp":           ["gimp"],
+        }
+        _LINUX_WEB_APPS = {
+            "youtube":   ("https://www.youtube.com", ["brave-browser", "brave", "google-chrome", "firefox"]),
+            "google":    ("https://www.google.com",  ["brave-browser", "brave", "google-chrome", "firefox"]),
+            "gmail":     ("https://mail.google.com", ["brave-browser", "brave", "google-chrome", "firefox"]),
+            "claude":    ("https://claude.ai",        ["brave-browser", "brave", "google-chrome", "firefox"]),
+            "chatgpt":   ("https://chat.openai.com", ["brave-browser", "brave", "google-chrome", "firefox"]),
+            "github":    ("https://github.com",       ["brave-browser", "brave", "google-chrome", "firefox"]),
+            "whatsapp":  ("https://web.whatsapp.com",["brave-browser", "brave", "google-chrome", "firefox"]),
+        }
+        if key in _LINUX_WEB_APPS:
+            url, browsers = _LINUX_WEB_APPS[key]
+            for b in browsers:
+                if shutil.which(b):
+                    try:
+                        subprocess.Popen([b, url])
+                        result = {"success": True, "app": key, "method": "web", "browser": b}
+                        break
+                    except Exception as e:
+                        result = {"success": False, "error": str(e)}
+            else:
+                import webbrowser as _wb
+                _wb.open(url)
+                result = {"success": True, "app": key, "method": "webbrowser"}
+        else:
+            candidates = _LINUX_APPS.get(key, [app_name])
+            for candidate in candidates:
+                if shutil.which(candidate):
+                    try:
+                        subprocess.Popen([candidate])
+                        result = {"success": True, "app": candidate, "os": system}
+                        break
+                    except Exception as e:
+                        result = {"success": False, "error": str(e)}
+            else:
+                result = {"success": False, "error": f"Couldn't open '{app_name}': none of {candidates} found on PATH"}
 
     _log_action("open_app", {"app": app_name}, result)
     return result
@@ -792,8 +879,9 @@ def execute_computer_action(action: str, params: dict) -> Dict:
     action = action.lower().strip()
 
     if action == "screenshot":
-        region = params.get("region")
-        return take_screenshot(region)
+        region    = params.get("region")
+        save_path = params.get("save_path") or params.get("path")
+        return take_screenshot(region, save_path=save_path)
 
     elif action == "click":
         return click(

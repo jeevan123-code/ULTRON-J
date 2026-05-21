@@ -13,9 +13,13 @@ from typing import Dict, List, Optional
 # BROWSER PREFERENCE & UTILITIES
 # =============================================================================
 
-_PREFERRED_BROWSER = "chrome"
+import platform as _platform
+import shutil as _shutil
 
-_BROWSER_PATHS = {
+_PREFERRED_BROWSER = "brave"
+
+# Windows executable paths (tried in order; first existing one wins).
+_WIN_BROWSER_PATHS = {
     "chrome": [
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
         r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
@@ -24,20 +28,82 @@ _BROWSER_PATHS = {
         r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
         r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
     ],
+    "edge": [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    ],
+    "firefox": [
+        r"C:\Program Files\Mozilla Firefox\firefox.exe",
+        r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe",
+    ],
+}
+
+# Linux/macOS binary candidates (tried via shutil.which in order).
+_LINUX_BROWSER_BINS = {
+    "brave":   ["brave-browser", "brave"],
+    "chrome":  ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"],
+    "firefox": ["firefox"],
+    "edge":    ["microsoft-edge", "microsoft-edge-stable"],
+    "opera":   ["opera"],
+    "safari":  ["safari"],
 }
 
 _KNOWN_BROWSERS = ("brave", "chrome", "edge", "firefox", "safari", "opera")
 
+# Chromium-family browsers that accept --autoplay-policy
+_CHROMIUM_FAMILY = {"brave", "chrome", "edge", "opera", "chromium"}
+
+
+def _find_browser_bin(name: str) -> Optional[str]:
+    """Return the first executable found for the requested browser, or None."""
+    for candidate in _LINUX_BROWSER_BINS.get(name, [name]):
+        path = _shutil.which(candidate)
+        if path:
+            return path
+    return None
+
 
 def _launch_browser(url: str, browser: str = None) -> str:
-    """Launch browser with autoplay unrestricted. Returns browser name used."""
+    """
+    Launch a browser with autoplay unrestricted. Cross-platform.
+    Returns the browser name actually used.
+    """
     name = (browser or _PREFERRED_BROWSER).lower()
-    for exe in _BROWSER_PATHS.get(name, []):
-        if os.path.exists(exe):
-            subprocess.Popen([exe, "--autoplay-policy=no-user-gesture-required", url])
+    system = _platform.system()
+    autoplay_flag = "--autoplay-policy=no-user-gesture-required"
+
+    if system == "Windows":
+        # Try known exe paths first
+        for exe in _WIN_BROWSER_PATHS.get(name, []):
+            if os.path.exists(exe):
+                args = [exe, autoplay_flag, url] if name in _CHROMIUM_FAMILY else [exe, url]
+                subprocess.Popen(args)
+                return name
+        # Fall back to Windows `start` built-in
+        subprocess.Popen(f'start {name} "{url}"', shell=True)
+        return name
+
+    elif system == "Darwin":
+        bin_path = _find_browser_bin(name)
+        if bin_path:
+            args = [bin_path, autoplay_flag, url] if name in _CHROMIUM_FAMILY else [bin_path, url]
+            subprocess.Popen(args)
             return name
-    subprocess.Popen(f'start {name} "{url}"', shell=True)
-    return name
+        subprocess.Popen(["open", "-a", name.title(), url])
+        return name
+
+    else:  # Linux
+        bin_path = _find_browser_bin(name)
+        if bin_path:
+            args = [bin_path, autoplay_flag, url] if name in _CHROMIUM_FAMILY else [bin_path, url]
+            subprocess.Popen(args)
+            return name
+        # Browser not found by name — try xdg-open as last resort
+        xdg = _shutil.which("xdg-open")
+        if xdg:
+            subprocess.Popen([xdg, url])
+            return "default"
+        raise RuntimeError(f"Browser '{name}' not found. Install it or set a different default.")
 
 
 def _detect_browser_hint(text: str) -> Optional[str]:
@@ -84,57 +150,177 @@ def _extract_play_query(text: str) -> str:
 # HANDLER FUNCTIONS  (called by orchestrate())
 # =============================================================================
 
+def _press_browser_key(*keys: str) -> Dict:
+    """
+    Send a keyboard shortcut to the browser window.
+    On Linux, uses xdotool to find and activate the browser window first.
+    Falls back to pyautogui when xdotool is unavailable.
+    """
+    import subprocess as _sp, shutil as _sh, time as _tm
+    xdt_key = "+".join(keys)
+
+    if _platform.system() == "Linux":
+        xdt = _sh.which("xdotool")
+        if xdt:
+            for search_args in [
+                ["--name", "YouTube"],
+                ["--class", "Brave-browser"],
+                ["--class", "Google-chrome"],
+                ["--class", "Firefox"],
+            ]:
+                try:
+                    r = _sp.run([xdt, "search"] + search_args,
+                                capture_output=True, text=True, timeout=2)
+                    if r.returncode == 0 and r.stdout.strip():
+                        wid = r.stdout.strip().split("\n")[-1]
+                        _sp.run([xdt, "windowactivate", "--sync", wid], timeout=2)
+                        _tm.sleep(0.2)
+                        _sp.run([xdt, "key", "--clearmodifiers", xdt_key], timeout=2)
+                        return {"success": True}
+                except Exception:
+                    pass
+    try:
+        import pyautogui
+        if len(keys) == 1:
+            pyautogui.press(keys[0])
+        else:
+            pyautogui.hotkey(*keys)
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 def handle_set_browser(task_params: list) -> Dict:
     global _PREFERRED_BROWSER
     browser_name = (task_params[0] or "").lower() if task_params else ""
-    if browser_name in _BROWSER_PATHS:
+    if browser_name in _KNOWN_BROWSERS:
         _PREFERRED_BROWSER = browser_name
         return {"success": True, "action_taken": "set_browser",
                 "message": f"Got it — I'll use {browser_name.title()} from now on."}
     return {"success": False, "action_taken": "set_browser",
-            "message": "I support Chrome and Brave. Say 'use brave' or 'use chrome'."}
+            "message": f"I support: {', '.join(_KNOWN_BROWSERS)}. Say 'use brave' or 'use chrome'."}
+
+
+def _activate_browser_and_play(browser_name: str):
+    """
+    After opening a YouTube watch URL, wait for page load then force-play.
+    Uses xdotool on Linux to focus the browser window, then presses 'k'.
+    """
+    import time as _time
+    import subprocess as _sp, shutil as _sh
+    _time.sleep(4)  # wait for page + video element to load
+
+    if _platform.system() == "Linux":
+        xdt = _sh.which("xdotool")
+        if xdt:
+            search_classes = {
+                "brave":   ["Brave-browser", "brave-browser"],
+                "chrome":  ["Google-chrome", "Chromium"],
+                "firefox": ["Firefox"],
+            }
+            classes = search_classes.get(browser_name.lower(), ["Brave-browser", "Google-chrome", "Firefox"])
+            for cls in classes:
+                try:
+                    r = _sp.run([xdt, "search", "--class", cls],
+                                capture_output=True, text=True, timeout=3)
+                    if r.returncode == 0 and r.stdout.strip():
+                        wid = r.stdout.strip().split("\n")[-1]
+                        _sp.run([xdt, "windowactivate", "--sync", wid], timeout=2)
+                        _time.sleep(0.3)
+                        # Click the center of the screen to focus video player
+                        _sp.run([xdt, "mousemove", "--window", wid, "640", "360"], timeout=2)
+                        _sp.run([xdt, "click", "1"], timeout=2)
+                        _time.sleep(0.3)
+                        # Press 'k' (YouTube play/pause toggle)
+                        _sp.run([xdt, "key", "--clearmodifiers", "--window", wid, "k"], timeout=2)
+                        return
+                except Exception:
+                    pass
+    # Fallback: pyautogui spacebar press
+    try:
+        import pyautogui as _pg
+        _pg.press('k')
+    except Exception:
+        pass
+
+
+def _youtube_play(query: str, browser: str = None) -> Dict:
+    """
+    Core YouTube play logic shared by all call sites.
+    Fetches search-results HTML, extracts the first real video ID,
+    then opens the direct watch URL with autoplay=1.
+    Falls back to the search-results page if no ID is found.
+    Returns a result dict with action_taken, message, success.
+    """
+    import urllib.request as _ur, urllib.parse as _up
+    encoded    = _up.quote(query)
+    search_url = f"https://www.youtube.com/results?search_query={encoded}"
+    try:
+        req  = _ur.Request(
+            search_url,
+            headers={"User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0 Safari/537.36"
+            )},
+        )
+        html = _ur.urlopen(req, timeout=10).read().decode("utf-8", errors="ignore")
+        ids  = [v for v in re.findall(r'"videoId":"([A-Za-z0-9_-]{11})"', html) if len(v) == 11]
+        if ids:
+            video_url = f"https://www.youtube.com/watch?v={ids[0]}&autoplay=1"
+            used = _launch_browser(video_url, browser=browser)
+            # Force play in a background thread — browser needs time to load
+            import threading as _thr
+            _thr.Thread(
+                target=_activate_browser_and_play,
+                args=(used,),
+                daemon=True,
+            ).start()
+            return {
+                "success": True,
+                "action_taken": "youtube_play",
+                "message": f"Playing '{query}' on YouTube in {used.title()}",
+                "video_id": ids[0],
+                "browser": used,
+            }
+        # No video ID found in page — open search results as fallback
+        used = _launch_browser(search_url, browser=browser)
+        return {
+            "success": True,
+            "action_taken": "youtube_play",
+            "message": f"Opened YouTube search for '{query}' in {used.title()} (no direct video found)",
+            "browser": used,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e), "action_taken": "youtube_play"}
 
 
 def handle_play_media(text: str, task_params: list) -> Dict:
     query  = _extract_play_query(text) or (task_params[0] if task_params else text)
     browser = _detect_browser_hint(text)
-    try:
-        import urllib.request as _ur
-        search_url = f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}"
-        req = _ur.Request(search_url, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36"
-        })
-        html = _ur.urlopen(req, timeout=10).read().decode("utf-8", errors="ignore")
-        ids = re.findall(r'"videoId":"([A-Za-z0-9_-]{11})"', html)
-        if ids:
-            video_url = f"https://www.youtube.com/watch?v={ids[0]}&autoplay=1"
-            used = _launch_browser(video_url, browser)
-            return {"success": True, "action_taken": "play_media",
-                    "message": f"Playing '{query}' on YouTube ({used.title()})"}
-        used = _launch_browser(search_url, browser)
-        return {"success": True, "action_taken": "play_media",
-                "message": f"Opened YouTube search for '{query}' ({used.title()})"}
-    except Exception as e:
-        return {"success": False, "error": str(e), "action_taken": "play_media"}
+    return _youtube_play(query, browser=browser)
 
 
 def handle_pause_resume_media(task_type: str) -> Dict:
-    try:
-        import pyautogui
-        try:
-            import pygetwindow as gw
-            yt_wins = [w for w in gw.getAllWindows()
-                       if 'youtube' in w.title.lower() and w.title]
-            if yt_wins:
-                yt_wins[0].activate()
-                time.sleep(0.4)
-        except Exception:
-            pass
-        pyautogui.press('k')
-        msg = "Paused." if task_type == "pause_media" else "Resumed."
-        return {"success": True, "action_taken": task_type, "message": msg}
-    except Exception as e:
-        return {"success": False, "error": str(e), "action_taken": task_type}
+    """Pause or resume YouTube playback using the 'k' keyboard shortcut."""
+    r = _press_browser_key("k")
+    msg = "Paused." if task_type == "pause_media" else "Resumed."
+    return {**r, "action_taken": task_type,
+            "message": msg if r.get("success") else r.get("error", "Failed.")}
+
+
+def handle_media_next() -> Dict:
+    """Skip to the next YouTube video (Shift+N)."""
+    r = _press_browser_key("shift", "n")
+    return {**r, "action_taken": "media_next",
+            "message": "Skipped to next video." if r.get("success") else r.get("error", "Failed.")}
+
+
+def handle_media_prev() -> Dict:
+    """Go to the previous YouTube video (Shift+P)."""
+    r = _press_browser_key("shift", "p")
+    return {**r, "action_taken": "media_prev",
+            "message": "Playing previous video." if r.get("success") else r.get("error", "Failed.")}
 
 
 def handle_open_url(task: dict, text: str) -> Dict:

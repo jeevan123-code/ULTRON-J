@@ -59,14 +59,21 @@ def _resolve_dest(dest: str) -> str:
         return p if os.path.isdir(p) else os.path.join(home, fallback)
 
     shortcuts = {
-        "desktop":   _od_or("Desktop",   "Desktop"),
-        "documents": _od_or("Documents", "Documents"),
-        "downloads": os.path.join(home, "Downloads"),
-        "onedrive":  _od,
-        "pictures":  _od_or("Pictures",  "Pictures"),
-        "music":     os.path.join(home, "Music"),
-        "videos":    os.path.join(home, "Videos"),
-        "home":      home,
+        "desktop":          _od_or("Desktop",   "Desktop"),
+        "documents":        _od_or("Documents", "Documents"),
+        "downloads":        os.path.join(home, "Downloads"),
+        "onedrive":         _od,
+        "pictures":         _od_or("Pictures",  "Pictures"),
+        "music":            os.path.join(home, "Music"),
+        "videos":           os.path.join(home, "Videos"),
+        "home":             home,
+        "my home":          home,
+        "home directory":   home,
+        "home folder":      home,
+        "my home directory":home,
+        "my home folder":   home,
+        "user home":        home,
+        "home dir":         home,
     }
     dl = dest.strip().lower()
     if dl in shortcuts:
@@ -114,6 +121,219 @@ def _ensure_ext(filename: str) -> str:
     if not any(filename.endswith(e) for e in common):
         return filename + ".txt"
     return filename
+
+
+# ── System / media action helpers ────────────────────────────────────────────
+
+def _browser_key(*keys: str) -> dict:
+    """Send a keyboard shortcut to a YouTube/browser window using xdotool, then pyautogui."""
+    import platform as _plt, subprocess as _sp, shutil as _sh, time as _tm
+    xdt_key = "+".join(keys)
+    if _plt.system() == "Linux":
+        xdt = _sh.which("xdotool")
+        if xdt:
+            for search_args in [
+                ["--name", "YouTube"],
+                ["--class", "Brave-browser"],
+                ["--class", "Google-chrome"],
+                ["--class", "Firefox"],
+            ]:
+                try:
+                    r = _sp.run([xdt, "search"] + search_args,
+                                capture_output=True, text=True, timeout=2)
+                    if r.returncode == 0 and r.stdout.strip():
+                        wid = r.stdout.strip().split("\n")[-1]
+                        _sp.run([xdt, "windowactivate", "--sync", wid], timeout=2)
+                        _tm.sleep(0.2)
+                        _sp.run([xdt, "key", "--clearmodifiers", xdt_key], timeout=2)
+                        return {"success": True}
+                except Exception:
+                    pass
+    try:
+        import pyautogui
+        if len(keys) == 1:
+            pyautogui.press(keys[0])
+        else:
+            pyautogui.hotkey(*keys)
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _xdg_open(path: str) -> None:
+    """Cross-platform file/folder opener."""
+    import platform as _plt, subprocess as _sp
+    system = _plt.system()
+    if system == "Windows":
+        os.startfile(path)
+    elif system == "Darwin":
+        _sp.Popen(["open", path])
+    else:
+        _sp.Popen(["xdg-open", path])
+
+
+def _close_app(name: str) -> dict:
+    """Kill a running application by name."""
+    import platform as _plt, subprocess as _sp
+    name = re.sub(r"^(?:the|my|a|an)\s+", "", name.strip().lower())
+    _PROC_MAP = {
+        "brave":       ["brave-browser", "brave"],
+        "chrome":      ["google-chrome", "google-chrome-stable", "chromium"],
+        "firefox":     ["firefox"],
+        "edge":        ["microsoft-edge"],
+        "terminal":    ["gnome-terminal", "xterm", "konsole"],
+        "youtube":     ["brave-browser", "brave", "google-chrome"],
+        "calculator":  ["gnome-calculator", "kcalc", "galculator"],
+        "discord":     ["discord"],
+        "spotify":     ["spotify"],
+        "gedit":       ["gedit"],
+        "notepad":     ["notepad"],
+    }
+    system = _plt.system()
+    candidates = _PROC_MAP.get(name, [name])
+    if system == "Windows":
+        for proc in candidates:
+            exe = proc if proc.endswith(".exe") else proc + ".exe"
+            r = _sp.run(["taskkill", "/F", "/IM", exe], capture_output=True, text=True)
+            if r.returncode == 0:
+                return {"success": True, "result": f"Closed {name}."}
+        return {"success": False, "error": f"Could not close '{name}'."}
+    else:
+        for proc in candidates:
+            r = _sp.run(["pkill", "-f", proc], capture_output=True)
+            if r.returncode == 0:
+                return {"success": True, "result": f"Closed {name}."}
+        return {"success": False, "error": f"'{name}' is not running or not found."}
+
+
+def _lock_screen() -> dict:
+    import platform as _plt, subprocess as _sp, shutil as _sh
+    system = _plt.system()
+    try:
+        if system == "Windows":
+            _sp.Popen(["rundll32.exe", "user32.dll,LockWorkStation"])
+        elif system == "Darwin":
+            _sp.Popen(["/System/Library/CoreServices/Menu Extras/User.menu/"
+                       "Contents/Resources/CGSession", "-suspend"])
+        else:
+            for cmd in [["loginctl", "lock-session"],
+                        ["gnome-screensaver-command", "--lock"],
+                        ["xdg-screensaver", "lock"],
+                        ["xset", "s", "activate"]]:
+                if _sh.which(cmd[0]):
+                    _sp.Popen(cmd)
+                    return {"success": True, "result": "Screen locked."}
+            return {"success": False,
+                    "error": "Could not lock screen. Try: loginctl lock-session"}
+        return {"success": True, "result": "Screen locked."}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _sleep_computer() -> dict:
+    import platform as _plt, subprocess as _sp, shutil as _sh
+    system = _plt.system()
+    try:
+        if system == "Windows":
+            _sp.Popen(["rundll32.exe", "powrprof.dll,SetSuspendState", "0", "1", "0"])
+        elif system == "Darwin":
+            _sp.Popen(["pmset", "sleepnow"])
+        else:
+            for cmd in [["systemctl", "suspend"], ["pm-suspend"]]:
+                if _sh.which(cmd[0]):
+                    _sp.Popen(cmd)
+                    return {"success": True, "result": "Suspending system..."}
+            return {"success": False,
+                    "error": "Could not suspend. Try: systemctl suspend"}
+        return {"success": True, "result": "Going to sleep..."}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _empty_trash() -> dict:
+    import platform as _plt, subprocess as _sp
+    system = _plt.system()
+    try:
+        if system == "Windows":
+            _sp.run(["PowerShell", "-Command",
+                     "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"],
+                    capture_output=True)
+        elif system == "Darwin":
+            _sp.run(["osascript", "-e", 'tell app "Finder" to empty trash'],
+                    capture_output=True)
+        else:
+            home = os.path.expanduser("~")
+            for d in [os.path.join(home, ".local", "share", "Trash", "files"),
+                      os.path.join(home, ".local", "share", "Trash", "info")]:
+                if os.path.isdir(d):
+                    for item in os.listdir(d):
+                        p = os.path.join(d, item)
+                        try:
+                            shutil.rmtree(p) if os.path.isdir(p) else os.remove(p)
+                        except Exception:
+                            pass
+        return {"success": True, "result": "Trash emptied."}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _system_info() -> dict:
+    try:
+        import psutil, platform as _plt
+        cpu  = psutil.cpu_percent(interval=0.5)
+        mem  = psutil.virtual_memory()
+        disk = psutil.disk_usage("/")
+        batt = psutil.sensors_battery()
+        bat_line = (f"- Battery: {batt.percent:.0f}% "
+                    f"({'charging' if batt.power_plugged else 'discharging'})\n"
+                    if batt else "")
+        return {"success": True, "result": (
+            f"**System Status**\n"
+            f"- CPU: {cpu}%\n"
+            f"- RAM: {mem.percent}% used "
+            f"({mem.used // (1024**2):,} MB / {mem.total // (1024**2):,} MB)\n"
+            f"- Disk: {disk.percent}% used "
+            f"({disk.used // (1024**3):.1f} GB / {disk.total // (1024**3):.1f} GB)\n"
+            f"{bat_line}"
+            f"- OS: {_plt.system()} {_plt.release()}"
+        )}
+    except ImportError:
+        return {"success": False, "error": "Install psutil: pip install psutil"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _brightness_ctrl(direction: str) -> dict:
+    import platform as _plt, subprocess as _sp, shutil as _sh
+    system = _plt.system()
+    label = "increased" if direction == "up" else "decreased"
+    try:
+        if system == "Linux":
+            if _sh.which("brightnessctl"):
+                change = "+10%" if direction == "up" else "10%-"
+                _sp.run(["brightnessctl", "set", change], capture_output=True)
+                return {"success": True, "result": f"Brightness {label}."}
+            if _sh.which("xbacklight"):
+                flag = "-inc" if direction == "up" else "-dec"
+                _sp.run(["xbacklight", flag, "10"], capture_output=True)
+                return {"success": True, "result": f"Brightness {label}."}
+            return {"success": False,
+                    "error": "Install brightnessctl: sudo apt install brightnessctl"}
+        elif system == "Windows":
+            import pyautogui
+            key = "brightnessup" if direction == "up" else "brightnessdown"
+            for _ in range(3):
+                pyautogui.press(key)
+            return {"success": True, "result": f"Brightness {label}."}
+        elif system == "Darwin":
+            keycode = "144" if direction == "up" else "145"
+            _sp.run(["osascript", "-e",
+                     f'tell app "System Events" to key code {keycode}'],
+                    capture_output=True)
+            return {"success": True, "result": f"Brightness {label}."}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+    return {"success": False, "error": "Unsupported platform."}
 
 
 # ── Pattern table ─────────────────────────────────────────────────────────────
@@ -223,6 +443,11 @@ _PATTERNS = [
     (r"^open (?:the )?(?:folder|directory) (.+)",
      "open_folder"),
 
+    # ── multi-step: open BROWSER and play QUERY on YouTube (must precede open_app) ──
+    # e.g. "open brave and play pink lips" / "open chrome and watch despacito"
+    (r"^open\s+(brave|chrome|firefox|edge|opera|chromium)\s+and\s+(?:play|watch|listen to)\s+(.+)$",
+     "open_and_play"),
+
     # ── multi-step: open SITE and search QUERY (must precede open_app) ────────
     # groups: (site, query) — execute_intent for "open_and_search" inverts.
     (r"^open\s+(\w+)\s+and\s+search\s+(?:for\s+)?(.+)$", "open_and_search"),
@@ -242,6 +467,10 @@ _PATTERNS = [
     (r"^(?:what day is (?:it|today)|today'?s? date)[?]?$", "get_date"),
 
     # ── screenshot ────────────────────────────────────────────────────────────
+    # With explicit save path: "take screenshot and save to ~/Documents"
+    (r"^(?:take (?:a )?)?screen(?:shot|cap(?:ture)?)"
+     r"(?:\s+and)?\s+(?:save|store|put)\s+(?:it\s+)?(?:to|on|in|at|into)\s+(.+)$",
+     "take_screenshot_to"),
     (r"^(?:take (?:a )?)?screenshot$", "take_screenshot"),
     (r"^(?:take (?:a )?)?screen(?:shot|cap(?:ture)?)$", "take_screenshot"),
     (r"^capture (?:the )?screen$", "take_screenshot"),
@@ -254,15 +483,29 @@ _PATTERNS = [
     (r"^(?:mute|unmute|toggle (?:the )?mute)(?:\s+(?:audio|sound|mic|volume))?$", "volume_mute"),
 
     # ── media controls ────────────────────────────────────────────────────────
-    (r"^pause(?: (?:the )?(?:video|music|song|playback|media))?$", "media_pause"),
+    (r"^pause(?: (?:the )?(?:video|music|song|playback|media|youtube))?$", "media_pause"),
     (r"^(?:resume|unpause|continue)(?: (?:the )?(?:video|music|song|playback|media))?$", "media_play"),
-    (r"^(?:next|skip)(?: (?:track|song|video))?$", "media_next"),
-    (r"^(?:previous|prev|back|go back)(?: (?:track|song|video))?$", "media_prev"),
+    # next / skip — "next", "play next", "next video", "play next video on youtube", etc.
+    (r"^(?:play\s+)?(?:the\s+)?next(?:\s+(?:video|track|song|one))?(?:\s+(?:on|in)\s+youtube)?$", "media_next"),
+    (r"^skip(?:\s+(?:to\s+)?(?:the\s+|this\s+)?(?:next\s+)?(?:video|track|song))?(?:\s+(?:on|in)\s+youtube)?$", "media_next"),
+    # previous — "previous", "play previous", "previous video", "go back", etc.
+    (r"^(?:play\s+)?(?:the\s+)?(?:previous|prev)(?:\s+(?:video|track|song|one))?(?:\s+(?:on|in)\s+youtube)?$", "media_prev"),
+    (r"^(?:go\s+(?:back|to\s+(?:the\s+)?previous)|back)(?:\s+(?:video|track|song))?(?:\s+(?:on|in)\s+youtube)?$", "media_prev"),
 
     # ── window control ────────────────────────────────────────────────────────
     (r"^minimize(?: (?:this |the )?(?:window|app|application))?$", "minimize_window"),
     (r"^maximize(?: (?:this |the )?(?:window|app|application))?$", "maximize_window"),
     (r"^close (?:this |the )?(?:window|app|application|tab)$", "close_window"),
+    # ── close a specific app by name ─────────────────────────────────────────
+    (r"^(?:close|quit|exit|kill|terminate)\s+(.+)$", "close_app"),
+    # ── system controls ───────────────────────────────────────────────────────
+    (r"^(?:lock(?:\s+(?:the\s+)?(?:screen|computer|pc|laptop|system|my\s+(?:pc|computer|screen)))?|lock\s+it)$", "lock_screen"),
+    (r"^(?:sleep|suspend)(?:\s+(?:the\s+)?(?:computer|pc|laptop|system))?$", "sleep_computer"),
+    (r"^(?:empty|clear)\s+(?:the\s+)?(?:trash|recycle\s*bin|rubbish)$", "empty_trash"),
+    (r"^(?:system|pc)\s+(?:info|information|status|stats)$", "system_info"),
+    # ── brightness ────────────────────────────────────────────────────────────
+    (r"^(?:brightness\s+up|increase\s+(?:the\s+)?brightness|screen\s+brighter)$", "brightness_up"),
+    (r"^(?:brightness\s+down|(?:decrease|lower|dim)\s+(?:the\s+)?brightness|screen\s+dimmer)$", "brightness_down"),
 
     # ── press key ─────────────────────────────────────────────────────────────
     (r"^press (?:the )?escape(?: key)?$", "press_escape"),
@@ -331,7 +574,7 @@ def execute_intent(intent: dict) -> dict:
             doc_path = _find(clean) or _find(name)
             if doc_path and os.path.exists(doc_path):
                 try:
-                    os.startfile(doc_path)
+                    _xdg_open(doc_path)
                     return {"success": True, "app": doc_path,
                             "result": f"Opened {os.path.basename(doc_path)}"}
                 except Exception as e:
@@ -346,7 +589,7 @@ def execute_intent(intent: dict) -> dict:
             return {"success": False,
                     "error": f"'{filename}' not found. Try: find {filename}"}
         try:
-            os.startfile(path)
+            _xdg_open(path)
             return {"success": True, "app": path,
                     "result": f"Opened {os.path.basename(path)}\n`{path}`"}
         except Exception as e:
@@ -358,7 +601,7 @@ def execute_intent(intent: dict) -> dict:
         path   = _find_dir(target) or _resolve_dest(target)
         if os.path.isdir(path):
             try:
-                os.startfile(path)
+                _xdg_open(path)
                 return {"success": True, "result": f"Opened folder: `{path}`"}
             except Exception as e:
                 return {"success": False, "error": str(e)}
@@ -661,6 +904,10 @@ def execute_intent(intent: dict) -> dict:
         return {"success": True, "result": f"Today is {today.strftime('%A, %d %B %Y')}"}
 
     # ── screenshot ────────────────────────────────────────────────────────────
+    if t == "take_screenshot_to":
+        save_path = (g[0] or "").strip()
+        return execute_action("screenshot", {"save_path": save_path})
+
     if t == "take_screenshot":
         return execute_action("screenshot", {})
 
@@ -684,40 +931,69 @@ def execute_intent(intent: dict) -> dict:
 
     # ── media controls ────────────────────────────────────────────────────────
     if t == "media_pause":
-        from computer_control import hotkey as _hk
-        _hk("space")
-        return {"success": True, "result": "Paused."}
+        r = _browser_key("k")   # YouTube: k = pause/play toggle
+        return {**r, "result": "Paused."}
 
     if t == "media_play":
-        from computer_control import press_key as _pk
-        _pk("space")
-        return {"success": True, "result": "Playing."}
+        r = _browser_key("k")   # YouTube: k = pause/play toggle
+        return {**r, "result": "Playing."}
 
     if t == "media_next":
-        from computer_control import press_key as _pk
-        _pk("nexttrack")
-        return {"success": True, "result": "Next track."}
+        r = _browser_key("shift", "n")  # YouTube: Shift+N = next video
+        return {**r, "result": "Skipped to next video."}
 
     if t == "media_prev":
-        from computer_control import press_key as _pk
-        _pk("prevtrack")
-        return {"success": True, "result": "Previous track."}
+        r = _browser_key("shift", "p")  # YouTube: Shift+P = previous video
+        return {**r, "result": "Playing previous video."}
 
     # ── window control ────────────────────────────────────────────────────────
     if t == "minimize_window":
-        from computer_control import hotkey as _hk
-        _hk("win", "down")
+        import platform as _plt, subprocess as _sp, shutil as _sh
+        if _plt.system() == "Linux" and _sh.which("xdotool"):
+            _sp.run(["xdotool", "getactivewindow", "windowminimize"], capture_output=True)
+        else:
+            from computer_control import hotkey as _hk
+            _hk("win", "down")
         return {"success": True, "result": "Window minimized."}
 
     if t == "maximize_window":
-        from computer_control import hotkey as _hk
-        _hk("win", "up")
+        import platform as _plt, subprocess as _sp, shutil as _sh
+        if _plt.system() == "Linux" and _sh.which("xdotool"):
+            _sp.run(["xdotool", "getactivewindow", "windowmaximize"], capture_output=True)
+        else:
+            from computer_control import hotkey as _hk
+            _hk("win", "up")
         return {"success": True, "result": "Window maximized."}
 
     if t == "close_window":
-        from computer_control import hotkey as _hk
-        _hk("alt", "f4")
+        import platform as _plt, subprocess as _sp, shutil as _sh
+        if _plt.system() == "Linux" and _sh.which("xdotool"):
+            _sp.run(["xdotool", "getactivewindow", "windowclose"], capture_output=True)
+        else:
+            from computer_control import hotkey as _hk
+            _hk("alt", "f4")
         return {"success": True, "result": "Window closed."}
+
+    if t == "close_app":
+        return _close_app((g[0] or "").strip())
+
+    if t == "lock_screen":
+        return _lock_screen()
+
+    if t == "sleep_computer":
+        return _sleep_computer()
+
+    if t == "empty_trash":
+        return _empty_trash()
+
+    if t == "system_info":
+        return _system_info()
+
+    if t == "brightness_up":
+        return _brightness_ctrl("up")
+
+    if t == "brightness_down":
+        return _brightness_ctrl("down")
 
     # ── key presses ───────────────────────────────────────────────────────────
     if t == "press_escape":
@@ -780,17 +1056,20 @@ def execute_intent(intent: dict) -> dict:
 
     # ── media ──────────────────────────────────────────────────────────────────
     if t == "play_media_on":
-        import urllib.parse
+        from browser_tasks import _youtube_play
         query, browser = g[0].strip(), g[1].strip()
-        url = ("https://www.youtube.com/results?search_query="
-               + urllib.parse.quote(query))
-        return execute_action("open_url", {"url": url, "browser": browser})
+        return _youtube_play(query, browser=browser)
 
     if t == "play_media":
-        import urllib.parse
-        url = ("https://www.youtube.com/results?search_query="
-               + urllib.parse.quote(g[0].strip()))
-        return execute_action("open_url", {"url": url})
+        from browser_tasks import _youtube_play
+        return _youtube_play(g[0].strip())
+
+    # ── open browser and play on YouTube ──────────────────────────────────────
+    if t == "open_and_play":
+        # groups: (browser, query)
+        from browser_tasks import _youtube_play
+        browser, query = g[0].strip().lower(), g[1].strip()
+        return _youtube_play(query, browser=browser)
 
     # ── search ─────────────────────────────────────────────────────────────────
     if t == "open_and_search":

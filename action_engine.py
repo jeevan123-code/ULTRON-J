@@ -49,19 +49,74 @@ _WELL_KNOWN_FOLDERS = {
     "onedrive":   [_ONEDRIVE_ROOT],
 }
 
+_HOME_PHRASES = {
+    "home", "~", "my home", "home directory", "home folder",
+    "my home directory", "my home folder", "user home", "home dir",
+}
+
+import re as _path_re
+
+# Common Windows user-folder subpaths → Linux equivalents under HOME.
+_WIN_FOLDER_MAP = [
+    ("desktop",   "Desktop"),
+    ("documents", "Documents"),
+    ("downloads", "Downloads"),
+    ("pictures",  "Pictures"),
+    ("videos",    "Videos"),
+    ("music",     "Music"),
+    ("onedrive",  ""),          # OneDrive root → home
+]
+
+
+def _translate_win_path(p: str) -> str:
+    """
+    If p looks like a Windows absolute path (C:\\... or C:/...), translate it
+    to the Linux equivalent under the real home directory.
+    Examples:
+        C:\\Users\\jeevan\\Desktop\\file.txt  → /home/jeevan/Desktop/file.txt
+        C:\\Users\\User\\Desktop\\file.txt    → /home/jeevan/Desktop/file.txt  (any username)
+        C:\\Users\\User\\file.txt             → /home/jeevan/file.txt
+        C:\\Windows\\System32\\foo            → unchanged (system path, not translatable)
+    """
+    norm = p.replace("\\", "/")
+    # Must look like  X:/...
+    if not _path_re.match(r"^[A-Za-z]:/", norm):
+        return p
+    home = os.path.expanduser("~")
+    # C:/Users/<any_username>/... → map relative tail under home
+    m = _path_re.match(r"^[A-Za-z]:/[Uu]sers/[^/]+/(.*)", norm)
+    if m:
+        tail = m.group(1)
+        return os.path.join(home, tail) if tail else home
+    # C:/Users → just home
+    if _path_re.match(r"^[A-Za-z]:/[Uu]sers/?$", norm):
+        return home
+    # Not a user path — return unchanged so caller can surface the error
+    return p
+
+
 def _resolve_path(p: str) -> str:
     """Expand ~/env vars and map well-known bare folder names to real paths.
+    Also translates Windows-style paths (C:\\...) to Linux paths on non-Windows.
     Examples:
-       'Downloads'           -> C:/Users/xjoke/OneDrive/Downloads (if it exists)
-                                else C:/Users/xjoke/Downloads
-       'desktop/notes.txt'   -> C:/Users/xjoke/OneDrive/Desktop/notes.txt
-       '~/projects'          -> C:/Users/xjoke/projects
-       'C:/already/abs/path' -> unchanged
+       'Downloads'                          -> ~/Downloads (or OneDrive/Downloads)
+       'desktop/notes.txt'                  -> ~/Desktop/notes.txt
+       '~/projects'                         -> /home/jeevan/projects
+       'C:\\Users\\User\\Desktop\\file.txt' -> /home/jeevan/Desktop/file.txt
     """
     if not p:
         return p
+    # Natural-language home phrases (e.g. LLM returns "my home directory")
+    if p.strip().lower() in _HOME_PHRASES:
+        return os.path.expanduser("~")
+    # Translate Windows-style paths on Linux/macOS before anything else
+    if os.name != "nt":
+        p = _translate_win_path(p)
     s = os.path.expanduser(os.path.expandvars(p))
     if os.path.isabs(s):
+        # Fix LLM-hallucinated /home/user when the real home is different.
+        _real_home = os.path.expanduser("~")
+        s = _path_re.sub(r"^/home/user(?=/|$)", _real_home, s)
         return s
     # Normalize separators just for comparison
     norm = s.replace("\\", "/").strip("/")
@@ -444,7 +499,7 @@ def run_code_sandbox(code: str, timeout: int = None) -> dict:
     Execute Python code safely in a restricted sandbox.
     Returns {"output": str, "error": str, "success": bool}
     """
-    timeout = timeout or CODE_SANDBOX_TIMEOUT
+    timeout = int(timeout) if timeout and str(timeout).isdigit() else CODE_SANDBOX_TIMEOUT
 
     safe, reason = _check_code_safety(code)
     if not safe:

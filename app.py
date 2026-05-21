@@ -93,17 +93,45 @@ from action_engine import (
     run_code_sandbox, safe_calculate, fetch_weather, create_note,
 )
 
+# ── Error tracker — lightweight failure logger used by self_upgrade ───────────
+try:
+    from error_tracker import log_failure as _log_failure
+except Exception:
+    def _log_failure(module, function, error, context=None, tb=None): pass
+
 # ── Voice engine — get_voice_status is needed inline (startup print); ────────
 #    stream_tts_from_llm is used by /ask voice-mode to wrap the LLM stream in
 #    sentence-level TTS so the chat page hears audio as soon as each sentence
 #    finishes rather than waiting for the full text + a separate TTS round trip.
 try:
-    from voice_engine import get_voice_status, stream_tts_from_llm
+    from voice_engine import get_voice_status, stream_tts_from_llm, tts as _tts_fn
     VOICE_AVAILABLE = True
 except ImportError:
     VOICE_AVAILABLE = False
     def get_voice_status(): return {"ready": False, "error": "edge-tts not installed"}
     def stream_tts_from_llm(gen, mood="FOCUSED"): return iter([])
+    def _tts_fn(text, mood="FOCUSED"): return b"", "none"
+
+
+def _action_sse(msg: str, extra: dict = None, voice: bool = False, mood: str = "FOCUSED"):
+    """
+    Yield an SSE stream for an action result so the frontend can:
+      1. Display the text immediately (via _full token)
+      2. Play TTS audio concurrently (via sentence/audio_b64 event)
+    """
+    import json as _j, base64 as _b64
+    payload = {"_full": msg}
+    if extra:
+        payload.update(extra)
+    yield f"data: {_j.dumps(payload)}\n\n"
+    if voice and VOICE_AVAILABLE and msg:
+        try:
+            audio_bytes, _ = _tts_fn(msg[:300], mood=mood)
+            if audio_bytes:
+                yield f"data: {_j.dumps({'type': 'sentence', 'audio_b64': _b64.b64encode(audio_bytes).decode()})}\n\n"
+        except Exception:
+            pass
+    yield 'data: {"done": true}\n\n'
 
 # ── Task Orchestrator (used by /ask, /clarify/check via blueprints, etc.) ─────
 from task_orchestrator import orchestrate
@@ -175,6 +203,8 @@ try:
         distiller_hours=6,
         evolution_hours=12,
         proactive_minutes=30,
+        predictive_seconds=60,
+        skill_hours=6,
         enable=True,
     )
     print(f"[app] Ultimate loops started: {_ultimate_started}")
@@ -385,7 +415,7 @@ def health():
     # Memory (SQLite)
     try:
         from memory import sqlite_get_history
-        sqlite_get_history("_health_check_", limit=1)
+        sqlite_get_history("_health_check_")
         status["memory"] = "ok"
     except Exception as e:
         status["memory"] = f"error: {str(e)[:60]}"
@@ -393,10 +423,7 @@ def health():
     # ChromaDB / vector store
     try:
         import vector_store as _vs
-        if _vs._collection is not None or not _vs.CHROMA_AVAILABLE:
-            status["chromadb"] = "ok" if _vs.CHROMA_AVAILABLE else "unavailable"
-        else:
-            status["chromadb"] = "ok"
+        status["chromadb"] = "ok" if getattr(_vs, "_CHROMA_AVAILABLE", False) else "unavailable"
     except Exception as e:
         status["chromadb"] = f"error: {str(e)[:60]}"
 
@@ -417,8 +444,8 @@ def health():
 
     # Tavily web search
     try:
-        from config import TAVILY_KEY
-        status["tavily"] = "ok" if TAVILY_KEY else "no_key"
+        from config import TAVILY_API_KEY as _TAVILY_KEY
+        status["tavily"] = "ok" if _TAVILY_KEY else "no_key"
     except Exception:
         status["tavily"] = "unavailable"
 
@@ -432,7 +459,9 @@ def health():
     except Exception:
         status["perception"] = "unavailable"
 
-    all_ok = all(v == "ok" for v in status.values())
+    # "unavailable" = optional module not installed, not a failure
+    critical = {k: v for k, v in status.items() if k in ("memory", "groq", "gemini", "openrouter")}
+    all_ok = all(v == "ok" for v in critical.values())
     return jsonify({"ok": all_ok, "modules": status}), 200
 
 # =============================================================================
@@ -486,7 +515,12 @@ def ask():
 
 
     # ── NEW: Orchestrator intercept (computer control, project builder) ───────────
-    _orch = orchestrate(question, session_id=session_id)
+    try:
+        _orch = orchestrate(question, session_id=session_id)
+    except Exception as _oe:
+        import traceback as _oetb
+        _log_failure("task_orchestrator", "orchestrate", str(_oe), {"question": question[:120]}, _oetb.format_exc())
+        _orch = {"success": False, "passthrough": True, "error": str(_oe)}
     if _orch.get("action_taken") and not _orch.get("passthrough"):
         # Prefer detect_intent groups so repeat-last can re-execute correctly
         _orch_intent = detect_intent(question) or {"type": _orch.get("action_taken"), "groups": [question], "raw": question}
@@ -494,15 +528,11 @@ def ask():
         _orch_msg = (_orch.get("message")
                      or (f"❌ Failed: {_orch['error']}" if not _orch.get("success") and _orch.get("error") else None)
                      or "Done!")
-        return jsonify({
-            "response":     _orch_msg,
-            "action_taken": _orch.get("action_taken"),
-            "data":         _orch,
-            "mood":         get_mood(),
-            "mood_icon":    get_mood_icon(),
-            "needs_input":  _orch.get("needs_input", False),
-            "questions":    _orch.get("questions", []),
-        })
+        return Response(
+            _action_sse(_orch_msg, voice=voice_mode, mood=get_mood()),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
     # ── End orchestrator intercept ────────────────────────────────────────────────
 
     # ── Pre-LLM intent intercept (T09) ───────────────────────────────────────
@@ -512,30 +542,34 @@ def ask():
         if last and last.get("intent"):
             _r = execute_intent(last["intent"])
             set_last_action(session_id, last["intent"], _r)
-            return jsonify({
-                "response": f"Repeating: {last['intent']['type']}",
-                "action":   last["intent"]["type"],
-                "result":   _r,
-                "executed": True,
-            })
-        return jsonify({"response": "No previous action to repeat."})
+            _rmsg = _r.get("message") or f"Repeated: {last['intent']['type']}"
+            return Response(
+                _action_sse(_rmsg, voice=voice_mode, mood=get_mood()),
+                mimetype="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+        return Response(
+            _action_sse("No previous action to repeat.", voice=voice_mode, mood=get_mood()),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
     elif _intent and _intent["type"] != "help_me_now":
         _r = execute_intent(_intent)
         set_last_action(session_id, _intent, _r)
         sqlite_save_message(session_id, "user", question)
+        # Use the action's own message if available, otherwise build a short summary
         _resp = (
-            f"{_intent['type'].replace('_', ' ').title()}: "
-            f"{_r.get('result') or _r.get('app') or 'done'}"
+            _r.get("message")
+            or (_r.get("result") or _r.get("app") or "Done!")
             if _r.get("success")
             else f"Failed: {_r.get('error', 'unknown')}"
         )
         sqlite_save_message(session_id, "assistant", _resp)
-        return jsonify({
-            "response": _resp,
-            "action":   _intent["type"],
-            "result":   _r,
-            "executed": True,
-        })
+        return Response(
+            _action_sse(_resp, voice=voice_mode, mood=get_mood()),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
     # ── End intent intercept ──────────────────────────────────────────────────
 
     # T22 — "Help me" / "I'm stuck" with screen context
@@ -824,10 +858,22 @@ def ask():
             except Exception:
                 pass
 
+            # Extract personal facts from user message (background, never blocks)
+            try:
+                from personal_facts import extract_and_store_async
+                extract_and_store_async(question)
+            except Exception:
+                pass
+
     def _guarded_generate():
         _conversation_active.set()
         try:
             yield from generate()
+        except Exception as _gen_err:
+            import traceback as _tb
+            _log_failure("app", "generate", str(_gen_err), {"question": question[:120]}, _tb.format_exc())
+            yield f"data: {json.dumps({'token': 'Something went wrong. Please try again.'})}\n\n"
+            yield 'data: {"done": true}\n\n'
         finally:
             _conversation_active.clear()
 
@@ -1315,14 +1361,14 @@ if __name__ == "__main__":
         except Exception as _exc:
             print(f"  ❌ {label:<22} {str(_exc)[:30]}")
     try:
-        from config import GROQ_KEYS, GEMINI_KEYS, OPENROUTER_KEYS, TAVILY_KEY
+        from config import GROQ_KEYS, GEMINI_KEYS, OPENROUTER_KEYS, TAVILY_API_KEY as _TAVILY_KEY
         _chk("groq",       lambda: bool(GROQ_KEYS))
         _chk("gemini",     lambda: bool(GEMINI_KEYS))
         _chk("openrouter", lambda: bool(OPENROUTER_KEYS))
-        _chk("tavily",     lambda: bool(TAVILY_KEY))
+        _chk("tavily",     lambda: bool(_TAVILY_KEY))
     except Exception as _e:
         print(f"  ⚠️  API keys check failed: {_e}")
-    _chk("memory (sqlite)", lambda: __import__("memory").sqlite_get_history("_hc_", limit=1) is not None or True)
+    _chk("memory (sqlite)", lambda: __import__("memory").sqlite_get_history("_hc_") is not None or True)
     _chk("voice_engine",    lambda: VOICE_AVAILABLE)
     print(f"{'─'*46}\n")
 
@@ -1405,6 +1451,17 @@ if __name__ == "__main__":
     if BEYOND_JARVIS_AVAILABLE:
         start_beyond_jarvis(app)
         print("[+] Beyond JARVIS background services started")
+
+    # ── Plugin registry hot-watcher ───────────────────────────────────────────
+    # Watches plugins/ directory every 5s — drop a .py file in and it loads
+    # automatically without a restart.
+    try:
+        from plugin_registry import start_plugin_watcher, load_all_plugins
+        load_all_plugins()          # load any existing plugins at boot
+        start_plugin_watcher(interval=5)
+        print("[+] Plugin registry watcher started (plugins/ hot-reload enabled)")
+    except Exception as _e:
+        print(f"[!] Plugin registry watcher skipped: {_e}")
 
     from config import env_status_report, FEATURE_BY_KEY
     print("\n[+] Environment key status:")

@@ -27,6 +27,14 @@ import base64
 
 from flask import Blueprint, render_template, request, jsonify, Response
 
+
+def _hv(s: str, maxlen: int = 500) -> str:
+    """Sanitize a value for use in an HTTP header (ASCII-safe, no newlines, truncated)."""
+    return (str(s)
+            .replace("\r", " ").replace("\n", " ")
+            .encode("latin-1", "ignore").decode("latin-1")
+            .strip()[:maxlen])
+
 # ── Mirror app.py optional-import pattern for voice_engine ─────────────────────
 try:
     from voice_engine import (
@@ -208,11 +216,11 @@ def api_voice_chat():
                 audio,
                 mimetype="audio/mpeg",
                 headers={
-                    "X-Transcription": user_text,
-                    "X-Response-Text": response_text,
+                    "X-Transcription": _hv(user_text),
+                    "X-Response-Text": _hv(response_text),
                     "X-Mood":          mood,
                     "X-Confidence":    str(round(confidence, 2)),
-                    "X-Voice-Command": _orch.get("action_taken", ""),
+                    "X-Voice-Command": _hv(_orch.get("action_taken", "")),
                     "Access-Control-Expose-Headers": "X-Transcription,X-Response-Text,X-Mood,X-Confidence,X-Voice-Command",
                 },
             )
@@ -230,11 +238,11 @@ def api_voice_chat():
                 audio,
                 mimetype="audio/mpeg",
                 headers={
-                    "X-Transcription": user_text,
-                    "X-Response-Text": response_text,
+                    "X-Transcription": _hv(user_text),
+                    "X-Response-Text": _hv(response_text),
                     "X-Mood":          mood,
                     "X-Confidence":    str(round(confidence, 2)),
-                    "X-Voice-Command": voice_cmd,
+                    "X-Voice-Command": _hv(voice_cmd),
                     "Access-Control-Expose-Headers": "X-Transcription,X-Response-Text,X-Mood,X-Confidence,X-Voice-Command",
                 },
             )
@@ -315,10 +323,10 @@ def api_voice_chat():
         audio,
         mimetype="audio/mpeg",
         headers={
-            "X-Transcription": user_text,
-            "X-Response-Text": full_response[:500],
+            "X-Transcription": _hv(user_text),
+            "X-Response-Text": _hv(full_response),
             "X-Mood":          mood,
-            "X-Mood-Icon":     get_mood_icon(),
+            "X-Mood-Icon":     _hv(get_mood_icon()),
             "X-Confidence":    str(round(confidence, 2)),
             "X-TTS-Provider":  used_provider,
             "X-Voice-Command": "",

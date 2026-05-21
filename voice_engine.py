@@ -518,6 +518,31 @@ def stream_tts_from_llm(
 # STT PROVIDERS
 # =============================================================================
 
+def _stt_groq(audio_bytes: bytes) -> Dict:
+    """Groq Whisper — GPU-accelerated, ~200ms, uses existing GROQ_API_KEY."""
+    try:
+        from config import GROQ_API_KEY as _gkey
+    except ImportError:
+        _gkey = os.environ.get("GROQ_API_KEY", "")
+    if not _gkey:
+        raise RuntimeError("GROQ_API_KEY not set")
+    resp = requests.post(
+        "https://api.groq.com/openai/v1/audio/transcriptions",
+        headers={"Authorization": f"Bearer {_gkey}"},
+        files={"file": ("audio.webm", audio_bytes, "audio/webm")},
+        data={"model": "whisper-large-v3-turbo", "response_format": "json", "language": "en"},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    result = resp.json()
+    return {
+        "text":       result.get("text", "").strip(),
+        "language":   "en",
+        "confidence": 0.95,
+        "provider":   "groq_whisper",
+    }
+
+
 def _stt_openai(audio_bytes: bytes) -> Dict:
     if not OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY not set")
@@ -595,6 +620,13 @@ def stt(audio_input, provider: str = "auto") -> Dict:
 
     if provider == "auto":
         chain = []
+        # Groq Whisper first — GPU-backed, ~200ms, free tier, no extra install
+        try:
+            from config import GROQ_API_KEY as _gk
+        except ImportError:
+            _gk = os.environ.get("GROQ_API_KEY", "")
+        if _gk:
+            chain.append("groq")
         if OPENAI_API_KEY:
             chain.append("openai")
         if FASTER_WHISPER_AVAILABLE:
@@ -607,30 +639,38 @@ def stt(audio_input, provider: str = "auto") -> Dict:
     if not chain:
         return {
             "text": "", "confidence": 0,
-            "error": "No STT available. Set OPENAI_API_KEY or run: pip install faster-whisper",
+            "error": "No STT available. Set GROQ_API_KEY, OPENAI_API_KEY, or run: pip install faster-whisper",
             "provider": "none",
         }
 
     last_err = None
     for prov in chain:
         try:
-            if prov == "openai":
+            if prov == "groq":
+                result = _stt_groq(audio_bytes)
+            elif prov == "openai":
                 result = _stt_openai(audio_bytes)
             elif prov in ("faster_whisper", "local_whisper"):
                 if audio_path is None:
-                    # Save as webm first, then convert to wav for compatibility
-                    with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tmp:
+                    # Detect format from magic bytes; default to webm
+                    if audio_bytes[:4] == b'OggS':
+                        raw_suffix = ".ogg"
+                    elif audio_bytes[:4] == b'fLaC':
+                        raw_suffix = ".flac"
+                    elif audio_bytes[:3] == b'ID3' or audio_bytes[:2] == b'\xff\xfb':
+                        raw_suffix = ".mp3"
+                    else:
+                        raw_suffix = ".webm"
+                    with tempfile.NamedTemporaryFile(suffix=raw_suffix, delete=False) as tmp:
                         tmp.write(audio_bytes)
-                        webm_path = tmp.name
-                    # Try to convert webm → wav using pydub (needs ffmpeg)
-                    wav_path = webm_path.replace(".webm", ".wav")
+                        raw_path = tmp.name
+                    wav_path = raw_path.rsplit(".", 1)[0] + ".wav"
                     try:
                         from pydub import AudioSegment
-                        AudioSegment.from_file(webm_path).export(wav_path, format="wav")
+                        AudioSegment.from_file(raw_path).export(wav_path, format="wav")
                         audio_path = wav_path
                     except Exception:
-                        # No pydub/ffmpeg — use webm directly (may work on some systems)
-                        audio_path = webm_path
+                        audio_path = raw_path
                 if prov == "faster_whisper":
                     result = _stt_faster_whisper(audio_path)
                 else:
@@ -888,8 +928,15 @@ def get_voice_status() -> dict:
         "kokoro"     if kokoro_model_ready else
         "edge"       if EDGE_TTS_AVAILABLE else "none"
     )
+    _groq_key = ""
+    try:
+        from config import GROQ_API_KEY as _gk
+        _groq_key = _gk
+    except Exception:
+        _groq_key = os.environ.get("GROQ_API_KEY", "")
     active_stt = (
         "openai_whisper"  if OPENAI_API_KEY else
+        "groq_whisper"    if _groq_key else
         "faster_whisper"  if FASTER_WHISPER_AVAILABLE else
         "local_whisper"   if LOCAL_WHISPER_AVAILABLE else "none"
     )
@@ -903,6 +950,7 @@ def get_voice_status() -> dict:
         },
         "stt": {
             "openai_whisper":  bool(OPENAI_API_KEY),
+            "groq_whisper":    bool(_groq_key),
             "faster_whisper":  FASTER_WHISPER_AVAILABLE,
             "local_whisper":   LOCAL_WHISPER_AVAILABLE,
             "active":          active_stt,

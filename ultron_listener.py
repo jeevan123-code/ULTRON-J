@@ -32,7 +32,11 @@ import threading
 import subprocess
 import struct
 import math
-import audioop
+try:
+    import audioop
+    _AUDIOOP_AVAILABLE = True
+except (ImportError, ModuleNotFoundError):
+    _AUDIOOP_AVAILABLE = False
 import requests
 import asyncio
 from datetime import datetime
@@ -252,8 +256,15 @@ def transcribe_locally(audio_path: str) -> str:
 # AUDIO UTILITIES
 # ─────────────────────────────────────────────────────────────────────────────
 def rms(data: bytes) -> float:
+    if _AUDIOOP_AVAILABLE:
+        try:
+            return audioop.rms(data, 2)
+        except Exception:
+            pass
     try:
-        return audioop.rms(data, 2)
+        import numpy as _np
+        arr = _np.frombuffer(data, dtype=_np.int16).astype(_np.float32)
+        return float(_np.sqrt(_np.mean(arr ** 2))) if len(arr) else 0.0
     except Exception:
         count = len(data) // 2
         if count == 0:

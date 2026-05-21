@@ -40,7 +40,7 @@ MODEL_FILE = os.path.join(_BASE_DIR, "jeevan_model.json")
 _lock = threading.Lock()
 
 # Update the profile every N conversations
-UPDATE_EVERY = 10
+UPDATE_EVERY = 4
 
 # =============================================================================
 # DEFAULT PROFILE

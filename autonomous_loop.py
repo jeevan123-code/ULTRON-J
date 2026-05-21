@@ -731,13 +731,3 @@ def stop_autonomous_loop():
     global _loop_running
     with _loop_lock:
         _loop_running = False
-
-
-def get_self_improvement_log() -> list:
-    if os.path.exists(SELF_IMPROVE_LOG):
-        try:
-            with open(SELF_IMPROVE_LOG, "r") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return []

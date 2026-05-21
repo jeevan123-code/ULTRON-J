@@ -44,20 +44,31 @@ from typing import Generator, List, Tuple
 
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-INTELLIGENCE_MODEL = "llama-3.3-70b-versatile"
+INTELLIGENCE_MODEL      = "llama-3.3-70b-versatile"  # COMPLEX / deep reasoning
+INTELLIGENCE_MODEL_FAST = "llama-3.1-8b-instant"     # SIMPLE / MEDIUM — 3× higher rate limit
 
 # Output caps. JARVIS brevity is enforced at the prompt level, but these are
 # the hard backstop so a verbose model can't blow past it.
-INTELLIGENCE_MAX_TOKENS_SHORT = 350    # SIMPLE / MEDIUM / chat replies
+INTELLIGENCE_MAX_TOKENS_SHORT = 500    # SIMPLE / MEDIUM / chat replies
 INTELLIGENCE_MAX_TOKENS_LONG  = 1200   # COMPLEX path — when Jeevan needs depth
 
 # Shared persona + tool inventory injected into every chat-path system prompt.
 # Single source of truth — keep it next to the only function that uses it.
 _PERSONA_BLOCK = (
-    "You are Ultron-J, Jeevan's personal autonomous AI assistant. "
-    "Speak like JARVIS — direct, calm, and short. "
-    "Default to 1–2 sentences. Maximum 4 sentences unless Jeevan explicitly asks for detail. "
-    "No hedging, no apologies, no 'as an AI' phrases, no headers, no bullet lists in chat replies."
+    "You are Ultron-J, Jeevan's personal autonomous AI — a reasoning partner, not a chatbot. "
+    "Default to 1–2 sentences. Hard cap: 4 sentences unless Jeevan explicitly asks for more. "
+    "No hedging ('I think', 'perhaps', 'it seems'). No filler ('Of course!', 'Great question!'). "
+    "No 'as an AI' denials. No bullet lists or headers in chat. Direct, confident, done."
+)
+
+# Reasoning meta-instruction — injected FIRST in medium/complex prompts so the
+# model attends to it before any other content. Concreteness beats vague "think step by step".
+_COT_BLOCK = (
+    "REASONING PROTOCOL — follow this before every reply:\n"
+    "1. What is Jeevan ACTUALLY asking? (real intent, not surface words)\n"
+    "2. What from his profile + memory is directly relevant?\n"
+    "3. What does LIVE REALITY say that confirms or changes my answer?\n"
+    "4. Deliver the answer in 1–3 sentences. No re-stating the question."
 )
 
 _TOOLS_BLOCK = (
@@ -160,6 +171,7 @@ def _stream_with_intelligence_prompt(
     temperature: float = 0.7,
     max_tokens: int = INTELLIGENCE_MAX_TOKENS_SHORT,
     provider: str = "auto",
+    model: str = "",
 ) -> Generator:
     """
     Stream a response using the enriched intelligence system prompt.
@@ -208,6 +220,7 @@ def _stream_with_intelligence_prompt(
 
         # Streaming timeout: (connect, read-per-chunk). 25s per-chunk lets a
         # silent server be detected as stalled instead of hanging the UI.
+        _model = model or INTELLIGENCE_MODEL
         resp = requests.post(
             GROQ_URL,
             headers={
@@ -215,7 +228,7 @@ def _stream_with_intelligence_prompt(
                 "Content-Type": "application/json",
             },
             json={
-                "model": INTELLIGENCE_MODEL,
+                "model": _model,
                 "messages": messages,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
@@ -372,7 +385,7 @@ def think_and_stream(
         system_prompt = _build_simple_system_prompt(ws_simple, "")
         for _chunk in _stream_with_intelligence_prompt(
             system_prompt, history, question, temperature,
-            provider=provider,
+            provider=provider, model=INTELLIGENCE_MODEL_FAST,
         ):
             if isinstance(_chunk, str) and '"_full"' in _chunk:
                 try:
@@ -428,6 +441,16 @@ def think_and_stream(
                     block = (block + "\n\n" + facts_block) if block else facts_block
         except Exception:
             pass
+
+        # Personal facts — always injected regardless of query topic
+        try:
+            from personal_facts import get_facts_block, get_relevant_facts
+            _pf_block = get_facts_block()
+            if _pf_block:
+                block = (_pf_block + "\n\n" + block) if block else _pf_block
+        except Exception:
+            pass
+
         ctx["recall"] = block
 
     def _build_world_state():
@@ -522,7 +545,7 @@ def think_and_stream(
         system_prompt = _build_medium_system_prompt(world_state, jeevan_profile)
         yield from _stream_with_intelligence_prompt(
             system_prompt, history, question, temperature,
-            provider=provider,
+            provider=provider, model=INTELLIGENCE_MODEL_FAST,
         )
         return
 
@@ -537,7 +560,7 @@ def think_and_stream(
         yield from _stream_with_intelligence_prompt(
             system_prompt, history, question, temperature,
             max_tokens=INTELLIGENCE_MAX_TOKENS_LONG,
-            provider=provider,
+            provider=provider, model=INTELLIGENCE_MODEL,
         )
         return
 
@@ -617,26 +640,34 @@ def think_and_stream(
 # SYSTEM PROMPT BUILDERS
 # =============================================================================
 def _build_simple_system_prompt(world_state: str, jeevan_profile: str) -> str:
-    """System prompt for simple queries — persona + tools + rich context, direct answer."""
+    """System prompt for simple queries — persona + tools, answer directly."""
     parts = [_PERSONA_BLOCK, _TOOLS_BLOCK]
     if jeevan_profile:
         parts.append(jeevan_profile)
     if world_state:
-        parts.append(world_state)
+        parts.append(
+            "LIVE REALITY:\n" + world_state.strip() +
+            "\nUse this if relevant. Never contradict it."
+        )
     return "\n\n".join(parts)
 
 
 def _build_medium_system_prompt(world_state: str, jeevan_profile: str) -> str:
-    """System prompt for medium queries — persona + tools + CoT hint + rich context."""
-    parts = [_PERSONA_BLOCK, _TOOLS_BLOCK]
+    """System prompt for medium queries.
+    Order: CoT (top) → persona → profile → tools → world_state (bottom).
+    CoT first for attention; world_state last for recency bias — both bookend.
+    """
+    parts = [_COT_BLOCK, _PERSONA_BLOCK]
     if jeevan_profile:
         parts.append(jeevan_profile)
+    parts.append(_TOOLS_BLOCK)
     if world_state:
-        parts.append(world_state)
-    parts.append(
-        "APPROACH: Before answering, briefly think — what is Jeevan really asking? "
-        "What do I already know that's relevant? Then answer in 1–3 sentences."
-    )
+        parts.append(
+            "LIVE REALITY (anchor your answer here — this is what is true RIGHT NOW):\n"
+            + world_state.strip() +
+            "\nINSTRUCTION: If Jeevan's question touches anything above, use that data. "
+            "Never contradict it with guesses."
+        )
     return "\n\n".join(parts)
 
 
