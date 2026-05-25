@@ -39,3 +39,4 @@ workspace/
 task_graphs/
 .env
 *.env
+.venv/
