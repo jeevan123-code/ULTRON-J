@@ -1,0 +1,477 @@
+[
+  {
+    "timestamp": "2026-05-20T01:43:47.836827",
+    "action": "open_app",
+    "params": {
+      "app": "in brave"
+    },
+    "success": false,
+    "error": "[Errno 2] No such file or directory: 'in brave'"
+  },
+  {
+    "timestamp": "2026-05-20T01:44:25.421800",
+    "action": "open_app",
+    "params": {
+      "app": "the youtube in brave"
+    },
+    "success": false,
+    "error": "[Errno 2] No such file or directory: 'the youtube in brave'"
+  },
+  {
+    "timestamp": "2026-05-20T01:45:10.937806",
+    "action": "open_app",
+    "params": {
+      "app": "in brave browser"
+    },
+    "success": false,
+    "error": "[Errno 2] No such file or directory: 'in brave browser'"
+  },
+  {
+    "timestamp": "2026-05-20T20:52:05.412536",
+    "action": "screenshot",
+    "params": {
+      "region": "None"
+    },
+    "success": false,
+    "error": "To take screenshots, you must install Pillow version 9.2.0 or greater and gnome-screenshot by running `sudo apt install gnome-screenshot`"
+  },
+  {
+    "timestamp": "2026-05-20T21:32:55.356527",
+    "action": "screenshot",
+    "params": {
+      "region": "None"
+    },
+    "success": false,
+    "error": "To take screenshots, you must install Pillow version 9.2.0 or greater and gnome-screenshot by running `sudo apt install gnome-screenshot`"
+  },
+  {
+    "timestamp": "2026-05-20T21:35:23.226701",
+    "action": "open_app",
+    "params": {
+      "app": "when you"
+    },
+    "success": false,
+    "error": "[Errno 2] No such file or directory: 'when you'"
+  },
+  {
+    "timestamp": "2026-05-20T21:47:49.171269",
+    "action": "screenshot",
+    "params": {
+      "region": "None"
+    },
+    "success": false,
+    "error": "To take screenshots, you must install Pillow version 9.2.0 or greater and gnome-screenshot by running `sudo apt install gnome-screenshot`"
+  },
+  {
+    "timestamp": "2026-05-20T21:48:08.444146",
+    "action": "open_app",
+    "params": {
+      "app": "gedit"
+    },
+    "success": false,
+    "error": "[Errno 2] No such file or directory: 'gedit'"
+  },
+  {
+    "timestamp": "2026-05-20T21:48:08.464056",
+    "action": "open_url",
+    "params": {
+      "url": "https://google.com"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-20T21:48:09.780254",
+    "action": "screenshot",
+    "params": {
+      "region": "None"
+    },
+    "success": false,
+    "error": "To take screenshots, you must install Pillow version 9.2.0 or greater and gnome-screenshot by running `sudo apt install gnome-screenshot`"
+  },
+  {
+    "timestamp": "2026-05-20T22:31:42.641454",
+    "action": "screenshot",
+    "params": {
+      "region": "None"
+    },
+    "success": false,
+    "error": "To take screenshots, you must install Pillow version 9.2.0 or greater and gnome-screenshot by running `sudo apt install gnome-screenshot`"
+  },
+  {
+    "timestamp": "2026-05-20T22:36:15.058326",
+    "action": "screenshot",
+    "params": {
+      "region": "None"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-20T22:36:47.580660",
+    "action": "screenshot",
+    "params": {
+      "region": "None"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-20T22:37:00.977892",
+    "action": "screenshot",
+    "params": {
+      "region": "None"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-20T22:37:16.035145",
+    "action": "screenshot",
+    "params": {
+      "region": "None"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T14:23:38.652387",
+    "action": "screenshot",
+    "params": {
+      "region": "None"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T14:23:44.464877",
+    "action": "open_app",
+    "params": {
+      "app": "the terminal"
+    },
+    "success": false,
+    "error": "[Errno 2] No such file or directory: 'the terminal'"
+  },
+  {
+    "timestamp": "2026-05-21T14:27:49.827568",
+    "action": "screenshot",
+    "params": {
+      "region": "None"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T14:27:49.840104",
+    "action": "open_app",
+    "params": {
+      "app": "the terminal"
+    },
+    "success": false,
+    "error": "[Errno 2] No such file or directory: 'the terminal'"
+  },
+  {
+    "timestamp": "2026-05-21T14:29:29.147180",
+    "action": "screenshot",
+    "params": {
+      "region": "None"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T14:29:33.241089",
+    "action": "open_app",
+    "params": {
+      "app": "the terminal"
+    },
+    "success": false,
+    "error": "[Errno 2] No such file or directory: 'the terminal'"
+  },
+  {
+    "timestamp": "2026-05-21T14:56:37.807941",
+    "action": "open_app",
+    "params": {
+      "app": "the terminal"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T15:36:14.969769",
+    "action": "hotkey",
+    "params": {
+      "keys": "['alt', 'f4']"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T15:36:15.665667",
+    "action": "open_app",
+    "params": {
+      "app": "file manager"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T15:36:15.714764",
+    "action": "open_app",
+    "params": {
+      "app": "vs code"
+    },
+    "success": false,
+    "error": "Couldn't open 'vs code': none of ['code'] found on PATH"
+  },
+  {
+    "timestamp": "2026-05-21T16:17:41.408177",
+    "action": "open_app",
+    "params": {
+      "app": "brave"
+    },
+    "success": false,
+    "error": "Couldn't open 'brave': none of ['brave'] found on PATH"
+  },
+  {
+    "timestamp": "2026-05-21T16:17:41.653897",
+    "action": "open_url",
+    "params": {
+      "url": "https://youtube.com",
+      "browser": "brave"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T16:19:40.927117",
+    "action": "open_app",
+    "params": {
+      "app": "brave"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T16:19:40.931482",
+    "action": "open_url",
+    "params": {
+      "url": "https://youtube.com",
+      "browser": "brave"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T16:19:58.995250",
+    "action": "screenshot",
+    "params": {
+      "region": "None"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T16:23:23.941032",
+    "action": "open_app",
+    "params": {
+      "app": "brave"
+    },
+    "success": false,
+    "error": "Couldn't open 'brave': none of ['brave'] found on PATH"
+  },
+  {
+    "timestamp": "2026-05-21T16:26:37.791873",
+    "action": "open_app",
+    "params": {
+      "app": "brave"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T16:27:45.779447",
+    "action": "screenshot",
+    "params": {
+      "region": "None",
+      "save_path": ""
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T16:28:00.999320",
+    "action": "screenshot",
+    "params": {
+      "region": "None",
+      "save_path": "~/documents"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T16:28:01.061820",
+    "action": "open_url",
+    "params": {
+      "url": "https://www.google.com/search?q=best%20universities%20in%20germany"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T16:29:55.177398",
+    "action": "open_url",
+    "params": {
+      "url": "https://www.google.com/search?q=best%20universities%20in%20germany",
+      "browser": "brave"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T17:39:37.494986",
+    "action": "open_url",
+    "params": {
+      "url": "https://www.google.com/search?q=cockroach%20jantha%20party",
+      "browser": "brave"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T17:47:40.365539",
+    "action": "open_app",
+    "params": {
+      "app": "brave"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T17:47:41.956796",
+    "action": "screenshot",
+    "params": {
+      "region": "None",
+      "save_path": ""
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T17:47:45.432845",
+    "action": "screenshot",
+    "params": {
+      "region": "None",
+      "save_path": "~/pictures"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T17:48:32.895592",
+    "action": "screenshot",
+    "params": {
+      "region": "None",
+      "save_path": ""
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-21T18:49:15.020496",
+    "action": "screenshot",
+    "params": {
+      "region": "None",
+      "save_path": "~/desktop"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-22T00:13:35.350929",
+    "action": "open_url",
+    "params": {
+      "url": "https://www.google.com/search?q=best%20universities%20in%20germany",
+      "browser": "brave"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-22T00:14:02.328859",
+    "action": "open_app",
+    "params": {
+      "app": "brave and play pink lips song"
+    },
+    "success": false,
+    "error": "Couldn't open 'brave and play pink lips song': none of ['brave and play pink lips song'] found on PATH"
+  },
+  {
+    "timestamp": "2026-05-22T00:15:40.211955",
+    "action": "open_app",
+    "params": {
+      "app": "brave and play pink lips"
+    },
+    "success": false,
+    "error": "Couldn't open 'brave and play pink lips': none of ['brave and play pink lips'] found on PATH"
+  },
+  {
+    "timestamp": "2026-05-22T00:18:35.790404",
+    "action": "open_url",
+    "params": {
+      "url": "https://www.google.com/search?q=best%20universities%20in%20germany",
+      "browser": "brave"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-22T00:21:13.796696",
+    "action": "screenshot",
+    "params": {
+      "region": "None",
+      "save_path": "~/Desktop"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-22T00:22:15.370890",
+    "action": "open_app",
+    "params": {
+      "app": "brave"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-22T00:57:55.007420",
+    "action": "screenshot",
+    "params": {
+      "region": "None",
+      "save_path": ""
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-22T00:58:00.991611",
+    "action": "open_url",
+    "params": {
+      "url": "https://www.google.com/search?q=python%20tutorials",
+      "browser": "brave"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-22T01:25:58.028987",
+    "action": "open_url",
+    "params": {
+      "url": "https://www.google.com/search?q=python%20tutorials",
+      "browser": "brave"
+    },
+    "success": true,
+    "error": ""
+  }
+]

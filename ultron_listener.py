@@ -53,7 +53,6 @@ WAKE_WORDS          = [
     "ok ultron", "okay ultron", "hey ultron", "yo ultron",
     "hello ultron", "ultron", "hey ultra", "ok ultra",
     "ok altron", "ok all tron", "ultra", "altron",
-    "all tron", "ul tron", "old tron", "electron",
 ]
 
 # Bare "ok" / "okay" wake support — primary trigger Jeevan asked for.
@@ -123,12 +122,12 @@ CHANNELS            = 1
 CHUNK               = 1024
 RECORD_SECONDS_MAX  = 12
 SILENCE_THRESHOLD   = 700
-SILENCE_TIMEOUT     = 1.8
+SILENCE_TIMEOUT     = 2.8
 VAD_CHECK_INTERVAL  = 0.3
 PICOVOICE_KEY       = os.environ.get("PICOVOICE_ACCESS_KEY", "").strip() or None
 
 # Jarvis mode — first N seconds after startup: listen without wake word
-JARVIS_OPEN_EARS_SECONDS = 60
+JARVIS_OPEN_EARS_SECONDS = 12
 
 # Startup greeting (Jeevan's custom)
 STARTUP_GREETING = "Olla Jeevan, I am Ultron. How can I help you?"
@@ -638,7 +637,7 @@ def run_vad_listener():
         cal_energies.append(rms(d.tobytes()))
     ambient = sum(cal_energies) / max(len(cal_energies), 1)
     global SILENCE_THRESHOLD, _tts_playing
-    SILENCE_THRESHOLD = max(80, ambient * 3)
+    SILENCE_THRESHOLD = max(120, ambient * 5)
     log(f"Ambient noise: {ambient:.0f}  ->  threshold set to {SILENCE_THRESHOLD:.0f}", "OK")
 
     # Startup greeting
@@ -649,7 +648,7 @@ def run_vad_listener():
     wake_buffer        = []
     wake_buffer_max    = int(SAMPLE_RATE / CHUNK * 1.5)
     above_thresh_count = 0
-    ENERGY_TRIGGER     = 2
+    ENERGY_TRIGGER     = 7
     _debug_counter     = 0
 
     while _running:
