@@ -52,7 +52,8 @@ ULTRON_SERVER       = "http://localhost:5000"
 WAKE_WORDS          = [
     "ok ultron", "okay ultron", "hey ultron", "yo ultron",
     "hello ultron", "ultron", "hey ultra", "ok ultra",
-    "ok altron", "ok all tron", "ultra", "altron",
+    "ok altron", "ok all tron",
+    # "ultra" and "altron" removed — Whisper hallucinates these from background audio
 ]
 
 # Bare "ok" / "okay" wake support — primary trigger Jeevan asked for.
@@ -121,13 +122,14 @@ SAMPLE_RATE         = 16000
 CHANNELS            = 1
 CHUNK               = 1024
 RECORD_SECONDS_MAX  = 12
-SILENCE_THRESHOLD   = 700
+SILENCE_THRESHOLD   = 900     # raised; auto-calibrated at startup anyway
 SILENCE_TIMEOUT     = 2.8
 VAD_CHECK_INTERVAL  = 0.3
 PICOVOICE_KEY       = os.environ.get("PICOVOICE_ACCESS_KEY", "").strip() or None
 
 # Jarvis mode — first N seconds after startup: listen without wake word
-JARVIS_OPEN_EARS_SECONDS = 12
+# Reduced from 12 to 6; also uses a stricter energy threshold (×3 instead of ×1.5)
+JARVIS_OPEN_EARS_SECONDS = 6
 
 # Startup greeting (Jeevan's custom)
 STARTUP_GREETING = "Olla Jeevan, I am Ultron. How can I help you?"
@@ -245,9 +247,27 @@ def transcribe_locally(audio_path: str) -> str:
             return ""
     try:
         segments, _ = _whisper_model.transcribe(
-            audio_path, beam_size=1, language="en"
+            audio_path,
+            beam_size=1,
+            language="en",
+            vad_filter=True,           # filters out non-speech (fixes Whisper hallucination on noise/silence)
+            vad_parameters={
+                "min_silence_duration_ms": 500,
+                "speech_pad_ms": 200,
+                "threshold": 0.5,      # Silero VAD confidence — must be 50%+ speech to process
+            },
+            no_speech_threshold=0.6,   # skip segments where Whisper itself thinks it's not speech
         )
-        return " ".join(s.text for s in segments).lower().strip()
+        text = " ".join(s.text for s in segments).lower().strip()
+        # Reject common Whisper hallucinations on silence/noise
+        _HALLUCINATED_PHRASES = {
+            "you", "thank you", "thanks", "thank you for watching",
+            "bye", "goodbye", ".", " ", "", "uh", "um", "hmm",
+            "the", "a", "i", "okay", "oh", "ah",
+        }
+        if text in _HALLUCINATED_PHRASES:
+            return ""
+        return text
     except Exception:
         return ""
 
@@ -462,7 +482,7 @@ def record_until_silence(pa, stream) -> list:
     silent_chunks   = 0
     silence_limit   = int(SILENCE_TIMEOUT * SAMPLE_RATE / CHUNK)
     max_chunks      = int(RECORD_SECONDS_MAX * SAMPLE_RATE / CHUNK)
-    min_chunks      = int(0.4 * SAMPLE_RATE / CHUNK)  # at least 0.4s
+    min_chunks      = int(0.8 * SAMPLE_RATE / CHUNK)  # at least 0.8s (was 0.4s — a noise burst could pass)
     speech_detected = False
 
     log("Recording... (speak now)", "LISTEN")
@@ -542,11 +562,11 @@ def run_picovoice_listener():
                     continue
                 # Check if we are in open-ears window (first query after startup)
                 if _in_open_ears_window() and not _is_processing:
-                    # Check for ANY speech (not just wake word) during first 12s
+                    # Check for ANY speech (not just wake word) during first 6s
                     data_arr, _ = sd_stream.read(CHUNK)
                     data = data_arr.tobytes()
                     energy = rms(data)
-                    if energy > SILENCE_THRESHOLD * 1.5:
+                    if energy > SILENCE_THRESHOLD * 2.5:  # stricter: was 1.5x (AC/fan could trigger)
                         log("OPEN EARS — capturing first command", "WAKE")
                         frames = [data] + record_until_silence(None, sd_stream)
                         if len(frames) >= 5:
@@ -637,7 +657,8 @@ def run_vad_listener():
         cal_energies.append(rms(d.tobytes()))
     ambient = sum(cal_energies) / max(len(cal_energies), 1)
     global SILENCE_THRESHOLD, _tts_playing
-    SILENCE_THRESHOLD = max(120, ambient * 5)
+    # 7x ambient + floor of 300 — filters AC/fan/TV; was 5x/120 which is too sensitive
+    SILENCE_THRESHOLD = max(300, ambient * 7)
     log(f"Ambient noise: {ambient:.0f}  ->  threshold set to {SILENCE_THRESHOLD:.0f}", "OK")
 
     # Startup greeting
@@ -646,9 +667,9 @@ def run_vad_listener():
     log("=" * 52, "INFO")
 
     wake_buffer        = []
-    wake_buffer_max    = int(SAMPLE_RATE / CHUNK * 1.5)
+    wake_buffer_max    = int(SAMPLE_RATE / CHUNK * 2.0)   # 2 seconds of rolling context (was 1.5)
     above_thresh_count = 0
-    ENERGY_TRIGGER     = 7
+    ENERGY_TRIGGER     = 15   # ~0.96s of sustained speech needed (was 7 = 0.45s — a cough could trigger it)
     _debug_counter     = 0
 
     while _running:
@@ -679,7 +700,7 @@ def run_vad_listener():
                 above_thresh_count = 0
 
                 # ── Open ears window: no wake word needed ─────────────────────
-                if _in_open_ears_window():
+                if _in_open_ears_window() and energy > SILENCE_THRESHOLD * 2.5:
                     log("OPEN EARS — capturing first command", "WAKE")
                     frames = list(wake_buffer) + record_until_silence(None, stream)
                     wake_buffer = []
@@ -705,6 +726,10 @@ def run_vad_listener():
 
                 if spoken:
                     log(f"[heard] \"{spoken}\"", "INFO")
+                # Reject transcriptions shorter than 2 words — single words are almost always noise artefacts
+                if len(spoken.split()) < 2:
+                    wake_buffer = []
+                    continue
                 has_wake = matches_wake(spoken)
 
                 if has_wake:

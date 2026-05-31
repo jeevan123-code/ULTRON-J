@@ -72,6 +72,20 @@ body{background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'SF
 #error-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#1a1a1a;border:1px solid rgba(239,68,68,0.4);color:#f87171;padding:10px 20px;border-radius:10px;font-size:13px;transition:transform 0.3s;z-index:100;white-space:nowrap}
 #error-toast.show{transform:translateX(-50%) translateY(0)}
 
+/* Live mic-energy meter */
+#energy-meter{width:120px;height:4px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;margin-top:-10px}
+#energy-bar-fill{height:100%;width:0%;background:linear-gradient(90deg,#3b82f6,#10b981,#f59e0b,#ef4444);transition:width 60ms linear}
+
+/* Debug overlay — shows live wake/mic state so we can actually see what's
+   working vs failing in production. Toggle with the 🐛 button. */
+#debug-overlay{position:fixed;bottom:10px;right:10px;background:rgba(0,0,0,0.85);border:1px solid rgba(59,130,246,0.4);color:#9ca3af;font-family:ui-monospace,SFMono-Regular,monospace;font-size:11px;line-height:1.5;padding:8px 10px;border-radius:6px;z-index:200;max-width:280px;display:none}
+#debug-overlay.show{display:block}
+#debug-overlay .k{color:#3b82f6;display:inline-block;width:90px}
+#debug-overlay .v{color:#fff}
+#debug-overlay .warn{color:#f59e0b}
+#debug-overlay .err{color:#ef4444}
+#debug-overlay .ok{color:#10b981}
+
 /* Scrollable transcript */
 #transcript-scroll{width:100%;max-width:640px;max-height:calc(100vh - 320px);overflow-y:auto;display:flex;flex-direction:column;gap:10px}
 #transcript-scroll::-webkit-scrollbar{width:3px}
@@ -89,7 +103,24 @@ body{background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'SF
     <a href="/" class="nav-btn">Chat</a>
     <a href="/voice" class="nav-btn active">Voice</a>
   </div>
-  <div id="provider-dot"><div class="pdot"></div><span id="provider-name">groq</span></div>
+  <div style="display:flex;align-items:center;gap:6px">
+    <button id="mic-btn" class="nav-btn" onclick="toggleMic()" title="Mic on/off — disable all voice input" style="cursor:pointer">
+      <span id="mic-icon">🎙️</span>
+    </button>
+    <button id="mute-btn" class="nav-btn" onclick="toggleMute()" title="Mute / unmute Ultron's voice (text only)" style="cursor:pointer">
+      <span id="mute-icon">🔊</span>
+    </button>
+    <button id="wake-btn" class="nav-btn" onclick="toggleWake()" title="Wake-word: say 'Ultron' from any tab" style="cursor:pointer">
+      <span id="wake-icon">🌙</span><span id="wake-label" style="margin-left:6px">wake</span>
+    </button>
+    <button id="manual-btn" class="nav-btn" onclick="toggleManualStop()" title="Manual stop: recording only ends when you tap the orb" style="cursor:pointer">
+      <span id="manual-icon">⏱️</span>
+    </button>
+    <button id="debug-btn" class="nav-btn" onclick="toggleDebugOverlay()" title="Show live mic/wake diagnostics" style="cursor:pointer">
+      <span>🐛</span>
+    </button>
+    <div id="provider-dot"><div class="pdot"></div><span id="provider-name">groq</span></div>
+  </div>
 </div>
 
 <div id="main">
@@ -106,100 +137,965 @@ body{background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'SF
   <div id="status-label">Tap to speak</div>
   <div id="hint">Tap once to record — tap again to send</div>
 
+  <!-- Live mic-energy bar — visible proof that the mic + VAD are alive.
+       Fills proportionally to current mic dBFS. If this never moves while
+       you speak, the mic stream isn't reaching the page. -->
+  <div id="energy-meter" title="Live mic energy">
+    <div id="energy-bar-fill"></div>
+  </div>
+
   <div id="transcript-scroll"></div>
 
 </div>
 
 <div id="error-toast"></div>
 
+<div id="debug-overlay">
+  <div><span class="k">build</span><span class="v" id="dbg-build">—</span></div>
+  <div><span class="k">visibility</span><span class="v" id="dbg-vis">—</span></div>
+  <div><span class="k">mic</span><span class="v" id="dbg-mic">—</span></div>
+  <div><span class="k">worklet</span><span class="v" id="dbg-worklet">—</span></div>
+  <div><span class="k">keepalive</span><span class="v" id="dbg-keepalive">—</span></div>
+  <div><span class="k">ambient</span><span class="v" id="dbg-ambient">—</span></div>
+  <div><span class="k">energy</span><span class="v" id="dbg-energy">—</span></div>
+  <div><span class="k">wake checks</span><span class="v" id="dbg-checks">0</span></div>
+  <div><span class="k">last wake</span><span class="v" id="dbg-last">—</span></div>
+  <div><span class="k">last text</span><span class="v" id="dbg-text">—</span></div>
+</div>
+
 <script>
-const orb = document.getElementById('orb-wrap');
-const statusLabel = document.getElementById('status-label');
+// Build marker so we can verify the browser loaded the latest JS.
+// If this number doesn't match what's printed in the DevTools console,
+// you're seeing a cached page — hard-refresh (Ctrl+Shift+R).
+const ULTRON_VOICE_BUILD = '2026-05-30-v5-patient-recording';
+console.log('[ultron] voice.html build:', ULTRON_VOICE_BUILD);
+
+// =========================================================================
+// Voice page — rearchitected for reliable barge-in, no premature cutoff,
+// and graceful background-tab handling.
+//
+// Key design choices:
+//  - ONE persistent microphone stream + AudioContext, opened once and shared
+//    by recording (MediaRecorder), recording-VAD (silence detection) and
+//    barge-in (energy detection while Ultron speaks). This eliminates the
+//    start/stop races that caused barge-in to silently fail.
+//  - All energy thresholds are CALIBRATED against ambient noise — no
+//    hardcoded -38 dBFS that breaks on different speaker volumes.
+//  - The SR-based "stop phrase" listener was removed: it can't hear over
+//    Ultron's own voice (Chrome SR has no echo cancellation). Energy VAD
+//    handles all barge-in; a transcript filter discards the trailing "stop"
+//    so Ultron doesn't reply to it.
+//  - Manual-stop toggle: if VAD still cuts you off (Hinglish thinking
+//    pauses, mid-sentence breaths), click the ⏱️ button — recording then
+//    only ends when you tap the orb.
+//  - Background-tab survival: silent-audio keepalive + visibilitychange
+//    handler that resumes the AudioContext and re-arms wake recognition.
+//    NOTE: Chrome suspends SpeechRecognition in hidden tabs — this is a
+//    browser-level constraint we can't fully work around without a Chrome
+//    extension or a local wake-word model (Picovoice).
+// =========================================================================
+
+const orb              = document.getElementById('orb-wrap');
+const statusLabel      = document.getElementById('status-label');
 const transcriptScroll = document.getElementById('transcript-scroll');
-const errorToast = document.getElementById('error-toast');
+const errorToast       = document.getElementById('error-toast');
 
 let mediaRecorder = null;
-let audioChunks = [];
-let stream = null;
-let state = 'idle';
-let currentAudio = null;
+let audioChunks   = [];
+let state         = 'idle';
+let currentAudio  = null;
 
+// Recording-VAD bookkeeping
+let _silenceStart = null;
+let _recordStart  = null;
+let _voicedMs     = 0;
+let _lastVadTick  = null;
+
+// Audio playback queue + barge-in
+let _audioQueue       = [];
+let _audioPlaying     = false;
+let _currentBubble    = null;
+let _stopped          = false;
+let _streamController = null;
+
+// Preferences (persisted to localStorage)
+let _muted       = localStorage.getItem('ultron_muted')      === '1';
+let _micOff      = localStorage.getItem('ultron_micoff')     === '1';
+let _wakeEnabled = localStorage.getItem('ultron_wake')       === '1';
+let _manualStop  = localStorage.getItem('ultron_manualstop') === '1';
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+// ─── Calibration constants (offsets above ambient, not absolute thresholds)
+const VAD_SILENCE_MS         = 6000;   // auto-stop after 6s of true silence
+const VAD_MIN_SPEECH_MS      = 800;
+const VAD_MIN_VOICED_MS      = 250;
+const AMBIENT_INIT_DB        = -55;    // overwritten by calibration
+const VOICE_OVER_AMBIENT_DB  = 12;     // user voice = ambient + 12 dB
+const SILENCE_OVER_AMBIENT_DB= 5;      // silence threshold = ambient + 5 dB
+const BARGE_OVER_AMBIENT_DB  = 14;     // barge-in fires above ambient + 14 dB
+const BARGE_TRIGGER_MS       = 280;    // sustained for 280 ms = real speech
+
+// =========================================================================
+// Persistent microphone — single getUserMedia for the page lifetime.
+// =========================================================================
+const _mic = {
+  stream: null, ctx: null, source: null, analyser: null, buf: null,
+  ambient: AMBIENT_INIT_DB, ready: false,
+};
+
+async function _micEnsure() {
+  if (_mic.ready) return true;
+  if (_micOff)    return false;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showError('Browser does not support microphone access');
+    return false;
+  }
+  try {
+    _mic.stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+    });
+  } catch (e) {
+    showError('Mic access denied — allow microphone in browser settings');
+    return false;
+  }
+  _mic.ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if (_mic.ctx.state === 'suspended') {
+    try { await _mic.ctx.resume(); } catch (e) {}
+  }
+  _mic.source   = _mic.ctx.createMediaStreamSource(_mic.stream);
+  _mic.analyser = _mic.ctx.createAnalyser();
+  _mic.analyser.fftSize = 512;
+  _mic.source.connect(_mic.analyser);
+  _mic.buf = new Float32Array(_mic.analyser.fftSize);
+  _mic.ready = true;
+  _ensureKeepalive();           // needs _mic.ctx
+  _calibrateAmbient(1200);
+  _startMonitor();
+  _startWorkletWatchdog();
+  return true;
+}
+
+function _micRelease() {
+  _stopMonitor();
+  if (_watchdogTimer) { clearInterval(_watchdogTimer); _watchdogTimer = null; }
+  if (_keepaliveNode) { try { _keepaliveNode.stop(); } catch (e) {} _keepaliveNode = null; _keepaliveGain = null; }
+  _workletNode = null;
+  if (_mic.ctx)    { try { _mic.ctx.close(); } catch (e) {} }
+  if (_mic.stream) { try { _mic.stream.getTracks().forEach(t => t.stop()); } catch (e) {} }
+  _mic.stream = _mic.ctx = _mic.source = _mic.analyser = _mic.buf = null;
+  _mic.ready = false;
+}
+
+function _micEnergyDb() {
+  if (!_mic.ready) return -100;
+  _mic.analyser.getFloatTimeDomainData(_mic.buf);
+  let sum = 0;
+  for (let i = 0; i < _mic.buf.length; i++) sum += _mic.buf[i] * _mic.buf[i];
+  const rms = Math.sqrt(sum / _mic.buf.length);
+  return rms > 0 ? 20 * Math.log10(rms) : -100;
+}
+
+// Take the floor energy reading over `ms` and treat that as ambient.
+async function _calibrateAmbient(ms) {
+  if (!_mic.ready) return;
+  const start = Date.now();
+  let min = +Infinity;
+  while (Date.now() - start < ms) {
+    const db = _micEnergyDb();
+    if (db < min && db > -95) min = db;
+    await new Promise(r => setTimeout(r, 40));
+  }
+  if (min !== +Infinity && isFinite(min)) {
+    _mic.ambient = min;
+    console.log('[mic] ambient floor =', _mic.ambient.toFixed(1), 'dBFS');
+  }
+}
+
+// =========================================================================
+// Unified monitor loop — runs the entire time mic is up. Routes the live
+// energy reading based on state:
+//   speaking  → barge-in detection (sustained voice → interrupt)
+//   recording → silence detection (auto-stop after VAD_SILENCE_MS)
+//   idle + hidden tab + wake on → BACKGROUND wake-word check
+//   else      → just update the energy bar
+//
+// AudioWorklet path: the worklet runs in the audio thread which is NOT
+// throttled in background tabs (unlike setInterval). So even when Brave is
+// minimised, energy readings keep arriving and background-wake detection
+// keeps working — bypassing Chrome's SpeechRecognition background suspend.
+// =========================================================================
+let _monitorTimer  = null;
+let _bargeVoicedMs = 0;
+let _bgVoicedMs    = 0;
+let _bgRecording   = false;
+let _workletNode   = null;
+
+function _startMonitor() {
+  if (_monitorTimer) return;
+  _silenceStart  = null;
+  _voicedMs      = 0;
+  _bargeVoicedMs = 0;
+  _bgVoicedMs    = 0;
+  _lastVadTick   = Date.now();
+  _monitorTimer  = setInterval(_monitorTick, 50);
+  _ensureAudioWorklet();
+}
+function _stopMonitor() {
+  if (_monitorTimer) { clearInterval(_monitorTimer); _monitorTimer = null; }
+}
+
+// Inline AudioWorklet that posts energy readings from the audio thread.
+// Not throttled in hidden tabs → background wake-word detection works.
+const _WORKLET_SRC = `
+class VadProcessor extends AudioWorkletProcessor {
+  constructor() { super(); this._sum = 0; this._n = 0; }
+  process(inputs) {
+    const input = inputs[0];
+    if (!input || !input.length) return true;
+    const ch = input[0];
+    if (!ch || !ch.length) return true;
+    for (let i = 0; i < ch.length; i++) this._sum += ch[i] * ch[i];
+    this._n += ch.length;
+    if (this._n >= sampleRate / 20) {   // ~50 ms
+      const rms = Math.sqrt(this._sum / this._n);
+      const db = rms > 0 ? 20 * Math.log10(rms) : -100;
+      this.port.postMessage(db);
+      this._sum = 0; this._n = 0;
+    }
+    return true;
+  }
+}
+registerProcessor('vad-processor', VadProcessor);
+`;
+
+async function _ensureAudioWorklet() {
+  if (_workletNode || !_mic.ready) return;
+  if (!_mic.ctx.audioWorklet) {
+    console.warn('[mic] AudioWorklet not supported — background wake disabled');
+    return;
+  }
+  try {
+    const blob = new Blob([_WORKLET_SRC], {type: 'application/javascript'});
+    const url  = URL.createObjectURL(blob);
+    await _mic.ctx.audioWorklet.addModule(url);
+    URL.revokeObjectURL(url);
+    _workletNode = new AudioWorkletNode(_mic.ctx, 'vad-processor');
+    _mic.source.connect(_workletNode);
+    _workletNode.port.onmessage = (e) => _onWorkletEnergy(e.data);
+    console.log('[mic] AudioWorklet installed — background wake-word active');
+  } catch (e) {
+    console.warn('[mic] AudioWorklet setup failed:', e);
+  }
+}
+
+// Audio-thread callback. Drives ALL wake detection — foreground AND
+// background. We don't use the browser's SpeechRecognition for wake because
+// it has a 100–300 ms gap between recognition cycles where wake words get
+// missed (the "going off and on" symptom). The AudioWorklet has no such
+// gap — it's a continuous stream.
+let _lastWorkletMs = 0;
+
+function _onWorkletEnergy(db) {
+  _lastWorkletMs = Date.now();
+  _updateEnergyBar(db);
+  if (state !== 'idle' || !_wakeEnabled || _micOff || _bgRecording) return;
+  const dt = 50;   // worklet fires ~20 Hz
+  const voiceDb = _mic.ambient + (VOICE_OVER_AMBIENT_DB - 2);
+  if (db >= voiceDb) {
+    _bgVoicedMs += dt;
+    if (_bgVoicedMs >= 350) {
+      _bgVoicedMs = 0;
+      _bgWakeCheck();
+    }
+  } else {
+    _bgVoicedMs = Math.max(0, _bgVoicedMs - dt * 0.6);
+  }
+}
+
+// Worklet health watchdog. If the audio thread stops posting for >3 s
+// (usually because Chrome suspended the AudioContext on tab hide despite
+// the keepalive, or the mic track ended), force a recovery cycle:
+// resume the AudioContext, restart the keepalive, re-install the worklet.
+let _watchdogTimer = null;
+function _startWorkletWatchdog() {
+  if (_watchdogTimer) return;
+  _lastWorkletMs = Date.now();
+  _watchdogTimer = setInterval(async () => {
+    if (!_mic.ready || !_workletNode) return;
+    const silentFor = Date.now() - _lastWorkletMs;
+    if (silentFor < 3000) return;
+    // The worklet went quiet — try to revive it.
+    console.warn('[mic] worklet silent for', silentFor, 'ms — recovering');
+    try {
+      if (_mic.ctx && _mic.ctx.state !== 'running') {
+        await _mic.ctx.resume();
+      }
+      // If the mic track itself ended (OS reclaimed the device, etc.),
+      // we need a fresh stream — fall back to a full mic reset.
+      const track = _mic.stream && _mic.stream.getAudioTracks && _mic.stream.getAudioTracks()[0];
+      if (!track || track.readyState !== 'live') {
+        console.warn('[mic] track dead — full reset');
+        _micRelease();
+        if (!_micOff) _micEnsure();
+        return;
+      }
+      // Otherwise just re-attach the worklet.
+      try { _workletNode.disconnect(); } catch (e) {}
+      _workletNode = null;
+      await _ensureAudioWorklet();
+    } catch (e) {
+      console.warn('[mic] recovery failed:', e);
+    }
+    _lastWorkletMs = Date.now();
+  }, 2000);
+}
+
+// Wake-word check (works in foreground AND background — same code path):
+// record from the wake trigger, send to /api/voice/transcribe, and if the
+// transcript contains a wake word, replay the same audio through the full
+// stream_chat pipeline.
+//
+// Recording length is silence-aware — we stop after 3.5 s of silence or
+// 14 s max. Was 1.5s / 7s but that cut off natural thinking pauses
+// ("Ultron pause the video... [thinks 2s]... which is playing on YouTube"
+// became "Ultron pause the radio which is playing"). Whisper handles
+// 14-second clips fine and the longer silence window lets users complete
+// real sentences without rushing.
+async function _bgWakeCheck() {
+  if (_bgRecording || !_mic.ready || _micOff) return;
+  _bgRecording = true;
+  _dbgChecks++;
+  _dbgLastWake = Date.now();
+  console.log('[wake] check #' + _dbgChecks + ' (visibility=' + document.visibilityState + ')');
+
+  // Subtle visual: brief border flash on the orb so the user knows wake
+  // is being checked (otherwise silent failures feel like nothing's happening).
+  const wrap = document.getElementById('orb-wrap');
+  if (wrap) wrap.style.outline = '2px solid rgba(59,130,246,0.4)';
+
+  const chunks = [];
+  const mimeType =
+    MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
+    : MediaRecorder.isTypeSupported('audio/webm')           ? 'audio/webm'
+    : 'audio/ogg';
+  let mr;
+  try { mr = new MediaRecorder(_mic.stream, {mimeType}); }
+  catch (e) { _bgRecording = false; if (wrap) wrap.style.outline = ''; return; }
+  mr.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+  mr.start(100);
+
+  // Silence-aware stop: poll mic energy; when we see ≥3.5 s of quiet after
+  // an initial voiced window, stop. Hard cap at 14 s. Min 1.5 s before any
+  // silence-based stop is allowed (so a short cough or breath right after
+  // the trigger doesn't end the recording before the user actually starts
+  // speaking).
+  const WAKE_MIN_SPEECH_MS = 1500;
+  const WAKE_SILENCE_MS    = 3500;
+  const WAKE_MAX_MS        = 14000;
+  const start = Date.now();
+  let lastVoiceTime = Date.now();
+  const voiceThresh   = _mic.ambient + VOICE_OVER_AMBIENT_DB;
+  const silenceThresh = _mic.ambient + SILENCE_OVER_AMBIENT_DB;
+  await new Promise(resolve => {
+    const tick = setInterval(() => {
+      const db = _micEnergyDb();
+      if (db >= voiceThresh) lastVoiceTime = Date.now();
+      const elapsed   = Date.now() - start;
+      const silentFor = Date.now() - lastVoiceTime;
+      if (elapsed >= WAKE_MAX_MS ||
+          (elapsed > WAKE_MIN_SPEECH_MS && db < silenceThresh && silentFor > WAKE_SILENCE_MS)) {
+        clearInterval(tick);
+        resolve();
+      }
+    }, 80);
+  });
+
+  if (mr.state !== 'inactive') { try { mr.stop(); } catch (e) {} }
+  await new Promise(r => setTimeout(r, 150));
+  if (wrap) wrap.style.outline = '';
+
+  if (!chunks.length) { _bgRecording = false; return; }
+  const blob = new Blob(chunks, {type: mr.mimeType || 'audio/webm'});
+  const fd   = new FormData();
+  fd.append('audio', blob, 'wake.webm');
+
+  let text = '';
+  try {
+    const resp = await fetch('/api/voice/transcribe', {method: 'POST', body: fd});
+    if (resp.ok) {
+      const j = await resp.json();
+      text = (j.text || '').trim();
+    }
+  } catch (e) { console.warn('[wake] transcribe failed:', e); }
+  _dbgLastText = text || '(empty)';
+  console.log('[wake] heard:', JSON.stringify(text));
+
+  if (!text || !WAKE_PATTERNS.some(p => p.test(text))) {
+    _bgRecording = false;
+    return;
+  }
+  console.log('[wake] MATCH — processing as query');
+
+  // Match — feed the already-captured audio through the normal pipeline.
+  let query = text;
+  for (const p of WAKE_PATTERNS) query = query.replace(p, '').trim();
+  query = query.replace(/^[,.\-:;\s]+/, '').trim();
+
+  if (query.length >= 3) {
+    audioChunks   = chunks;
+    mediaRecorder = mr;
+    _voicedMs     = VAD_MIN_VOICED_MS + 1;
+    setState('processing');
+    try { await sendAudio(); }
+    finally { _bgRecording = false; }
+  } else {
+    _bgRecording = false;
+    startRecording();
+  }
+}
+
+function _monitorTick() {
+  if (!_mic.ready) return;
+  const db  = _micEnergyDb();
+  const now = Date.now();
+  const dt  = now - _lastVadTick;
+  _lastVadTick = now;
+  _updateEnergyBar(db);
+
+  if (state === 'speaking') {
+    const bargeDb = _mic.ambient + BARGE_OVER_AMBIENT_DB;
+    if (db >= bargeDb) {
+      _bargeVoicedMs += dt;
+      if (_bargeVoicedMs >= BARGE_TRIGGER_MS) {
+        _bargeVoicedMs = 0;
+        statusLabel.textContent = 'Stopped';
+        _bargeInAndStartRecording();
+      }
+    } else {
+      _bargeVoicedMs = Math.max(0, _bargeVoicedMs - dt * 0.6);
+    }
+    return;
+  }
+
+  if (state === 'recording') {
+    const voiceDb   = _mic.ambient + VOICE_OVER_AMBIENT_DB;
+    const silenceDb = _mic.ambient + SILENCE_OVER_AMBIENT_DB;
+    if (db >= voiceDb) _voicedMs += dt;
+    const elapsed = now - _recordStart;
+    if (_manualStop) {
+      // Never auto-stop in manual mode.
+      if (statusLabel.textContent !== 'Listening… (tap to send)') {
+        statusLabel.textContent = 'Listening… (tap to send)';
+      }
+      return;
+    }
+    if (db < silenceDb) {
+      if (_silenceStart === null) _silenceStart = now;
+      const silenceDur = now - _silenceStart;
+      if (elapsed >= VAD_MIN_SPEECH_MS && silenceDur >= VAD_SILENCE_MS) {
+        stopRecording();
+      } else if (elapsed >= VAD_MIN_SPEECH_MS) {
+        const pct = Math.min(100, Math.round(silenceDur / VAD_SILENCE_MS * 100));
+        statusLabel.textContent = pct < 60 ? 'Listening…' : 'Almost done…';
+      }
+    } else {
+      _silenceStart = null;
+      statusLabel.textContent = 'Listening…';
+    }
+  }
+}
+
+function _updateEnergyBar(db) {
+  const pct = Math.max(0, Math.min(100, ((db + 60) / 50) * 100));
+  const bar = document.getElementById('energy-bar-fill');
+  if (bar) bar.style.width = pct.toFixed(0) + '%';
+  _dbgEnergy = db;
+}
+
+// =========================================================================
+// Debug overlay — toggle with the 🐛 button. Lets the user (and me) SEE
+// what's actually happening in production: worklet activity, mic state,
+// wake checks fired, last transcript. No more guessing.
+// =========================================================================
+let _dbgVisible    = false;
+let _dbgEnergy     = -100;
+let _dbgChecks     = 0;
+let _dbgLastWake   = 0;
+let _dbgLastText   = '';
+let _dbgRefreshTmr = null;
+
+function toggleDebugOverlay() {
+  _dbgVisible = !_dbgVisible;
+  const el = document.getElementById('debug-overlay');
+  if (!el) return;
+  el.classList.toggle('show', _dbgVisible);
+  if (_dbgVisible) {
+    _refreshDebugOverlay();
+    _dbgRefreshTmr = setInterval(_refreshDebugOverlay, 400);
+  } else {
+    if (_dbgRefreshTmr) { clearInterval(_dbgRefreshTmr); _dbgRefreshTmr = null; }
+  }
+}
+
+function _refreshDebugOverlay() {
+  if (!_dbgVisible) return;
+  const set = (id, txt, cls) => {
+    const e = document.getElementById(id);
+    if (!e) return;
+    e.textContent = txt;
+    e.className = 'v' + (cls ? ' ' + cls : '');
+  };
+  set('dbg-build', ULTRON_VOICE_BUILD, 'ok');
+  set('dbg-vis', document.visibilityState, document.visibilityState === 'visible' ? 'ok' : 'warn');
+  set('dbg-mic', _mic.ready ? 'ready' : 'OFF', _mic.ready ? 'ok' : 'err');
+  const workletAge = _lastWorkletMs ? (Date.now() - _lastWorkletMs) : 99999;
+  set('dbg-worklet', _workletNode ? (workletAge < 200 ? 'live ('+workletAge+'ms)' : 'STALE ('+workletAge+'ms)') : 'not installed',
+      _workletNode && workletAge < 500 ? 'ok' : 'err');
+  set('dbg-keepalive', _keepaliveNode ? (_mic.ctx && _mic.ctx.state === 'running' ? 'on ('+_mic.ctx.state+')' : 'on but ctx '+(_mic.ctx&&_mic.ctx.state)) : 'OFF',
+      _keepaliveNode && _mic.ctx && _mic.ctx.state === 'running' ? 'ok' : 'err');
+  set('dbg-ambient', _mic.ambient.toFixed(1) + ' dBFS');
+  const eb = _dbgEnergy >= (_mic.ambient + VOICE_OVER_AMBIENT_DB) ? 'ok' : '';
+  set('dbg-energy', _dbgEnergy.toFixed(1) + ' dBFS (thr ' + (_mic.ambient + VOICE_OVER_AMBIENT_DB).toFixed(1) + ')', eb);
+  set('dbg-checks', String(_dbgChecks));
+  set('dbg-last', _dbgLastWake ? Math.round((Date.now() - _dbgLastWake)/1000) + 's ago' : '—');
+  set('dbg-text', _dbgLastText || '—');
+}
+
+// =========================================================================
+// Media-active keepalive — generates a real sub-audible tone from Web Audio
+// so the OS mixer actually sees audio coming from the tab. Chrome 110+
+// tightened its "media-playing" detection: a silent <audio> data URL at
+// volume 0.001 no longer counts as audible enough to defeat background
+// throttling. A genuine 20 Hz oscillator at gain 0.005 does count — and
+// 20 Hz is below most adult hearing (and well below laptop speakers'
+// reproducible range), so it's effectively inaudible.
+// =========================================================================
+let _keepaliveNode = null;
+let _keepaliveGain = null;
+function _ensureKeepalive() {
+  if (_keepaliveNode) return;
+  if (!_mic.ctx) return;   // need the shared AudioContext
+  try {
+    _keepaliveNode = _mic.ctx.createOscillator();
+    _keepaliveGain = _mic.ctx.createGain();
+    _keepaliveNode.frequency.value = 20;      // sub-audible
+    _keepaliveGain.gain.value      = 0.005;   // real audio for the OS mixer
+    _keepaliveNode.connect(_keepaliveGain);
+    _keepaliveGain.connect(_mic.ctx.destination);
+    _keepaliveNode.start();
+  } catch (e) { _keepaliveNode = null; }
+}
+
+// =========================================================================
+// State machine
+// =========================================================================
 function setState(s) {
   state = s;
   document.body.className = s === 'idle' ? '' : s;
   const icons = {idle:'🎙️', recording:'⏹️', processing:'⚙️', speaking:'🔊'};
-  const labels = {idle:'Tap to speak', recording:'Recording… tap to stop', processing:'Thinking…', speaking:'Speaking…'};
+  const labels = {
+    idle:       _wakeEnabled ? 'Say "Ultron" or tap' : 'Tap to speak',
+    recording:  _manualStop ? 'Listening… (tap to send)' : 'Listening…',
+    processing: 'Thinking…',
+    speaking:   'Speaking… (talk to interrupt)',
+  };
   document.getElementById('orb-icon').textContent = icons[s] || '🎙️';
   statusLabel.textContent = labels[s] || '';
+
+  if (s === 'idle' && _wakeEnabled && !_micOff) {
+    _startWakeRecognition();
+  } else {
+    _stopWakeRecognition();
+  }
 }
 
+// =========================================================================
+// Recording lifecycle
+// =========================================================================
 async function toggleRecording() {
-  if (state === 'processing' || state === 'speaking') return;
+  if (_micOff) {
+    showError('Mic is off — click the 🎙️ button to re-enable');
+    return;
+  }
+  if (state === 'speaking')  { _bargeInAndStartRecording(); return; }
+  if (state === 'processing') return;
   if (state === 'recording') { stopRecording(); return; }
   await startRecording();
 }
 
 async function startRecording() {
-  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  _ensureKeepalive();
+  if (currentAudio) { try { currentAudio.pause(); } catch (e) {} currentAudio = null; }
+  const ok = await _micEnsure();
+  if (!ok) return;
+  audioChunks = [];
+  const mimeType =
+    MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
+    : MediaRecorder.isTypeSupported('audio/webm')           ? 'audio/webm'
+    : 'audio/ogg';
   try {
-    stream = await navigator.mediaDevices.getUserMedia({audio:true});
-  } catch(e) {
-    showError('Mic access denied — allow microphone in browser settings');
+    mediaRecorder = new MediaRecorder(_mic.stream, {mimeType});
+  } catch (e) {
+    showError('Recording not supported: ' + e.message);
     return;
   }
-  audioChunks = [];
-  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
-    : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
-  mediaRecorder = new MediaRecorder(stream, {mimeType});
-  mediaRecorder.ondataavailable = e => { if(e.data.size > 0) audioChunks.push(e.data); };
+  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
   mediaRecorder.onstop = sendAudio;
   mediaRecorder.start(100);
+  _recordStart  = Date.now();
+  _silenceStart = null;
+  _voicedMs     = 0;
   setState('recording');
 }
 
 function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
-  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    try { mediaRecorder.stop(); } catch (e) {}
+  }
+  // Do NOT stop the mic stream — it's persistent.
   setState('processing');
 }
 
+// =========================================================================
+// Audio playback queue
+// =========================================================================
+function _base64ToBlob(b64, mime) {
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], {type: mime});
+}
+
+function _stopAudioPlayback() {
+  _stopped = true;
+  _audioQueue.forEach(url => { try { URL.revokeObjectURL(url); } catch (e) {} });
+  _audioQueue   = [];
+  _audioPlaying = false;
+  if (currentAudio) {
+    try { currentAudio.pause(); } catch (e) {}
+    try { currentAudio.src = ''; }  catch (e) {}
+    currentAudio = null;
+  }
+  if (_streamController) {
+    try { _streamController.abort(); } catch (e) {}
+    _streamController = null;
+  }
+}
+
+function _playNextChunk() {
+  if (_stopped || _audioQueue.length === 0) {
+    _audioPlaying = false;
+    if (state === 'speaking') setState('idle');
+    return;
+  }
+  _audioPlaying = true;
+  setState('speaking');
+  const url = _audioQueue.shift();
+  currentAudio = new Audio(url);
+  currentAudio.onended = () => { URL.revokeObjectURL(url); _playNextChunk(); };
+  currentAudio.onerror = () => { URL.revokeObjectURL(url); _playNextChunk(); };
+  currentAudio.play().catch(() => _playNextChunk());
+}
+
+function _enqueueAudio(b64) {
+  if (_muted || _stopped) return;
+  const blob = _base64ToBlob(b64, 'audio/mpeg');
+  _audioQueue.push(URL.createObjectURL(blob));
+  if (!_audioPlaying) _playNextChunk();
+}
+
+// Energy monitor invokes this when sustained voice is heard while Ultron
+// is speaking. Stops audio + opens a fresh recording.
+function _bargeInAndStartRecording() {
+  _stopAudioPlayback();
+  setState('idle');
+  setTimeout(() => {
+    if (!_micOff && state === 'idle') startRecording();
+  }, 350);
+}
+
+// =========================================================================
+// SSE stream consumer
+// =========================================================================
 async function sendAudio() {
   if (!audioChunks.length) { setState('idle'); return; }
-  const blob = new Blob(audioChunks, {type: mediaRecorder.mimeType || 'audio/webm'});
-  const fd = new FormData();
-  fd.append('audio', blob, 'recording.webm');
 
-  let resp;
-  try {
-    resp = await fetch('/api/voice/chat', {method:'POST', body:fd});
-  } catch(e) {
-    showError('Network error: ' + e.message);
+  if (_voicedMs < VAD_MIN_VOICED_MS) {
+    showError('No speech detected — try again, closer to the mic');
     setState('idle');
     return;
   }
 
+  const blob = new Blob(audioChunks, {type: mediaRecorder.mimeType || 'audio/webm'});
+  const fd = new FormData();
+  fd.append('audio', blob, 'recording.webm');
+
+  _stopped = false;
+  _streamController = new AbortController();
+
+  let resp;
+  try {
+    resp = await fetch('/api/voice/stream_chat', {
+      method: 'POST', body: fd, signal: _streamController.signal,
+    });
+  } catch (e) {
+    if (e.name === 'AbortError') { setState('idle'); return; }
+    showError('Network error: ' + e.message);
+    setState('idle');
+    return;
+  }
   if (!resp.ok) {
     showError('Server error ' + resp.status);
     setState('idle');
     return;
   }
 
-  const transcription = resp.headers.get('X-Transcription') || '';
-  const responseText  = resp.headers.get('X-Response-Text') || '';
-  const confidence    = resp.headers.get('X-Confidence') || '';
+  const reader  = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer    = '';
+  _currentBubble = null;
 
-  if (transcription) addBubble('user', transcription, confidence);
-  if (responseText)  addBubble('ultron', responseText);
+  while (true) {
+    let value, done;
+    try { ({value, done} = await reader.read()); }
+    catch (e) { break; }
+    if (done) break;
+    if (_stopped) { try { reader.cancel(); } catch (e) {} break; }
+    buffer += decoder.decode(value, {stream: true});
+    let nl;
+    while ((nl = buffer.indexOf('\n\n')) !== -1) {
+      const evt = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 2);
+      if (!evt.startsWith('data: ')) continue;
+      let data;
+      try { data = JSON.parse(evt.slice(6)); } catch (e) { continue; }
 
-  const audioBlob = await resp.blob();
-  const audioUrl  = URL.createObjectURL(audioBlob);
-  setState('speaking');
-  currentAudio = new Audio(audioUrl);
-  currentAudio.onended = () => { setState('idle'); URL.revokeObjectURL(audioUrl); };
-  currentAudio.onerror = () => { setState('idle'); };
-  currentAudio.play().catch(() => setState('idle'));
+      if (data.type === 'transcript') {
+        // Discard stop-only barge-in transcripts so Ultron doesn't reply.
+        if (_isStopOnlyTranscript(data.text)) {
+          _stopped = true;
+          if (_streamController) { try { _streamController.abort(); } catch (e) {} }
+          setState('idle');
+          break;
+        }
+        addBubble('user', data.text, data.confidence);
+      } else if (data.type === 'text_token') {
+        if (!_currentBubble) _currentBubble = addBubble('ultron', '');
+        _currentBubble.textEl.textContent += data.token;
+        transcriptScroll.scrollTop = transcriptScroll.scrollHeight;
+      } else if (data.type === 'sentence' || data.type === 'command') {
+        if (data.text && !_currentBubble) _currentBubble = addBubble('ultron', data.text);
+        if (data.audio_b64) _enqueueAudio(data.audio_b64);
+      } else if (data.type === 'text_only') {
+        if (!_currentBubble) _currentBubble = addBubble('ultron', '');
+        _currentBubble.textEl.textContent += (data.text || '') + ' ';
+      } else if (data.type === 'done') {
+        if (_currentBubble && data.full_text) _currentBubble.textEl.textContent = data.full_text;
+      } else if (data.type === 'error') {
+        showError(data.msg || 'Voice error');
+      }
+    }
+    if (_stopped) break;
+  }
+
+  if (!_audioPlaying && _audioQueue.length === 0) setState('idle');
 }
 
+// Strict full-utterance matches.
+const _STOP_ONLY_RE = /^(stop|ok|okay|ok\s*stop|okay\s*stop|stop\s*ultron|ultron\s*stop|shut\s*up|cancel|enough|be\s*quiet|quiet)[.!,?\s]*$/i;
+// Stop-word lead-ins for short utterances ("stop talking", "stop please",
+// "stop now", "stop all the time stop", etc.) — anything ≤5 words starting
+// with a stop-ish word is treated as an interrupt, not a query.
+const _STOP_LEAD_RE = /^(stop|ok|okay|shut\s*up|cancel|enough|quiet|be\s+quiet)\b/i;
+
+function _isStopOnlyTranscript(text) {
+  const t = (text || '').trim();
+  if (!t) return true;
+  if (_STOP_ONLY_RE.test(t)) return true;
+  const wordCount = t.split(/\s+/).length;
+  if (wordCount <= 5 && _STOP_LEAD_RE.test(t.toLowerCase())) return true;
+  return false;
+}
+
+// =========================================================================
+// Wake-word listener (browser SpeechRecognition — Chrome/Brave/Edge only,
+// and suspended by Chrome when the tab is hidden — a browser constraint).
+// =========================================================================
+// Wake patterns include common Whisper / STT mishears of "Ultron" — the
+// English-trained models often render it as "ultra", "altron", "ultram",
+// "alteran", "altran", "altruon" depending on the speaker's accent. We
+// accept any of these as the wake word; the false-positive cost is one
+// wasted 3s STT round-trip, which is fine.
+const WAKE_PATTERNS = [
+  /\bultron\b/i, /\bhey\s+ultron\b/i, /\bokay\s+ultron\b/i,
+  /\bhello\s+ultron\b/i, /\bhi\s+ultron\b/i,
+  /\b(ultra|altron|ultram|alteran|altran|altruon|altrun|ultran)\b/i,
+  /\bhey\s+(ultra|altron|ultram|alteran|altran)\b/i,
+];
+let _wakeRecognition = null;
+
+function _startWakeRecognition() {
+  // DISABLED: Chrome's SpeechRecognition has a 100–300 ms gap between
+  // continuous-recognition cycles where wake words get dropped. That gap
+  // was the cause of the "going off and on" wake behavior. We now do all
+  // wake detection through the AudioWorklet + Whisper STT path
+  // (_bgWakeCheck), which has no such gap and uses a more accurate model.
+  // This function is kept as a no-op so the rest of the state machine
+  // (setState routing, toggleWake, etc.) doesn't need to be rewritten.
+  return;
+  /* eslint-disable no-unreachable */
+  if (!SR || _micOff) return;
+  _stopWakeRecognition();
+  let recog;
+  try { recog = new SR(); } catch (e) { return; }
+  _wakeRecognition = recog;
+  recog.continuous     = true;
+  recog.interimResults = true;
+  recog.lang           = 'en-US';
+
+  recog.onresult = (event) => {
+    if (state !== 'idle' || _wakeRecognition !== recog) return;
+    const last = event.results[event.results.length - 1];
+    const text = (last[0].transcript || '').trim();
+    for (const pat of WAKE_PATTERNS) {
+      if (pat.test(text)) {
+        _stopWakeRecognition();
+        statusLabel.textContent = 'Heard you — listening…';
+        setTimeout(() => startRecording(), 250);
+        return;
+      }
+    }
+  };
+  recog.onerror = (e) => {
+    if (e.error === 'not-allowed') {
+      showError('Microphone access denied for wake-word');
+      _wakeEnabled = false;
+      localStorage.setItem('ultron_wake', '0');
+      _updateWakeUI();
+      return;
+    }
+    if (state === 'idle' && _wakeEnabled && _wakeRecognition === recog) {
+      setTimeout(() => _startWakeRecognition(), 800);
+    }
+  };
+  recog.onend = () => {
+    if (state === 'idle' && _wakeEnabled && _wakeRecognition === recog) {
+      setTimeout(() => {
+        if (state !== 'idle' || _wakeRecognition !== recog) return;
+        try { recog.start(); } catch (e) { _startWakeRecognition(); }
+      }, 200);
+    }
+  };
+
+  const tryStart = (attempt) => {
+    if (_wakeRecognition !== recog) return;
+    try { recog.start(); }
+    catch (e) {
+      if (attempt < 5) setTimeout(() => tryStart(attempt + 1), 250);
+    }
+  };
+  tryStart(0);
+}
+
+function _stopWakeRecognition() {
+  if (_wakeRecognition) {
+    try { _wakeRecognition.onend    = null; } catch (e) {}
+    try { _wakeRecognition.onresult = null; } catch (e) {}
+    try { _wakeRecognition.onerror  = null; } catch (e) {}
+    try { _wakeRecognition.stop(); }  catch (e) {}
+    try { _wakeRecognition.abort && _wakeRecognition.abort(); } catch (e) {}
+    _wakeRecognition = null;
+  }
+}
+
+// =========================================================================
+// UI toggles
+// =========================================================================
+function _updateMuteUI() {
+  const icon = document.getElementById('mute-icon');
+  const btn  = document.getElementById('mute-btn');
+  icon.textContent = _muted ? '🔇' : '🔊';
+  btn.title = _muted ? 'Ultron muted — text only. Click to unmute.'
+                     : "Click to mute Ultron's voice (text only).";
+  if (_muted) btn.classList.add('active'); else btn.classList.remove('active');
+}
+function toggleMute() {
+  _muted = !_muted;
+  localStorage.setItem('ultron_muted', _muted ? '1' : '0');
+  _updateMuteUI();
+  if (_muted) _stopAudioPlayback();
+}
+
+function _updateMicUI() {
+  const icon = document.getElementById('mic-icon');
+  const btn  = document.getElementById('mic-btn');
+  icon.textContent = _micOff ? '🚫' : '🎙️';
+  btn.title = _micOff ? 'Mic off — voice input disabled. Click to enable.'
+                      : 'Mic on. Click to disable all voice input.';
+  if (_micOff) btn.classList.add('active'); else btn.classList.remove('active');
+}
+function toggleMic() {
+  _micOff = !_micOff;
+  localStorage.setItem('ultron_micoff', _micOff ? '1' : '0');
+  _updateMicUI();
+  if (_micOff) {
+    if (state === 'recording') stopRecording();
+    _stopWakeRecognition();
+    _micRelease();
+  } else {
+    _micEnsure().then(ok => {
+      if (ok && _wakeEnabled && state === 'idle') _startWakeRecognition();
+    });
+  }
+}
+
+function _updateWakeUI() {
+  const btn  = document.getElementById('wake-btn');
+  const icon = document.getElementById('wake-icon');
+  if (_wakeEnabled) {
+    btn.classList.add('active');
+    icon.textContent = '👂';
+    btn.title = 'Wake-word: listening. Say "Ultron" or "Hey Ultron".';
+  } else {
+    btn.classList.remove('active');
+    icon.textContent = '🌙';
+    btn.title = 'Wake-word: off. Click to enable hands-free listening.';
+  }
+}
+function toggleWake() {
+  _wakeEnabled = !_wakeEnabled;
+  localStorage.setItem('ultron_wake', _wakeEnabled ? '1' : '0');
+  _updateWakeUI();
+  if (_wakeEnabled) {
+    _micEnsure().then(ok => { if (ok && state === 'idle') _startWakeRecognition(); });
+    _acquireWakeLock();
+  } else {
+    _stopWakeRecognition();
+    _releaseWakeLock();
+  }
+}
+
+function _updateManualStopUI() {
+  const btn = document.getElementById('manual-btn');
+  if (!btn) return;
+  if (_manualStop) {
+    btn.classList.add('active');
+    btn.title = 'Manual stop ON — recording only ends when you tap the orb. Click to enable auto-stop.';
+  } else {
+    btn.classList.remove('active');
+    btn.title = 'Auto-stop ON — recording ends after ~6s of silence. Click for manual-stop mode.';
+  }
+}
+function toggleManualStop() {
+  _manualStop = !_manualStop;
+  localStorage.setItem('ultron_manualstop', _manualStop ? '1' : '0');
+  _updateManualStopUI();
+}
+
+// =========================================================================
+// Bubbles + toasts
+// =========================================================================
 function addBubble(role, text, conf) {
   const row = document.createElement('div');
   row.className = 'tx-row ' + role;
@@ -219,6 +1115,7 @@ function addBubble(role, text, conf) {
   }
   transcriptScroll.appendChild(row);
   transcriptScroll.scrollTop = transcriptScroll.scrollHeight;
+  return {row, textEl: msg};
 }
 
 let toastTimer;
@@ -229,9 +1126,65 @@ function showError(msg) {
   toastTimer = setTimeout(() => errorToast.classList.remove('show'), 4000);
 }
 
-fetch('/status').then(r=>r.json()).then(d=>{
-  document.getElementById('provider-name').textContent = d.provider || 'groq';
-}).catch(()=>{});
+// =========================================================================
+// Wake Lock + visibility recovery
+// =========================================================================
+let _wakeLock = null;
+async function _acquireWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    _wakeLock = await navigator.wakeLock.request('screen');
+    _wakeLock.addEventListener('release', () => { _wakeLock = null; });
+  } catch (e) {}
+}
+function _releaseWakeLock() {
+  if (_wakeLock) { try { _wakeLock.release(); } catch (e) {} _wakeLock = null; }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  // Returning from background — restore everything that may have been suspended.
+  if (_mic.ctx && _mic.ctx.state === 'suspended') {
+    _mic.ctx.resume().catch(() => {});
+  }
+  if (_mic.ready && !_monitorTimer) _startMonitor();
+  if (state === 'processing' && !_streamController) setState('idle');
+  if (_wakeEnabled && !_micOff && state === 'idle') {
+    _startWakeRecognition();
+    _acquireWakeLock();
+  }
+  _calibrateAmbient(800);
+});
+
+// =========================================================================
+// Backend status display
+// =========================================================================
+fetch('/api/voice/status').then(r => r.json()).then(d => {
+  const stt = d.stt && d.stt.active ? d.stt.active.replace('_whisper','') : 'groq';
+  const tts = d.tts && d.tts.active ? d.tts.active : 'edge';
+  document.getElementById('provider-name').textContent = stt + ' / ' + tts;
+}).catch(() => {});
+
+// =========================================================================
+// Startup
+// =========================================================================
+_updateMuteUI();
+_updateMicUI();
+_updateWakeUI();
+_updateManualStopUI();
+
+// Browsers require a user gesture before getUserMedia / autoplay. Hook on
+// the first click anywhere on the page (orb click also counts).
+document.addEventListener('click', function _firstGesture() {
+  _ensureKeepalive();
+  if (!_micOff) {
+    _micEnsure().then(ok => {
+      if (ok && _wakeEnabled && state === 'idle') _startWakeRecognition();
+      if (ok && _wakeEnabled) _acquireWakeLock();
+    });
+  }
+  document.removeEventListener('click', _firstGesture);
+}, { once: true });
 </script>
 </body>
 </html>

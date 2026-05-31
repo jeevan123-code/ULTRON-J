@@ -25,7 +25,7 @@ top-level `from app import ...` here.
 import json
 import base64
 
-from flask import Blueprint, render_template, request, jsonify, Response
+from flask import Blueprint, render_template, request, jsonify, Response, make_response
 
 
 def _hv(s: str, maxlen: int = 500) -> str:
@@ -76,8 +76,18 @@ voice_bp = Blueprint("voice", __name__)
 
 @voice_bp.route("/voice")
 def voice_page():
-    """Serve the voice interface."""
-    return render_template("voice.html")
+    """Serve the voice interface.
+
+    No-cache headers so iterative HTML/JS changes always reach the user
+    immediately. Without this, Brave/Chrome aggressively cache HTML and
+    show stale JS, which is why "the fix isn't working" complaints often
+    persist — the user is just running yesterday's code.
+    """
+    resp = make_response(render_template("voice.html"))
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 
 @voice_bp.route("/api/voice/status", methods=["GET"])
@@ -174,6 +184,10 @@ def api_voice_chat():
     if not audio_bytes:
         return jsonify({"error": "Empty audio"}), 400
 
+    # Reject tiny blobs that cannot contain a real voice command — noise/click artefacts
+    if len(audio_bytes) < 3000:
+        return jsonify({"error": "Audio too short"}), 422
+
     # Lazy import — these helpers live in app.py; importing at module load
     # would create a circular import.
     from app import get_mode, set_mode, needs_search, _extract_entities_from_message
@@ -181,18 +195,17 @@ def api_voice_chat():
     # ── Step 1: Transcribe ────────────────────────────────────────────────────
     stt_result  = stt(audio_bytes)
     user_text   = stt_result.get("text", "").strip()
-    confidence  = stt_result.get("confidence", 0)
+    confidence  = float(stt_result.get("confidence", 0))
 
-    if not user_text:
-        # Nothing heard - return silence indicator
+    def _no_speech_response(reason: str = "I didn't catch that. Could you say that again?"):
         try:
-            audio, _ = tts("I didn't catch that. Could you repeat?", mood=get_mood())
+            audio, _ = tts(reason, mood=get_mood())
             return Response(
                 audio,
                 mimetype="audio/mpeg",
                 headers={
                     "X-Transcription":  "",
-                    "X-Response-Text":  "I didn't catch that.",
+                    "X-Response-Text":  reason,
                     "X-Mood":           get_mood(),
                     "X-Confidence":     "0",
                     "X-Voice-Command":  "",
@@ -201,6 +214,19 @@ def api_voice_chat():
             )
         except Exception:
             return jsonify({"error": "STT returned empty text"}), 422
+
+    if not user_text:
+        return _no_speech_response()
+
+    # Reject low-confidence transcriptions. Real speech computes confidence from
+    # avg_logprob (geometric mean of token probs) — typically 0.55-0.85.
+    # Noise/hallucinations sit at 0.20-0.50. 0.55 is the safe cutoff.
+    if confidence < 0.55:
+        return _no_speech_response("I'm not sure I heard that clearly. Could you repeat?")
+
+    # Single-word utterances (greetings "hi", commands "stop", responses "yes")
+    # are legitimate. The hallucination filter + confidence threshold already
+    # remove single-word noise artefacts.
 
     # ── Step 2: Check for fast-path voice commands ────────────────────────────
     voice_cmd = parse_voice_command(user_text)
@@ -418,6 +444,10 @@ def api_voice_stream_chat():
     if not audio_bytes:
         return jsonify({"error": "Empty audio"}), 400
 
+    # Reject tiny blobs that cannot contain a real voice command
+    if len(audio_bytes) < 3000:
+        return jsonify({"error": "Audio too short"}), 422
+
     # Identity gate — log-only unless ULTRON_VOICE_IDENTITY_ENFORCE=1.
     # Fail-open on any error so this can never lock the enrolled owner out.
     try:
@@ -433,17 +463,30 @@ def api_voice_stream_chat():
         pass  # identity-check failure must never block voice
 
     # Lazy import - app.py helpers
-    from app import get_mode, set_mode, needs_search, _extract_entities_from_message
+    from app import (
+        get_mode, set_mode, needs_search, wants_fresh_news,
+        reframe_query, search_web_tavily, TAVILY_API_KEY,
+        _extract_entities_from_message,
+    )
 
     def generate():
         # ── Step 1: Transcribe ────────────────────────────────────────────────
         stt_result = stt(audio_bytes)
         user_text  = stt_result.get("text", "").strip()
-        confidence = stt_result.get("confidence", 0)
+        confidence = float(stt_result.get("confidence", 0))
 
         if not user_text:
             yield f"data: {json.dumps({'type': 'error', 'msg': 'No speech detected — try again'})}\n\n"
             return
+
+        # Reject low-confidence or single-word noise artefacts
+        if confidence < 0.55:
+            _msg = json.dumps({'type': 'error', 'msg': "I'm not sure I heard that clearly — please try again"})
+            yield f"data: {_msg}\n\n"
+            return
+
+        # Single-word utterances are legitimate (greetings, commands, "yes"/"no").
+        # Hallucination filter + confidence threshold already drop noise.
 
         yield f"data: {json.dumps({'type': 'transcript', 'text': user_text, 'confidence': round(confidence, 2)})}\n\n"
 
@@ -467,7 +510,25 @@ def api_voice_stream_chat():
             return
 
         # ── Step 2b: Orchestrator intercept ──────────────────────────────────
-        _orch = orchestrate(user_text, session_id=session_id)
+        # Skip the orchestrator entirely for info-shaped questions ("who is",
+        # "what is", "when did", "tell me about", etc.). Otherwise its LLM
+        # picker can map them to `search_web`, which silently hijacks the
+        # user's focused browser tab to run a Google query — instead of
+        # actually answering them. Info questions go straight to the
+        # LLM+Tavily path below.
+        text_l = user_text.lower().strip()
+        _INFO_LEADS = (
+            "who is", "who's", "who are", "what is", "what's", "what are",
+            "when is", "when's", "when did", "when was", "where is", "where's",
+            "where are", "why is", "why does", "why did", "how is", "how does",
+            "how did", "how do", "how can", "which is", "tell me about",
+            "tell me", "do you know", "can you tell", "explain",
+        )
+        is_info_question = any(text_l.startswith(p + " ") or text_l == p for p in _INFO_LEADS)
+        if is_info_question:
+            _orch = {}
+        else:
+            _orch = orchestrate(user_text, session_id=session_id)
         if _orch.get("action_taken") and not _orch.get("passthrough"):
             response_text = _orch.get("message") or "Done."
             try:
@@ -486,17 +547,51 @@ def api_voice_stream_chat():
         messages     = [{"role": r, "content": m} for r, m in history_rows]
         messages.append({"role": "user", "content": user_text})
 
+        # Force a web search for time-sensitive queries (CM/PM/CEO/price/
+        # weather/sports/etc.) so the LLM doesn't answer from stale training
+        # data. Same path as app.py chat — we just reuse its helpers.
+        search_context = ""
         if needs_search(user_text):
             trigger_mood_change("search_started")
+            try:
+                reframed = reframe_query(user_text)
+                days     = 3 if wants_fresh_news(user_text) else None
+                if TAVILY_API_KEY:
+                    tav = search_web_tavily(
+                        reframed, days=days,
+                        topic="news" if days else "general",
+                    )
+                    if tav.get("sources"):
+                        snippets = [
+                            f"• {s.get('title','')}: {s.get('content','')[:300]}"
+                            for s in tav["sources"][:4]
+                        ]
+                        search_context = "\n".join(snippets)
+                if not search_context:
+                    # Tavily empty or no key — fall back to local DDG scraper.
+                    try:
+                        from local_engine import local_smart_search
+                        _ddg = local_smart_search(reframed)
+                        if _ddg:
+                            search_context = _ddg[:2000]
+                    except Exception:
+                        pass
+            except Exception as _se:
+                # Never block voice on a search failure — degrade silently.
+                print(f"[voice_stream_chat] search failed: {_se}")
 
         if INTELLIGENCE_AVAILABLE:
-            llm_gen = think_and_stream(user_text, session_id, history_rows, temperature)
+            llm_gen = think_and_stream(
+                user_text, session_id, history_rows, temperature,
+                search_context=search_context,
+            )
         else:
             perception_ctx = build_perception_context()
-            extra_ctx = (
-                (perception_ctx or "") +
-                "\n[VOICE MODE: Use short, clear sentences. Each sentence should be self-contained. No markdown.]"
-            )
+            extra_ctx = "\n".join(filter(None, [
+                ("=== Web Search Results ===\n" + search_context) if search_context else "",
+                perception_ctx or "",
+                "\n[VOICE MODE: Use short, clear sentences. Each sentence should be self-contained. No markdown.]",
+            ]))
             llm_gen = stream_llm(messages, extra_context=extra_ctx)
         full_text  = ""
 

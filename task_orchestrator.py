@@ -319,6 +319,14 @@ TASK_PATTERNS = {
         r"^open\s+(brave|chrome|firefox|edge|opera|chromium)\s+and\s+(?:play|watch|listen\s+to)\s+(.+)$",
     ],
 
+    # ── Referent open — "open it" / "open the screenshot" (MUST precede open_app) ──
+    # Without this, "open (.+)" eats "open the screenshot" → open_app("the screenshot")
+    # and tries to launch an app called "the screenshot" → fails.
+    "open_recent": [
+        r"^open\s+(?:it|that|this)\s*$",
+        r"^open\s+(?:the\s+)?(screenshot|file|image|photo|recording|note|video|capture)\s*$",
+    ],
+
     # ── App launching ────────────────────────────────────────────────────────
     "open_app": [
         r"open (.+)",
@@ -391,7 +399,47 @@ TASK_PATTERNS = {
         r"\bset\s+(?:default\s+)?browser\s+to\s+(brave|chrome)\b",
         r"\bopen\s+(?:everything\s+)?(?:in|with)\s+(brave|chrome)\b",
     ],
-    # ── Close app by name ────────────────────────────────────────────────────
+    # ── Tab / window close (MUST come before close_app — greedy regex eats it otherwise) ──
+    # Hotkeys: Ctrl+W = close tab, Alt+F4 = close window. Works in any focused app.
+    "close_tab": [
+        # "close the tab" / "close this tab" / "close current tab"
+        r"^(?:close|kill|exit)\s+(?:the\s+|this\s+|current\s+)*tab\b\s*$",
+        # "close X tab" (X = brave / chrome / firefox / edge OR site name)
+        r"^(?:close|kill|exit)\s+(?:the\s+)?(.+?)\s+tab\b\s*$",
+        # "inside X close Y" / "in X close Y" — Y is implicit tab content
+        r"^(?:inside|in|within)\s+(brave|chrome|firefox|edge|chromium)\s+(?:close|kill)\s+(.+)$",
+        # "close X inside/in Y" — X = site, Y = browser
+        r"^(?:close|kill)\s+(.+?)\s+(?:inside|in|within|on)\s+(brave|chrome|firefox|edge|chromium)\b",
+        # bare known-browser-content names — "close youtube", "close gmail" etc.
+        r"^(?:close|kill)\s+(?:the\s+)?(youtube|gmail|github|twitter|reddit|google|stackoverflow|whatsapp|chatgpt|claude|x\.com)\s*$",
+    ],
+    "close_window": [
+        r"^(?:close|kill|quit|exit)\s+(?:the\s+|this\s+|current\s+)*window\b\s*$",
+        r"^(?:close|kill|quit)\s+(?:the\s+)?(.+?)\s+window\b\s*$",
+    ],
+    "focus_window": [
+        r"^(?:switch|shift|go|jump|move|flip)\s+to\s+(.+?)(?:\s+window)?\s*$",
+        r"^(?:bring\s+up|focus|activate|show)\s+(.+?)(?:\s+window)?\s*$",
+    ],
+    # ── Clipboard primitives (system hotkeys, work in any focused app) ──────
+    "copy_selection": [
+        r"^copy(?:\s+(?:it|that|this|selection|selected))?\s*$",
+        r"^(?:ctrl|control)\s*[+\-\s]\s*c\s*$",
+    ],
+    "paste_clipboard": [
+        r"^paste(?:\s+(?:it|that|this|here))?\s*$",
+        r"^(?:ctrl|control)\s*[+\-\s]\s*v\s*$",
+    ],
+    "cut_selection": [
+        r"^cut(?:\s+(?:it|that|this|selection|selected))?\s*$",
+        r"^(?:ctrl|control)\s*[+\-\s]\s*x\s*$",
+    ],
+    "select_all": [
+        r"^select\s+all\s*$",
+        r"^(?:ctrl|control)\s*[+\-\s]\s*a\s*$",
+    ],
+
+    # ── Close app by name (process-kill — last-resort fallback) ────────────
     "close_app": [
         r"^(?:close|quit|exit|kill|terminate)\s+(.+)$",
     ],
@@ -493,6 +541,12 @@ _LLM_SAFE_ACTIONS = {
     "search_web", "search_on_site", "open_and_search", "open_and_play",
     "play_media", "pause_media", "resume_media",
     "volume_control", "set_browser", "phone_screenshot",
+    "media_next", "media_prev", "system_info",
+    # window / tab control — autonomous primitives:
+    "close_tab", "close_window", "close_app", "focus_window", "open_recent",
+    "lock_screen", "brightness_up", "brightness_down",
+    # clipboard primitives (Ctrl+C/V/X/A):
+    "copy_selection", "paste_clipboard", "cut_selection", "select_all",
     # action_engine read-only / low-impact additions:
     "file_list", "file_read", "get_clipboard", "calculate",
     "weather_fetch", "web_scrape", "note_create", "get_window",
@@ -588,6 +642,28 @@ _ACTION_PARAM_MAPS = {
 # Session-scoped pending action store. Keyed by session_id so different
 # chats don't share confirmations. In-process only — cleared on restart.
 _PENDING_CONFIRM: Dict[str, Dict[str, Any]] = {}
+
+# Session-scoped tracker for the most-recent file produced by a tool. Lets
+# "open the screenshot", "open it", "open that" resolve to a real path
+# instead of being interpreted as `open_app("the screenshot")`.
+_LAST_ACTION_OUTPUT: Dict[str, Dict[str, Any]] = {}
+
+
+def _record_last_output(session_id: str, action: str, path: str, kind: str = "file"):
+    """Remember the last file an action produced, for referent commands later."""
+    if not path:
+        return
+    _LAST_ACTION_OUTPUT[session_id] = {
+        "action": action,
+        "path":   path,
+        "kind":   kind,
+    }
+
+
+# Session-scoped media play/pause state. YouTube's `k`/Space are TOGGLES — if
+# Ultron and reality fall out of sync, the user sees "Paused." when actually
+# resuming and vice-versa. Tracking last intent lets us suppress no-op toggles.
+_MEDIA_STATE: Dict[str, str] = {}   # session_id -> "playing" | "paused"
 
 _CONFIRM_PHRASES = (
     "yes", "yeah", "yep", "yup", "sure", "ok", "okay", "confirm", "confirmed",
@@ -1238,6 +1314,9 @@ def orchestrate(text: str, session_id: str = "default") -> Dict[str, Any]:
                     result["message"] = f"Screenshot saved to {result['path']}"
                 elif not result.get("success"):
                     result["message"] = f"Screenshot failed: {result.get('error', 'unknown error')}"
+            # Record so "open the screenshot" / "open it" resolves to this file.
+            if result.get("success") and result.get("path"):
+                _record_last_output(session_id, "screenshot", result["path"], kind="image")
             return result
         except Exception as e:
             return {"success": False, "error": str(e), "action_taken": "screenshot",
@@ -1366,8 +1445,53 @@ def orchestrate(text: str, session_id: str = "default") -> Dict[str, Any]:
             return {"success": False, "error": str(e), "action_taken": "open_app",
                     "message": f"Open failed: {e}"}
 
-    # ── Web search (CLOUD-ONLY — does NOT open a browser) ────────────────────
+    # ── Web search — context-aware routing ───────────────────────────────────
+    # If a browser window is currently focused, send the query directly to its
+    # address bar (Ctrl+L, type, Enter) so the search happens IN that browser.
+    # Otherwise (Ultron focused, no browser, terminal, etc.) fall back to a
+    # cloud search via Tavily and return the result text.
     if t == "search_web":
+        query = task["params"][-1] if task["params"] else text
+        if isinstance(query, tuple):
+            query = next((q for q in query if q), text)
+        query = (query or "").strip()
+        # Browser-hijack path (Ctrl+L → type → Enter into the active browser)
+        # only fires when the user EXPLICITLY asked for browser/google/web
+        # search. Earlier this hijack ran whenever the focused window was a
+        # browser, which meant questions like "who is the CM of Telangana"
+        # — typed via voice while Brave happened to be the focused window —
+        # silently grabbed the user's tab and ran a Google search instead of
+        # answering. Voice info-questions ("who is", "what is", etc.) now
+        # fall through to the cloud-summary path.
+        text_l = (text or "").lower()
+        wants_browser = any(p in text_l for p in (
+            "in browser", "in chrome", "in brave", "in firefox", "in edge",
+            "open browser and search", "on google", "in google", "google search for",
+        ))
+        if wants_browser and query:
+            try:
+                from computer_control import get_active_window, hotkey, type_text, press_key
+                win = get_active_window() or {}
+                title = (win.get("title") or "").lower()
+                wclass = (win.get("class") or "").lower()
+                _browser_signals = (
+                    "chrome", "brave", "firefox", "edge", "chromium", "opera",
+                    "google-chrome", "brave-browser",
+                )
+                is_browser = any(s in title or s in wclass for s in _browser_signals)
+                if is_browser:
+                    hotkey("ctrl", "l")
+                    import time as _t; _t.sleep(0.12)
+                    type_text(query, interval=0.0)
+                    _t.sleep(0.05)
+                    press_key("enter")
+                    return {
+                        "success": True, "action_taken": "browser_search",
+                        "message": f"Searching {title.split(' - ')[-1] or 'browser'} for '{query}'.",
+                    }
+            except Exception:
+                pass
+        # Default: cloud summary via Tavily — no browser hijack.
         return handle_search_web(task, text)
 
     if t == "open_url":
@@ -1467,24 +1591,164 @@ def orchestrate(text: str, session_id: str = "default") -> Dict[str, Any]:
 
     # ── Media playback ───────────────────────────────────────────────────────
     if t == "play_media":
+        _MEDIA_STATE[session_id] = "playing"   # explicit play sets known state
         return handle_play_media(text, task["params"])
 
     if t in ("pause_media", "resume_media"):
-        return handle_pause_resume_media(t)
+        # YouTube `k` is a toggle, not a directional command. We track our
+        # intent so re-issuing the same command doesn't invert reality —
+        # BUT only when we're confident the tracked state still matches
+        # what's on screen. After a skip / prev / new-play the video state
+        # is set by autoplay, so older tracking is stale and we trust the
+        # user instead of lying with "Already paused".
+        want = "paused" if t == "pause_media" else "playing"
+        cur  = _MEDIA_STATE.get(session_id)
+        stale = _MEDIA_STATE.get(session_id + ":stale", False)
+        if cur == want and not stale:
+            label = "paused" if want == "paused" else "playing"
+            return {"success": True, "action_taken": f"{t}_noop",
+                    "message": f"Already {label}.", "passthrough": False}
+        r = handle_pause_resume_media(t)
+        if r.get("success"):
+            _MEDIA_STATE[session_id] = want
+            _MEDIA_STATE.pop(session_id + ":stale", None)
+        return r
 
     if t == "media_next":
+        # Autoplay starts the next video → known state is "playing".
+        # Without this reset, the next "pause" command sees stale state
+        # and lies ("Already paused") instead of pausing.
+        _MEDIA_STATE[session_id] = "playing"
+        _MEDIA_STATE.pop(session_id + ":stale", None)
         return handle_media_next()
 
     if t == "media_prev":
+        _MEDIA_STATE[session_id] = "playing"
+        _MEDIA_STATE.pop(session_id + ":stale", None)
         return handle_media_prev()
 
     if t == "volume_control":
         return handle_volume_control(task, text)
 
     # ── App/system controls ──────────────────────────────────────────────────
+    # ── Clipboard primitives (system hotkeys to whatever has focus) ─────────
+    if t in ("copy_selection", "paste_clipboard", "cut_selection", "select_all"):
+        from computer_control import hotkey
+        _keymap = {
+            "copy_selection":  ("c", "Copied."),
+            "paste_clipboard": ("v", "Pasted."),
+            "cut_selection":   ("x", "Cut."),
+            "select_all":      ("a", "Selected all."),
+        }
+        key, msg = _keymap[t]
+        r = hotkey("ctrl", key)
+        if r.get("success"):
+            return {"success": True, "action_taken": t, "message": msg}
+        return {"success": False, "action_taken": t,
+                "message": f"Couldn't run Ctrl+{key.upper()}: {r.get('error','unknown error')}"}
+
+    # ── Close a browser/editor tab (Ctrl+W) ──────────────────────────────────
+    if t == "close_tab":
+        from intent_router import _focus_window
+        from computer_control import hotkey
+        # Identify browser hint and target from the captured groups (any order).
+        _browsers = {"brave", "chrome", "firefox", "edge", "chromium"}
+        browser = None
+        target  = None
+        for p in (task.get("params") or []):
+            if not p:
+                continue
+            pl = p.strip().lower()
+            if pl in _browsers:
+                browser = pl
+            else:
+                target = p.strip()
+        # If a browser was named, focus it first so Ctrl+W lands in the right window.
+        focus_msg = ""
+        if browser:
+            f = _focus_window(browser)
+            if not f.get("success"):
+                focus_msg = f" (couldn't focus {browser})"
+        r = hotkey("ctrl", "w")
+        if r.get("success"):
+            label = f"{target} tab" if target else "the tab"
+            return {"success": True, "action_taken": "close_tab",
+                    "message": f"Closed {label}.{focus_msg}"}
+        return {"success": False, "action_taken": "close_tab",
+                "message": f"Couldn't close tab: {r.get('error','unknown error')}"}
+
+    # ── Close the active window (Alt+F4 / wmctrl) ────────────────────────────
+    if t == "close_window":
+        from intent_router import _focus_window
+        from computer_control import hotkey
+        target = (task.get("params") or [None])[0]
+        if target:
+            f = _focus_window(target.strip())
+            if not f.get("success"):
+                return {"success": False, "action_taken": "close_window",
+                        "message": f"No '{target}' window to close."}
+        r = hotkey("alt", "f4")
+        if r.get("success"):
+            return {"success": True, "action_taken": "close_window",
+                    "message": f"Closed {target} window." if target else "Window closed."}
+        return {"success": False, "action_taken": "close_window",
+                "message": f"Couldn't close window: {r.get('error','unknown error')}"}
+
+    # ── Switch / focus an open window ────────────────────────────────────────
+    if t == "focus_window":
+        from intent_router import _focus_window
+        name = (task.get("params") or [""])[0].strip()
+        if not name:
+            return {"success": False, "action_taken": "focus_window",
+                    "message": "Switch to which window?"}
+        r = _focus_window(name)
+        if r.get("success"):
+            return {"success": True, "action_taken": "focus_window",
+                    "message": f"Switched to {name}."}
+        return {"success": False, "action_taken": "focus_window",
+                "message": f"No '{name}' window found."}
+
+    # ── Open the most-recent file produced by a previous tool ────────────────
+    if t == "open_recent":
+        last = _LAST_ACTION_OUTPUT.get(session_id)
+        if not last or not last.get("path"):
+            return {"success": False, "action_taken": "open_recent",
+                    "message": "I don't have a recent file to open — name one and I'll open it."}
+        path = last["path"]
+        if not os.path.exists(path):
+            return {"success": False, "action_taken": "open_recent",
+                    "message": f"The last {last.get('kind','file')} ({os.path.basename(path)}) is gone — was it deleted?"}
+        try:
+            _xdg_open(path)
+            return {"success": True, "action_taken": "open_recent",
+                    "message": f"Opening {os.path.basename(path)}."}
+        except Exception as e:
+            return {"success": False, "action_taken": "open_recent",
+                    "message": f"Couldn't open {os.path.basename(path)}: {e}"}
+
     if t == "close_app":
         from intent_router import _close_app
         name = (task["params"][0] if task["params"] else text).strip()
+        # Re-route obviously-tab-shaped requests that slipped past the regex
+        # (e.g. LLM picker hands us close_app("youtube tab")). Maps to Ctrl+W.
+        _ntl = name.lower()
+        if (_ntl.endswith(" tab") or _ntl == "tab"
+            or _ntl in {"youtube", "gmail", "github", "twitter", "reddit",
+                        "google", "stackoverflow", "whatsapp", "chatgpt",
+                        "claude", "x.com", "x"}):
+            from intent_router import _focus_window
+            from computer_control import hotkey
+            # If "X tab" form, X might be a browser — try focusing it first.
+            stripped = re.sub(r"\s+tab$", "", name, flags=re.IGNORECASE).strip()
+            if stripped.lower() in {"brave", "chrome", "firefox", "edge", "chromium"}:
+                _focus_window(stripped)
+            r = hotkey("ctrl", "w")
+            label = stripped if stripped else "the tab"
+            if r.get("success"):
+                return {"success": True, "action_taken": "close_tab",
+                        "message": f"Closed {label} tab."}
+            return {"success": False, "action_taken": "close_tab",
+                    "message": f"Couldn't close tab: {r.get('error','unknown error')}"}
         return _close_app(name)
 
     if t == "lock_screen":

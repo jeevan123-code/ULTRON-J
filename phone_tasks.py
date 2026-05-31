@@ -120,6 +120,83 @@ class PhoneBridge:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    # ── Modern Android 11+ Wireless Debugging (NO USB cable ever) ───────────
+    # The phone displays an IP:pair-port + 6-digit code when "Pair device with
+    # pairing code" is tapped. After pairing once, the device stays trusted;
+    # subsequent sessions just need `adb connect <ip>:<connect-port>` (a
+    # different, dynamic port shown on the Wireless Debugging screen).
+
+    @classmethod
+    def pair_modern_wireless(cls, host_port: str, code: str) -> Dict:
+        """
+        One-time pair with phone using Android 11+ Wireless Debugging.
+
+        Args:
+          host_port: e.g. "192.168.1.50:43257" (shown on phone's pair-code screen)
+          code:      6-digit pairing code displayed by the phone
+
+        After this succeeds, the phone trusts this laptop permanently. To
+        actually use the connection, also call connect_modern_wireless().
+        """
+        try:
+            # `adb pair` reads the code from stdin
+            r = subprocess.run(
+                ["adb", "pair", host_port],
+                input=f"{code}\n",
+                capture_output=True, text=True, timeout=20,
+            )
+            out = (r.stdout + r.stderr).lower()
+            if "successfully paired" in out or "paired to" in out:
+                return {
+                    "success": True,
+                    "message": (f"Paired with {host_port}. "
+                                "Now call connect_modern_wireless() with the "
+                                "OTHER port shown on Wireless Debugging."),
+                }
+            return {"success": False, "error": f"adb pair failed: {r.stdout.strip()} {r.stderr.strip()}"}
+        except FileNotFoundError:
+            return {"success": False, "error": "ADB not found. Install android-tools-adb."}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @classmethod
+    def connect_modern_wireless(cls, host_port: str) -> Dict:
+        """
+        Connect to a previously-paired phone.
+
+        Args:
+          host_port: e.g. "192.168.1.50:39847" — the connect port shown on
+                     phone's Wireless Debugging screen (changes every session).
+        """
+        try:
+            r = subprocess.run(
+                ["adb", "connect", host_port],
+                capture_output=True, text=True, timeout=10,
+            )
+            out = (r.stdout + r.stderr).lower()
+            if "connected" in out or "already connected" in out:
+                # Save just the IP part so legacy code can still see it
+                ip = host_port.split(":")[0]
+                cls._save_ip(ip)
+                # Also persist the full host:port so we can try it first next time
+                try:
+                    with open(cls._phone_ip_file, "w") as f:
+                        json.dump({
+                            "ip":          ip,
+                            "host_port":   host_port,
+                            "mode":        "modern_wireless",
+                        }, f)
+                except Exception:
+                    pass
+                return {"success": True, "host_port": host_port,
+                        "message": f"Connected wirelessly to {host_port}."}
+            if "failed to authenticate" in out or "no devices" in out:
+                return {"success": False, "error":
+                        "Not paired yet. Run pair_modern_wireless() first."}
+            return {"success": False, "error": f"Connect failed: {r.stdout.strip()} {r.stderr.strip()}"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     @classmethod
     def is_connected(cls) -> bool:
         try:

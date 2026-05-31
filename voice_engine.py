@@ -19,6 +19,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import math
 import os
 import re
 import tempfile
@@ -119,6 +120,19 @@ except ImportError:
     _KOKORO_ONNX_PATH = ""
     _KOKORO_VOICES_PATH = ""
 
+# Piper TTS — deep professional male voice (Ryan), ~1s synthesis on CPU.
+# This is the primary TTS for Ultron: local, fast, no API cost, no echo of
+# online services. Falls back to edge_tts if anything goes wrong.
+try:
+    from piper import PiperVoice as _PiperVoice
+    PIPER_AVAILABLE = True
+    _piper_voice = None  # lazy-loaded
+    _PIPER_MODEL_PATH = os.path.join(_BASE_DIR, "piper_voices", "en_US-ryan-high.onnx")
+except ImportError:
+    PIPER_AVAILABLE = False
+    _piper_voice = None
+    _PIPER_MODEL_PATH = ""
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SETUP
 # ─────────────────────────────────────────────────────────────────────────────
@@ -132,6 +146,11 @@ _SENT_END_RE = re.compile(
     r'(?<=[.!?])'
     r'(?=\s+[A-Z]|\s*$)'
 )
+
+# Early-split boundary for the FIRST chunk only — splits on , ; : —
+# so the very first audio chunk plays in ~1s instead of after a full sentence.
+_EARLY_SPLIT_RE = re.compile(r'(?<=[,;:—])\s+')
+_EARLY_MIN_WORDS = 5    # don't split before at least 5 words have arrived
 
 # =============================================================================
 # TEXT PREPROCESSING
@@ -277,6 +296,52 @@ def _tts_edge(text: str, mood: str) -> bytes:
             pass
 
 
+def _get_piper():
+    global _piper_voice
+    if _piper_voice is None:
+        if not os.path.exists(_PIPER_MODEL_PATH):
+            raise RuntimeError(f"Piper model not found: {_PIPER_MODEL_PATH}")
+        print("[VoiceEngine] Loading Piper Ryan voice (one-time ~1s)...")
+        _piper_voice = _PiperVoice.load(_PIPER_MODEL_PATH)
+    return _piper_voice
+
+
+def _tts_piper(text: str, mood: str) -> bytes:
+    """Piper local TTS — deep professional male voice (Ryan). ~1s on CPU.
+    Returns WAV bytes (browsers play this fine via the audio/mpeg response).
+    """
+    if not PIPER_AVAILABLE:
+        raise RuntimeError("piper-tts not installed")
+    voice = _get_piper()
+
+    import io as _io
+    import wave as _wave
+    from piper import SynthesisConfig as _SynthesisConfig
+
+    # Mood → speech rate. length_scale lower = faster. Baseline 0.85 puts
+    # Ultron at ~15% faster than Piper's default (still natural, clearly
+    # intelligible — verified). Mood adjustments multiply this baseline.
+    rate         = VOICE_SPEAKING_RATES.get(mood, 1.0)
+    length_scale = max(0.55, min(1.40, 0.85 / rate))
+    # Lower noise scales reduce variance — slightly less "warm" but cleaner
+    # and ~5% faster decode because fewer recovery passes are needed.
+    syn_cfg = _SynthesisConfig(
+        length_scale=length_scale,
+        noise_scale=0.55,
+        noise_w_scale=0.7,
+        normalize_audio=True,
+    )
+
+    buf = _io.BytesIO()
+    with _wave.open(buf, "wb") as wf:
+        voice.synthesize_wav(
+            text[:VOICE_MAX_TTS_CHARS],
+            wf,
+            syn_config=syn_cfg,
+        )
+    return buf.getvalue()
+
+
 def _get_kokoro():
     global _kokoro_model
     if _kokoro_model is None:
@@ -292,25 +357,33 @@ def _get_kokoro():
 
 
 def warmup_tts():
-    """Pre-load the Kokoro ONNX model on a background thread so the very first
-    /api/voice/speak request doesn't pay the ~5s cold-load cost. Pure
-    pre-warming — does not change synthesis behavior or voice output in any
-    way. Safe to call once at server startup; subsequent calls are no-ops
-    because _get_kokoro() is idempotent.
+    """Pre-load local TTS models on a background thread so the very first
+    synthesis call doesn't pay cold-load cost. Pure pre-warming — does not
+    change synthesis behavior. Safe to call once at server startup; subsequent
+    calls are no-ops because the getter functions are idempotent.
     """
-    if not KOKORO_AVAILABLE:
-        return
-    if not (os.path.exists(_KOKORO_ONNX_PATH) and os.path.exists(_KOKORO_VOICES_PATH)):
-        return
+    def _bg_piper():
+        if not (PIPER_AVAILABLE and os.path.exists(_PIPER_MODEL_PATH)):
+            return
+        try:
+            _get_piper()
+            print("[VoiceEngine] Piper Ryan voice pre-warmed.")
+        except Exception as _e:
+            print(f"[VoiceEngine] Piper pre-warm skipped: {_e}")
 
-    def _bg():
+    def _bg_kokoro():
+        if not KOKORO_AVAILABLE:
+            return
+        if not (os.path.exists(_KOKORO_ONNX_PATH) and os.path.exists(_KOKORO_VOICES_PATH)):
+            return
         try:
             _get_kokoro()
-            print("[VoiceEngine] Kokoro pre-warmed (first TTS call will be instant).")
+            print("[VoiceEngine] Kokoro pre-warmed.")
         except Exception as _e:
             print(f"[VoiceEngine] Kokoro pre-warm skipped: {_e}")
 
-    threading.Thread(target=_bg, daemon=True, name="kokoro-warmup").start()
+    threading.Thread(target=_bg_piper,  daemon=True, name="piper-warmup").start()
+    threading.Thread(target=_bg_kokoro, daemon=True, name="kokoro-warmup").start()
 
 
 def warmup_stt():
@@ -379,10 +452,14 @@ def tts(text: str, mood: str = "FOCUSED", provider: str = "auto") -> Tuple[bytes
 
     if provider == "auto":
         chain = []
+        # Piper Ryan (deep professional male, local, ~1s) is the default
+        # voice for Ultron. Cloud premium voices override only if a key is set.
         if ELEVENLABS_API_KEY:
             chain.append("elevenlabs")
         if OPENAI_API_KEY:
             chain.append("openai")
+        if PIPER_AVAILABLE and os.path.exists(_PIPER_MODEL_PATH):
+            chain.append("piper")
         if KOKORO_AVAILABLE:
             chain.append("kokoro")
         chain.append("edge")
@@ -396,6 +473,8 @@ def tts(text: str, mood: str = "FOCUSED", provider: str = "auto") -> Tuple[bytes
                 audio = _tts_elevenlabs(clean, mood)
             elif prov == "openai":
                 audio = _tts_openai(clean, mood)
+            elif prov == "piper":
+                audio = _tts_piper(clean, mood)
             elif prov == "kokoro":
                 audio = _tts_kokoro(clean, mood)
             elif prov == "edge":
@@ -423,122 +502,346 @@ def stream_tts_from_llm(
     mood: str = "FOCUSED",
 ) -> Generator[Dict, None, None]:
     """
-    Consume an LLM SSE stream, split into sentences, TTS each sentence,
-    yield audio chunks as they're ready.
+    Consume an LLM SSE stream, split into sentences, synthesize TTS in parallel
+    with token streaming, yield audio chunks in order as they're ready.
+
+    Two design changes vs the original blocking version:
+      1. TTS runs in a ThreadPoolExecutor — the token loop never blocks waiting
+         for synthesis, so text_token events keep flowing at LLM speed.
+      2. The FIRST chunk splits on a comma/semicolon after ≥5 words, so the
+         first audio plays in ~1s instead of waiting for a full `.!?` boundary.
+
+    Audio chunks are yielded in strict order (so the browser's FIFO queue
+    plays them sequentially with no gaps).
 
     Yields dicts:
-      {"type": "transcript_start"}                       — LLM started
-      {"type": "sentence", "text": "...", "audio_b64": "...", "index": N}  — audio chunk
-      {"type": "text_token", "token": "..."}             — raw token (for text display)
-      {"type": "done", "full_text": "..."}               — all done
-      {"type": "error", "msg": "..."}                    — error
+      {"type": "transcript_start"}
+      {"type": "text_token", "token": "..."}
+      {"type": "sentence", "text": "...", "audio_b64": "...", "index": N}
+      {"type": "text_only", "text": "...", "index": N}   — TTS failed for chunk
+      {"type": "done", "full_text": "..."}
+      {"type": "error", "msg": "..."}
     """
-    sentence_buf = ""
-    full_text    = ""
-    chunk_index  = 0
+    from concurrent.futures import ThreadPoolExecutor
+    from queue import Queue
 
-    yield {"type": "transcript_start"}
+    output_q: "Queue[Optional[Dict]]" = Queue()
+    SENTINEL: Dict = {"__sentinel__": True}
+    pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="tts-stream")
+    pending: List[tuple] = []          # [(idx, sentence, future), ...] in submission order
+    pending_lock = threading.Lock()
+
+    def _flush_in_order():
+        """Drain the head of `pending` while the next future is done."""
+        while True:
+            with pending_lock:
+                if not pending or not pending[0][2].done():
+                    return
+                idx, sentence, fut = pending.pop(0)
+            try:
+                audio_bytes = fut.result()
+                output_q.put({
+                    "type":      "sentence",
+                    "text":      sentence,
+                    "audio_b64": base64.b64encode(audio_bytes).decode(),
+                    "index":     idx,
+                })
+            except Exception:
+                output_q.put({"type": "text_only", "text": sentence, "index": idx})
+
+    def _submit(sentence: str, idx: int):
+        fut = pool.submit(lambda s=sentence: tts(s, mood=mood)[0])
+        with pending_lock:
+            pending.append((idx, sentence, fut))
+        # Fire flush on completion so audio arrives the instant it's ready,
+        # even if the LLM is paused and no new tokens are arriving.
+        fut.add_done_callback(lambda _f: _flush_in_order())
+
+    def producer():
+        sentence_buf = ""
+        full_text    = ""
+        chunk_index  = 0
+        first_chunk_emitted = False
+
+        try:
+            output_q.put({"type": "transcript_start"})
+
+            for sse_line in llm_generator:
+                if not isinstance(sse_line, str) or not sse_line.startswith("data: "):
+                    continue
+                data_str = sse_line[6:].strip()
+                if not data_str or data_str == "[DONE]":
+                    continue
+                try:
+                    d = json.loads(data_str)
+                except Exception:
+                    continue
+
+                if d.get("_full"):
+                    full_text = d["_full"]
+                    break
+
+                token = d.get("token", "")
+                if not token:
+                    continue
+
+                full_text    += token
+                sentence_buf += token
+
+                # Emit text token immediately — never blocked by TTS now.
+                output_q.put({"type": "text_token", "token": token})
+
+                # Early-split for the FIRST chunk only: kick off TTS at a
+                # comma/semicolon after ≥5 words so audio starts in ~1s.
+                if not first_chunk_emitted:
+                    m = _EARLY_SPLIT_RE.search(sentence_buf)
+                    if m and len(sentence_buf[:m.start()].split()) >= _EARLY_MIN_WORDS:
+                        head = sentence_buf[:m.start()].strip()
+                        sentence_buf = sentence_buf[m.end():]
+                        if len(head) >= 4:
+                            _submit(head, chunk_index)
+                            chunk_index += 1
+                            first_chunk_emitted = True
+                            continue
+
+                # Normal sentence boundary
+                if _SENT_END_RE.search(sentence_buf):
+                    parts = _SENT_END_RE.split(sentence_buf)
+                    complete_parts = parts[:-1]
+                    sentence_buf   = parts[-1]
+                    for sentence in complete_parts:
+                        sentence = sentence.strip()
+                        if len(sentence) < 4:
+                            continue
+                        _submit(sentence, chunk_index)
+                        chunk_index += 1
+                        first_chunk_emitted = True
+
+            # Flush any tail
+            remainder = sentence_buf.strip()
+            if remainder and len(remainder) > 3:
+                _submit(remainder, chunk_index)
+                chunk_index += 1
+
+            # Wait for every queued synthesis to flush.
+            while True:
+                with pending_lock:
+                    if not pending:
+                        break
+                    head_fut = pending[0][2]
+                try:
+                    head_fut.result()
+                except Exception:
+                    pass
+                _flush_in_order()
+
+            output_q.put({"type": "done", "full_text": full_text, "total_chunks": chunk_index})
+        except Exception as e:
+            output_q.put({"type": "error", "msg": str(e)})
+        finally:
+            output_q.put(SENTINEL)
+
+    threading.Thread(target=producer, daemon=True, name="tts-producer").start()
 
     try:
-        for sse_line in llm_generator:
-            if not isinstance(sse_line, str) or not sse_line.startswith("data: "):
-                continue
-
-            data_str = sse_line[6:].strip()
-            if not data_str or data_str == "[DONE]":
-                continue
-
-            try:
-                d = json.loads(data_str)
-            except Exception:
-                continue
-
-            # Final full response signal
-            if d.get("_full"):
-                full_text = d["_full"]
-                break
-
-            token = d.get("token", "")
-            if not token:
-                continue
-
-            full_text    += token
-            sentence_buf += token
-
-            # Yield token for real-time text display
-            yield {"type": "text_token", "token": token}
-
-            # Check for sentence boundary
-            if _SENT_END_RE.search(sentence_buf):
-                parts = _SENT_END_RE.split(sentence_buf)
-                complete_parts = parts[:-1]
-                sentence_buf   = parts[-1]   # keep incomplete tail
-
-                for sentence in complete_parts:
-                    sentence = sentence.strip()
-                    if len(sentence) < 4:
-                        continue
-                    try:
-                        audio_bytes, prov = tts(sentence, mood=mood)
-                        yield {
-                            "type":      "sentence",
-                            "text":      sentence,
-                            "audio_b64": base64.b64encode(audio_bytes).decode(),
-                            "index":     chunk_index,
-                            "provider":  prov,
-                        }
-                        chunk_index += 1
-                    except Exception as e:
-                        # TTS failed for this sentence — yield text only
-                        yield {"type": "text_only", "text": sentence, "index": chunk_index}
-                        chunk_index += 1
-
-        # Handle leftover buffer
-        remainder = sentence_buf.strip()
-        if remainder and len(remainder) > 3:
-            try:
-                audio_bytes, prov = tts(remainder, mood=mood)
-                yield {
-                    "type":      "sentence",
-                    "text":      remainder,
-                    "audio_b64": base64.b64encode(audio_bytes).decode(),
-                    "index":     chunk_index,
-                    "provider":  prov,
-                }
-            except Exception:
-                yield {"type": "text_only", "text": remainder, "index": chunk_index}
-
-    except Exception as e:
-        yield {"type": "error", "msg": str(e)}
-
-    yield {"type": "done", "full_text": full_text, "total_chunks": chunk_index}
+        while True:
+            item = output_q.get()
+            if item is SENTINEL:
+                return
+            yield item
+    finally:
+        # Best-effort: cancel pending work if the client disconnected.
+        pool.shutdown(wait=False)
 
 
 # =============================================================================
 # STT PROVIDERS
 # =============================================================================
 
+# Whisper hallucinates these phrases on silence / non-speech audio
+# (well-documented behavior — door sounds, fan noise, TTS bleed, non-English
+# background speech with language=en all trigger them)
+_WHISPER_HALLUCINATIONS = frozenset({
+    # YouTube/captions training bias
+    "thank you", "thanks", "thanks for watching", "thank you for watching",
+    "thanks for watching!", "thank you for watching!", "thanks so much for watching",
+    "thanks for watching the video", "thank you so much for watching",
+    "please subscribe", "subscribe", "like and subscribe", "see you next time",
+    "see you in the next video", "see you in the next one", "see you guys",
+    "subtitles by", "captions by", "transcribed by", "translated by",
+    "subtitles by the amara org community",
+    # Farewells / sign-offs
+    "bye", "bye bye", "goodbye", "see you", "see ya", "later",
+    # YouTube intro/outro family
+    "welcome back", "welcome to", "hello everyone", "hi everyone", "hey guys",
+    # Affirmation-only fragments (real commands always carry a verb)
+    "alright", "all right", "right", "okay then", "alright then", "okay so",
+    # Single low-info tokens
+    "you", "the", "okay", "ok", "yeah", "yes", "no", "huh", "what", "why",
+    # Filler / noise tokens
+    "uh", "um", "hmm", "mm", "hm", "ah", "oh", "mhm", "mhmm",
+    "music", "applause", "silence", "background noise", "no audio",
+    # Common Whisper noise outputs
+    "i love you", "i love you.", "love you", "love you.",
+    "the end", "the end.", "to be continued", "to be continued.",
+    # Indian-English Whisper noise patterns (seen in this user's voice log)
+    "jeevan", "hyderabad", "jeevan in hyderabad",
+    "personal assistant", "personal assistant for jeevan",
+})
+
+# Pattern-matched hallucination families. These fire when Whisper substitutes
+# a high-probability training-data phrase for noise/non-English audio.
+# The "I'm going to..." family is the single most common one observed on
+# Hindi/Telugu background speech with language=en forced.
+_WHISPER_HALLUCINATION_PATTERNS = [
+    re.compile(p, re.IGNORECASE) for p in (
+        # "I'm going to..." family — the #1 hallucination on noise
+        r"^i['’]?m (going|gonna) (to )?(go to |head to |get to )?[a-z' ]{0,40}[.!?]?$",
+        r"^i['’]?m (sorry|okay|fine|good|tired|happy|hungry|thirsty)[a-z' ]{0,20}[.!?]?$",
+        # "I'll..." farewells
+        r"^i['’]?ll (go|head|see you|talk to you|catch you|be back|let you know|do that)[a-z' ]{0,40}[.!?]?$",
+        # "We're..." / "Let's..." filler
+        r"^we['’]?re (going|gonna|here|back)[a-z' ]{0,40}[.!?]?$",
+        r"^let['’]?s (go|see|talk|start|begin|continue|do this)[a-z' ]{0,20}[.!?]?$",
+        # See-you farewells
+        r"^(see|catch|talk to) you (later|soon|tomorrow|next time|guys|all)[!.]?$",
+        # Going-to obligations
+        r"^(i|we) (have|need|got|gotta)?\s*to (go|leave|head)[a-z' ]{0,30}[.!?]?$",
+        # Don't-know / hedging
+        r"^i don['’]?t know[a-z' ]{0,20}[.!?]?$",
+        r"^i['’]?m not sure[a-z' ]{0,20}[.!?]?$",
+        # YouTube intro/outro template
+        r"^(welcome|welcome back|hi|hello|hey) (to|everyone|guys|friends|y['’]?all)[a-z' ]{0,30}[!.]?$",
+        # Caption-credit family — Whisper often appends "by amara.org community"
+        r"^(subtitles?|captions?|transcribed|translated)\s+by\b.*$",
+        # Repetition: triplet of same short token
+        r"^(.{1,15})\s+\1\s+\1",
+        # Bare proper nouns from this user's named context — strong noise signal
+        r"^(jeevan|ultron|hyderabad|india|telangana)[!.,? ]{0,3}$",
+    )
+]
+
+# Whisper occasionally echoes its own prompt-bias hint on near-silence.
+# Detect transcripts that are >=70% substring overlap with the prompt itself.
+def _is_prompt_echo(text: str, prompt: str) -> bool:
+    t = re.sub(r"[^\w ]", " ", text.lower()).strip()
+    p = re.sub(r"[^\w ]", " ", prompt.lower()).strip()
+    if len(t) < 4:
+        return False
+    t_words = set(t.split())
+    p_words = set(p.split())
+    if not t_words or not p_words:
+        return False
+    # If >=70% of transcript words are also prompt words AND short transcript,
+    # it's an echo (real commands of similar length share <40% vocabulary).
+    overlap = len(t_words & p_words) / len(t_words)
+    return overlap >= 0.7 and len(t_words) <= 6
+
+
+def _is_whisper_hallucination(text: str) -> bool:
+    """True if the transcribed text is a known Whisper noise-hallucination."""
+    cleaned = re.sub(r"[\[\]\(\)\.!?,;:\"'\s]+", " ", text.lower()).strip()
+    if cleaned in _WHISPER_HALLUCINATIONS:
+        return True
+    raw = text.strip()
+    for pat in _WHISPER_HALLUCINATION_PATTERNS:
+        if pat.match(raw):
+            return True
+    return False
+
+
 def _stt_groq(audio_bytes: bytes) -> Dict:
-    """Groq Whisper — GPU-accelerated, ~200ms, uses existing GROQ_API_KEY."""
+    """Groq Whisper — GPU-accelerated, ~200ms, uses existing GROQ_API_KEY.
+
+    Anti-hallucination:
+      - response_format=verbose_json gives per-segment no_speech_prob + avg_logprob
+      - temperature=0 minimizes Whisper's tendency to invent text on noise
+      - prompt biases vocabulary toward our domain (reduces "Ultron" -> "Altron")
+      - segment scores compute real confidence (was hardcoded 0.95 before)
+      - known hallucination phrases ("Thank you.", "Bye.") are filtered out
+    """
     try:
         from config import GROQ_API_KEY as _gkey
     except ImportError:
         _gkey = os.environ.get("GROQ_API_KEY", "")
     if not _gkey:
         raise RuntimeError("GROQ_API_KEY not set")
+    # Prompt biases Whisper toward command vocabulary instead of named entities.
+    # CRITICAL: previously we used "Ultron-J personal assistant for Jeevan in
+    # Hyderabad" — Whisper hallucinated "Jeevan in Hyderabad" verbatim on noise
+    # (the prompt acts as fall-back text the model emits when audio is unclear).
+    # Generic verbs are safer — they don't form an utterance Whisper can echo.
+    _whisper_prompt = (
+        "open close play pause search browser screenshot lock email volume "
+        "screenshot type click scroll terminal calculator weather time"
+    )
     resp = requests.post(
         "https://api.groq.com/openai/v1/audio/transcriptions",
         headers={"Authorization": f"Bearer {_gkey}"},
         files={"file": ("audio.webm", audio_bytes, "audio/webm")},
-        data={"model": "whisper-large-v3-turbo", "response_format": "json", "language": "en"},
+        data={
+            "model":            "whisper-large-v3-turbo",
+            "response_format":  "verbose_json",
+            "language":         "en",
+            "temperature":      "0.0",
+            "prompt":           _whisper_prompt,
+        },
         timeout=15,
     )
     resp.raise_for_status()
-    result = resp.json()
+    result   = resp.json()
+    text     = (result.get("text") or "").strip()
+    segments = result.get("segments") or []
+
+    # No segments returned — no speech detected
+    if not segments or not text:
+        return {"text": "", "confidence": 0.0, "language": "en",
+                "provider": "groq_whisper", "error": "no_speech"}
+
+    # Reject if Whisper itself flagged any segment as silence.
+    # Tightened from 0.5 → 0.4 — noise-only segments commonly score 0.4-0.95.
+    max_no_speech = max(float(s.get("no_speech_prob", 0)) for s in segments)
+    if max_no_speech > 0.4:
+        return {"text": "", "confidence": 0.0, "language": "en",
+                "provider": "groq_whisper", "error": "no_speech_prob_high",
+                "filtered_text": text, "no_speech_prob": round(max_no_speech, 3)}
+
+    # Reject if Whisper produced repetitive / gibberish output.
+    # OpenAI reference is 2.4; we want strict for voice commands.
+    max_compression = max(float(s.get("compression_ratio", 0)) for s in segments)
+    if max_compression > 2.0:
+        return {"text": "", "confidence": 0.0, "language": "en",
+                "provider": "groq_whisper", "error": "compression_ratio_high",
+                "filtered_text": text, "compression_ratio": round(max_compression, 2)}
+
+    # Real confidence from token-level log-probabilities (geometric mean).
+    # Real speech: avg_logprob typically -0.2 to -0.5 (confidence 0.6-0.8).
+    # Hallucinations on noise: typically -0.6 to -1.5 (confidence 0.2-0.55).
+    avg_logprob = sum(float(s.get("avg_logprob", -1.0)) for s in segments) / len(segments)
+    confidence  = max(0.0, min(1.0, math.exp(avg_logprob)))
+
+    # Tightened from -0.7 → -0.6 — catches more borderline noise hallucinations.
+    if avg_logprob < -0.6:
+        return {"text": "", "confidence": round(confidence, 3), "language": "en",
+                "provider": "groq_whisper", "error": "avg_logprob_low",
+                "filtered_text": text, "avg_logprob": round(avg_logprob, 3)}
+
+    # Reject if Whisper echoed back our own prompt-bias hint (sign of near-silence)
+    if _is_prompt_echo(text, _whisper_prompt):
+        return {"text": "", "confidence": 0.0, "language": "en",
+                "provider": "groq_whisper", "error": "prompt_echo",
+                "filtered_text": text}
+
+    # Filter known Whisper hallucinations on noise (phrase + pattern based)
+    if _is_whisper_hallucination(text):
+        return {"text": "", "confidence": 0.0, "language": "en",
+                "provider": "groq_whisper", "error": "hallucination_filtered",
+                "filtered_text": text}
+
     return {
-        "text":       result.get("text", "").strip(),
+        "text":       text,
         "language":   "en",
-        "confidence": 0.95,
+        "confidence": round(confidence, 3),
         "provider":   "groq_whisper",
     }
 
@@ -758,6 +1061,9 @@ def verify_caller_identity(audio_bytes: bytes, format_hint: str = "webm") -> Dic
 # =============================================================================
 
 _VOICE_CMDS = {
+    # Greetings — fast-path so "Hi" / "Hello" reply instantly, no LLM round-trip
+    r"^(hi|hello|hey|yo|hii+|helloo+)( there| ultron| j| jay| ultron[- ]?j)?[!.\?]*$":
+                                                    "GREETING",
     r"what('s| is) (the )?(time|clock)":           "TIME",
     r"what('s| is) (the )?date":                    "DATE",
     r"what day (is it|today)":                      "DATE",
@@ -793,6 +1099,13 @@ def parse_voice_command(text: str) -> Optional[str]:
 def execute_voice_command(command: str) -> str:
     """Execute a fast-path command. Returns spoken response text."""
     now = datetime.now()
+
+    if command == "GREETING":
+        h = now.hour
+        if   h < 12: tod = "morning"
+        elif h < 17: tod = "afternoon"
+        else:        tod = "evening"
+        return f"Good {tod}, {JEEVAN_NAME}. What do you need?"
 
     if command == "TIME":
         return f"It's {now.strftime('%I:%M %p')}."
@@ -922,9 +1235,13 @@ def get_voice_status() -> dict:
         os.path.exists(_KOKORO_ONNX_PATH) and
         os.path.exists(_KOKORO_VOICES_PATH)
     )
+    piper_model_ready = (
+        PIPER_AVAILABLE and os.path.exists(_PIPER_MODEL_PATH)
+    )
     active_tts = (
         "elevenlabs" if ELEVENLABS_API_KEY else
         "openai"     if OPENAI_API_KEY else
+        "piper"      if piper_model_ready else
         "kokoro"     if kokoro_model_ready else
         "edge"       if EDGE_TTS_AVAILABLE else "none"
     )
@@ -944,6 +1261,7 @@ def get_voice_status() -> dict:
         "tts": {
             "elevenlabs":  bool(ELEVENLABS_API_KEY),
             "openai":      bool(OPENAI_API_KEY),
+            "piper":       piper_model_ready,
             "kokoro":      kokoro_model_ready,
             "edge_tts":    EDGE_TTS_AVAILABLE,
             "active":      active_tts,

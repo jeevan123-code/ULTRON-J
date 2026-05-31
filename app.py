@@ -298,6 +298,11 @@ _SEARCH_TRIGGERS = [
     "update", "right now", "this week", "last 24", "recently",
     "score", "cricket", "ipl", "match", "live score", "sports",
     "football", "standings", "who won", "result", "wicket", "goal", "highlights",
+    # Time-sensitive role/office queries (the LLM answers these from training
+    # data which goes stale — force a fresh search every time).
+    "chief minister", "prime minister", "president of", "ceo of",
+    "governor", "mayor", "minister of", "head of state", "leader of",
+    "who's the", "stock price", "exchange rate", "election", "winner of",
 ]
 _SEARCH_RE = re.compile(
     r'\b(' + '|'.join(re.escape(t) for t in _SEARCH_TRIGGERS) + r')\b'
@@ -1376,42 +1381,52 @@ if __name__ == "__main__":
     print(f"    Chat UI  at: http://localhost:5000")
     print(f"    Voice UI at: http://localhost:5000/voice\n")
 
-    # Startup voice greeting — Edge TTS (GuyNeural), falls back to Windows SAPI
+    # Startup voice greeting — Edge TTS via OS-native MP3 player (cross-platform).
     def _startup_greeting():
         import time as _t
-        import asyncio, tempfile, os as _os
+        import asyncio, tempfile, os as _os, shutil, platform
         _t.sleep(1.5)
+        _tmp = None
         try:
             import edge_tts
             _text  = "Hello Jeevan, Ultron J online. Ready to help."
             _voice = "en-US-GuyNeural"
-            async def _gen():
-                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as _f:
-                    _tmp = _f.name
-                await edge_tts.Communicate(_text, _voice).save(_tmp)
-                return _tmp
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as _f:
+                _tmp = _f.name
             _loop = asyncio.new_event_loop()
-            _tmp  = _loop.run_until_complete(_gen())
+            _loop.run_until_complete(edge_tts.Communicate(_text, _voice).save(_tmp))
             _loop.close()
-            import winsound
-            winsound.PlaySound(_tmp, winsound.SND_FILENAME)
-            try:
-                _os.unlink(_tmp)
-            except Exception:
-                pass
-        except Exception as _e:
-            print(f"[!] Edge TTS greeting failed ({_e}), falling back to SAPI")
-            try:
-                subprocess.Popen(
-                    ["powershell", "-WindowStyle", "Hidden", "-c",
-                     "Add-Type -AssemblyName System.speech;"
-                     "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;"
-                     "$s.Volume=100;"
-                     "$s.Speak('Hello Jeevan, Ultron J online.')"],
-                    creationflags=0x08000000
+
+            if platform.system() == "Windows":
+                import winsound
+                winsound.PlaySound(_tmp, winsound.SND_FILENAME)
+            else:
+                # Linux/macOS — try MP3 players in order of preference
+                players = (
+                    ("mpg123",  ["-q"]),
+                    ("ffplay",  ["-nodisp", "-autoexit", "-loglevel", "quiet"]),
+                    ("mpv",     ["--no-video", "--really-quiet"]),
+                    ("cvlc",    ["--play-and-exit", "--quiet"]),
+                    ("afplay",  []),                 # macOS
+                    ("paplay",  []),                 # may need wav, but try
                 )
-            except Exception as _e2:
-                print(f"[!] Startup greeting failed: {_e2}")
+                played = False
+                for name, args in players:
+                    if shutil.which(name):
+                        subprocess.run([name, *args, _tmp], check=False)
+                        played = True
+                        break
+                if not played:
+                    print("[startup_greeting] No MP3 player found "
+                          "(install one of: mpg123, ffplay, mpv, cvlc)")
+        except Exception as _e:
+            print(f"[startup_greeting] skipped: {_e}")
+        finally:
+            if _tmp:
+                try:
+                    _os.unlink(_tmp)
+                except Exception:
+                    pass
     threading.Thread(target=_startup_greeting, daemon=True).start()
 
     try:

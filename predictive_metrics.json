@@ -1,488 +1,488 @@
 {
   "samples": [
     {
-      "ts": "2026-05-22T03:06:37.848165",
-      "mem_pct": 54.3,
-      "cpu_pct": 26.6,
+      "ts": "2026-05-30T20:55:43.283942",
+      "mem_pct": 58.4,
+      "cpu_pct": 3.3,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T03:07:38.965066",
-      "mem_pct": 54.3,
-      "cpu_pct": 36.2,
+      "ts": "2026-05-30T20:56:44.306817",
+      "mem_pct": 58.7,
+      "cpu_pct": 54.9,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T03:08:39.983822",
-      "mem_pct": 54.5,
-      "cpu_pct": 40.4,
+      "ts": "2026-05-30T20:57:45.417508",
+      "mem_pct": 59.2,
+      "cpu_pct": 71.5,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T03:09:41.007439",
-      "mem_pct": 54.4,
-      "cpu_pct": 18.0,
+      "ts": "2026-05-30T20:58:46.426908",
+      "mem_pct": 58.0,
+      "cpu_pct": 82.2,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T03:10:42.031469",
-      "mem_pct": 54.4,
-      "cpu_pct": 94.7,
+      "ts": "2026-05-30T20:59:47.491202",
+      "mem_pct": 58.6,
+      "cpu_pct": 84.5,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T03:11:43.061877",
-      "mem_pct": 54.1,
-      "cpu_pct": 6.8,
+      "ts": "2026-05-30T21:00:48.509140",
+      "mem_pct": 58.5,
+      "cpu_pct": 20.7,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T03:12:44.090876",
-      "mem_pct": 53.6,
-      "cpu_pct": 6.0,
+      "ts": "2026-05-30T21:01:49.583895",
+      "mem_pct": 58.8,
+      "cpu_pct": 100.0,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T03:13:45.126406",
-      "mem_pct": 54.1,
-      "cpu_pct": 7.0,
+      "ts": "2026-05-30T21:02:50.637157",
+      "mem_pct": 61.1,
+      "cpu_pct": 96.0,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T03:17:06.421908",
-      "mem_pct": 55.1,
-      "cpu_pct": 2.3,
+      "ts": "2026-05-30T21:03:51.668521",
+      "mem_pct": 63.2,
+      "cpu_pct": 35.3,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T03:18:07.468572",
-      "mem_pct": 54.6,
-      "cpu_pct": 47.4,
+      "ts": "2026-05-30T21:04:52.713182",
+      "mem_pct": 65.7,
+      "cpu_pct": 73.9,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T03:19:08.499203",
-      "mem_pct": 54.5,
-      "cpu_pct": 10.6,
+      "ts": "2026-05-30T21:05:53.744158",
+      "mem_pct": 68.5,
+      "cpu_pct": 100.0,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T03:20:09.547602",
-      "mem_pct": 60.2,
-      "cpu_pct": 99.0,
+      "ts": "2026-05-30T21:06:54.764101",
+      "mem_pct": 67.4,
+      "cpu_pct": 99.2,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T03:21:35.198957",
-      "mem_pct": 54.5,
-      "cpu_pct": 50.4,
+      "ts": "2026-05-30T21:07:55.782578",
+      "mem_pct": 66.4,
+      "cpu_pct": 20.5,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T03:22:36.273273",
-      "mem_pct": 53.5,
-      "cpu_pct": 20.8,
+      "ts": "2026-05-30T21:08:56.795284",
+      "mem_pct": 66.2,
+      "cpu_pct": 67.9,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T03:23:37.306075",
-      "mem_pct": 54.0,
-      "cpu_pct": 97.5,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T03:24:38.336472",
-      "mem_pct": 54.1,
-      "cpu_pct": 71.3,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T03:25:39.364505",
-      "mem_pct": 53.1,
-      "cpu_pct": 12.3,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T03:26:40.380114",
-      "mem_pct": 53.2,
-      "cpu_pct": 27.6,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T03:27:41.434965",
-      "mem_pct": 53.3,
-      "cpu_pct": 20.2,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T03:28:42.568029",
-      "mem_pct": 53.7,
-      "cpu_pct": 8.3,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:30:15.991653",
-      "mem_pct": 45.3,
-      "cpu_pct": 99.7,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:31:17.062096",
-      "mem_pct": 52.9,
-      "cpu_pct": 58.9,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:32:18.107614",
-      "mem_pct": 51.1,
-      "cpu_pct": 41.8,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:33:19.131803",
-      "mem_pct": 49.7,
-      "cpu_pct": 64.2,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:34:20.155865",
-      "mem_pct": 52.1,
-      "cpu_pct": 30.8,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:35:21.253190",
-      "mem_pct": 50.4,
-      "cpu_pct": 16.7,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:36:22.286019",
-      "mem_pct": 49.2,
-      "cpu_pct": 14.9,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:37:23.319878",
-      "mem_pct": 48.5,
-      "cpu_pct": 13.4,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:38:24.360325",
-      "mem_pct": 47.0,
-      "cpu_pct": 14.4,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:39:25.384654",
-      "mem_pct": 49.4,
-      "cpu_pct": 21.3,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:40:26.412622",
-      "mem_pct": 50.0,
-      "cpu_pct": 92.2,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:41:27.424234",
-      "mem_pct": 49.3,
-      "cpu_pct": 21.2,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:42:28.446895",
-      "mem_pct": 49.6,
-      "cpu_pct": 52.5,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:43:29.505926",
-      "mem_pct": 49.3,
-      "cpu_pct": 15.0,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:44:30.530717",
-      "mem_pct": 50.6,
-      "cpu_pct": 49.0,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:45:31.542374",
-      "mem_pct": 54.4,
-      "cpu_pct": 26.0,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:46:32.577588",
-      "mem_pct": 55.9,
-      "cpu_pct": 42.2,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:47:33.651919",
-      "mem_pct": 57.9,
-      "cpu_pct": 29.1,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:48:34.687198",
-      "mem_pct": 53.9,
-      "cpu_pct": 29.9,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:49:35.730833",
-      "mem_pct": 55.4,
-      "cpu_pct": 28.2,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:50:36.746716",
-      "mem_pct": 54.6,
-      "cpu_pct": 12.7,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:51:37.861717",
-      "mem_pct": 54.5,
-      "cpu_pct": 18.0,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:52:38.928518",
-      "mem_pct": 54.4,
-      "cpu_pct": 10.5,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:53:39.951554",
-      "mem_pct": 54.4,
-      "cpu_pct": 10.4,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:54:41.033922",
-      "mem_pct": 54.4,
-      "cpu_pct": 44.4,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:55:42.050758",
-      "mem_pct": 53.8,
-      "cpu_pct": 15.0,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T15:56:43.085492",
-      "mem_pct": 54.5,
+      "ts": "2026-05-30T21:09:57.874506",
+      "mem_pct": 66.4,
       "cpu_pct": 15.2,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T15:57:44.187990",
-      "mem_pct": 54.4,
-      "cpu_pct": 99.7,
+      "ts": "2026-05-30T21:10:58.904989",
+      "mem_pct": 66.0,
+      "cpu_pct": 20.2,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T15:58:45.294949",
-      "mem_pct": 54.6,
-      "cpu_pct": 78.9,
+      "ts": "2026-05-30T21:12:00.028547",
+      "mem_pct": 68.1,
+      "cpu_pct": 64.1,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T15:59:46.312944",
-      "mem_pct": 54.3,
-      "cpu_pct": 8.9,
+      "ts": "2026-05-30T21:13:01.061680",
+      "mem_pct": 66.9,
+      "cpu_pct": 15.4,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T16:00:47.350573",
-      "mem_pct": 54.2,
-      "cpu_pct": 7.9,
+      "ts": "2026-05-30T21:14:02.085862",
+      "mem_pct": 66.7,
+      "cpu_pct": 22.4,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T16:01:48.400079",
-      "mem_pct": 54.5,
+      "ts": "2026-05-30T21:15:03.107367",
+      "mem_pct": 66.8,
+      "cpu_pct": 27.3,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:16:04.117473",
+      "mem_pct": 69.2,
+      "cpu_pct": 13.2,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:17:05.161313",
+      "mem_pct": 70.1,
+      "cpu_pct": 58.1,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:18:06.247059",
+      "mem_pct": 69.1,
+      "cpu_pct": 99.5,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:19:07.266273",
+      "mem_pct": 69.4,
+      "cpu_pct": 36.4,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:20:08.327747",
+      "mem_pct": 68.5,
+      "cpu_pct": 36.9,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:21:09.348977",
+      "mem_pct": 68.9,
+      "cpu_pct": 40.0,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:22:10.419231",
+      "mem_pct": 70.1,
+      "cpu_pct": 32.0,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:23:11.450187",
+      "mem_pct": 69.7,
+      "cpu_pct": 26.7,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:24:12.473098",
+      "mem_pct": 71.0,
+      "cpu_pct": 99.5,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:25:13.502436",
+      "mem_pct": 77.7,
+      "cpu_pct": 99.5,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:26:14.574838",
+      "mem_pct": 77.7,
       "cpu_pct": 100.0,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T16:02:49.430328",
-      "mem_pct": 54.2,
-      "cpu_pct": 20.6,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T16:03:50.445737",
-      "mem_pct": 54.5,
-      "cpu_pct": 81.2,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T16:04:51.495785",
-      "mem_pct": 54.3,
-      "cpu_pct": 10.5,
-      "disk_pct": 0.0,
-      "provider_fails": 0,
-      "exec_fail_rate": 0.0
-    },
-    {
-      "ts": "2026-05-22T16:05:52.521639",
-      "mem_pct": 54.7,
+      "ts": "2026-05-30T21:27:15.718626",
+      "mem_pct": 76.7,
       "cpu_pct": 100.0,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T16:06:53.542805",
-      "mem_pct": 54.8,
-      "cpu_pct": 16.2,
+      "ts": "2026-05-30T21:28:28.679289",
+      "mem_pct": 61.8,
+      "cpu_pct": 50.7,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T16:07:54.569924",
-      "mem_pct": 55.1,
+      "ts": "2026-05-30T21:29:29.723568",
+      "mem_pct": 67.7,
+      "cpu_pct": 39.0,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:30:30.757232",
+      "mem_pct": 66.7,
+      "cpu_pct": 17.7,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:31:31.783904",
+      "mem_pct": 61.9,
+      "cpu_pct": 14.7,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:32:32.814818",
+      "mem_pct": 62.3,
+      "cpu_pct": 29.2,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:33:33.862008",
+      "mem_pct": 63.0,
+      "cpu_pct": 53.5,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:36:19.221141",
+      "mem_pct": 59.1,
+      "cpu_pct": 52.5,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:37:20.308011",
+      "mem_pct": 60.0,
+      "cpu_pct": 98.5,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:38:21.332015",
+      "mem_pct": 59.6,
+      "cpu_pct": 72.7,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:39:22.389430",
+      "mem_pct": 59.0,
+      "cpu_pct": 41.3,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:40:23.413201",
+      "mem_pct": 58.7,
+      "cpu_pct": 66.2,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:41:24.433938",
+      "mem_pct": 58.8,
+      "cpu_pct": 47.9,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:42:25.452508",
+      "mem_pct": 61.1,
+      "cpu_pct": 37.5,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:43:26.489321",
+      "mem_pct": 59.1,
+      "cpu_pct": 23.7,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:44:27.507587",
+      "mem_pct": 59.4,
+      "cpu_pct": 80.7,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:45:28.523641",
+      "mem_pct": 59.5,
       "cpu_pct": 100.0,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T16:08:55.595761",
-      "mem_pct": 54.8,
+      "ts": "2026-05-30T21:46:29.570399",
+      "mem_pct": 59.4,
+      "cpu_pct": 12.5,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:47:30.602083",
+      "mem_pct": 59.9,
+      "cpu_pct": 97.8,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:48:31.615789",
+      "mem_pct": 59.2,
+      "cpu_pct": 20.7,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:49:32.658631",
+      "mem_pct": 59.9,
+      "cpu_pct": 62.7,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:50:33.690589",
+      "mem_pct": 59.2,
+      "cpu_pct": 3.6,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-30T21:51:34.715010",
+      "mem_pct": 59.4,
+      "cpu_pct": 37.3,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-31T13:25:50.145251",
+      "mem_pct": 45.2,
       "cpu_pct": 15.3,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     },
     {
-      "ts": "2026-05-22T16:09:56.624218",
-      "mem_pct": 56.6,
-      "cpu_pct": 25.0,
+      "ts": "2026-05-31T13:26:51.175130",
+      "mem_pct": 48.6,
+      "cpu_pct": 54.0,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-31T13:27:52.204359",
+      "mem_pct": 44.1,
+      "cpu_pct": 46.3,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-31T13:28:53.245799",
+      "mem_pct": 44.3,
+      "cpu_pct": 15.5,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-31T13:29:54.274347",
+      "mem_pct": 44.7,
+      "cpu_pct": 100.0,
+      "disk_pct": 0.0,
+      "provider_fails": 0,
+      "exec_fail_rate": 0.0
+    },
+    {
+      "ts": "2026-05-31T13:30:55.305563",
+      "mem_pct": 41.9,
+      "cpu_pct": 30.4,
       "disk_pct": 0.0,
       "provider_fails": 0,
       "exec_fail_rate": 0.0
     }
   ],
   "last_alert": {
-    "mem_rising": "2026-05-21T17:37:48.416514"
+    "mem_rising": "2026-05-26T00:37:18.380688"
   },
-  "run_count": 698
+  "run_count": 1270
 }

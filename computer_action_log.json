@@ -473,5 +473,304 @@
     },
     "success": true,
     "error": ""
+  },
+  {
+    "timestamp": "2026-05-26T00:33:25.950066",
+    "action": "open_app",
+    "params": {
+      "app": "to discuss the stuff"
+    },
+    "success": false,
+    "error": "Couldn't open 'to discuss the stuff': none of ['to discuss the stuff'] found on PATH"
+  },
+  {
+    "timestamp": "2026-05-26T00:38:16.586364",
+    "action": "open_url",
+    "params": {
+      "url": "https://www.google.com/search?q=latest%20news%20in%20hyderabad",
+      "browser": "chrome"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-26T00:39:20.308382",
+    "action": "open_app",
+    "params": {
+      "app": "blender"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-26T00:39:54.070002",
+    "action": "open_app",
+    "params": {
+      "app": "vs studio"
+    },
+    "success": false,
+    "error": "Couldn't open 'vs studio': none of ['vs studio'] found on PATH"
+  },
+  {
+    "timestamp": "2026-05-26T00:40:11.416426",
+    "action": "open_app",
+    "params": {
+      "app": "system monitor"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-30T13:07:04.040356",
+    "action": "open_app",
+    "params": {
+      "app": "chrome and search for hmr"
+    },
+    "success": false,
+    "error": "Couldn't open 'chrome and search for hmr': none of ['chrome and search for hmr'] found on PATH"
+  },
+  {
+    "timestamp": "2026-05-30T13:08:25.226452",
+    "action": "open_app",
+    "params": {
+      "app": "brave"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-30T13:08:31.962317",
+    "action": "open_app",
+    "params": {
+      "app": "brain"
+    },
+    "success": false,
+    "error": "Couldn't open 'brain': none of ['brain'] found on PATH"
+  },
+  {
+    "timestamp": "2026-05-30T13:12:14.190534",
+    "action": "open_app",
+    "params": {
+      "app": "chrome and close the chrome"
+    },
+    "success": false,
+    "error": "Couldn't open 'chrome and close the chrome': none of ['chrome and close the chrome'] found on PATH"
+  },
+  {
+    "timestamp": "2026-05-30T13:46:46.997640",
+    "action": "screenshot",
+    "params": {
+      "region": "None",
+      "save_path": ""
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-30T13:47:29.537010",
+    "action": "open_app",
+    "params": {
+      "app": "the screenshot"
+    },
+    "success": false,
+    "error": "Couldn't open 'the screenshot': none of ['the screenshot'] found on PATH"
+  },
+  {
+    "timestamp": "2026-05-30T15:01:04.349169",
+    "action": "open_app",
+    "params": {
+      "app": "chrome"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-30T15:01:26.750288",
+    "action": "open_app",
+    "params": {
+      "app": "chrome"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-30T19:19:29.928111",
+    "action": "open_app",
+    "params": {
+      "app": "a chicken and the peacock decides to show the child and their species"
+    },
+    "success": false,
+    "error": "Couldn't open 'a chicken and the peacock decides to show the child and their species': none of ['a chicken and the peacock decides to show the child and their species'] found on PATH"
+  },
+  {
+    "timestamp": "2026-05-30T20:16:14.739087",
+    "action": "open_app",
+    "params": {
+      "app": "camera open just listen"
+    },
+    "success": false,
+    "error": "Couldn't open 'camera open just listen': none of ['camera open just listen'] found on PATH"
+  },
+  {
+    "timestamp": "2026-05-30T20:27:46.364940",
+    "action": "hotkey",
+    "params": {
+      "keys": "['ctrl', 'l']"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-30T20:27:46.740691",
+    "action": "type_text",
+    "params": {
+      "text_preview": "the current cm of tilangana"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-30T20:27:46.903760",
+    "action": "press_key",
+    "params": {
+      "key": "enter"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-30T21:09:47.846064",
+    "action": "open_app",
+    "params": {
+      "app": "terminal"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-30T21:10:38.623745",
+    "action": "type_text",
+    "params": {
+      "text_preview": "black"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-30T21:12:06.194495",
+    "action": "type_text",
+    "params": {
+      "text_preview": "black box"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-30T21:13:20.561216",
+    "action": "run_command",
+    "params": {
+      "command": "echo black box"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-30T21:17:05.363248",
+    "action": "hotkey",
+    "params": {
+      "keys": "['ctrl', 'c']"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-30T21:28:37.301388",
+    "action": "open_app",
+    "params": {
+      "app": "chrome now"
+    },
+    "success": false,
+    "error": "Couldn't open 'chrome now': none of ['chrome now'] found on PATH"
+  },
+  {
+    "timestamp": "2026-05-30T21:28:52.966554",
+    "action": "open_app",
+    "params": {
+      "app": "close"
+    },
+    "success": false,
+    "error": "Couldn't open 'close': none of ['close'] found on PATH"
+  },
+  {
+    "timestamp": "2026-05-30T21:29:03.611431",
+    "action": "open_app",
+    "params": {
+      "app": "chrome"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-30T21:29:10.253283",
+    "action": "hotkey",
+    "params": {
+      "keys": "['ctrl', 'l']"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-30T21:29:10.536416",
+    "action": "type_text",
+    "params": {
+      "text_preview": "german"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-30T21:29:10.702150",
+    "action": "press_key",
+    "params": {
+      "key": "enter"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-30T21:42:33.019588",
+    "action": "hotkey",
+    "params": {
+      "keys": "['ctrl', 'l']"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-30T21:42:33.359420",
+    "action": "type_text",
+    "params": {
+      "text_preview": "who is the chief minister of Telangana"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-30T21:42:33.514082",
+    "action": "press_key",
+    "params": {
+      "key": "enter"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-31T13:29:06.810879",
+    "action": "open_app",
+    "params": {
+      "app": "chrome and search hot stuff"
+    },
+    "success": false,
+    "error": "Couldn't open 'chrome and search hot stuff': none of ['chrome and search hot stuff'] found on PATH"
   }
 ]

@@ -152,12 +152,32 @@ def _extract_play_query(text: str) -> str:
 
 def _press_browser_key(*keys: str) -> Dict:
     """
-    Send a keyboard shortcut to the browser window.
-    On Linux, uses xdotool to find and activate the browser window first.
-    Falls back to pyautogui when xdotool is unavailable.
+    Send a keyboard shortcut to a YouTube browser window.
+
+    Why this is non-trivial: after `xdotool windowactivate`, the URL bar
+    (omnibox) usually has keyboard focus — not the page body. YouTube's
+    keyboard shortcuts (Shift+N for next, Shift+P for previous, k for
+    pause/play) only fire when the page body has focus. So `shift+n`
+    typed into the URL bar just opens autocomplete with "N…" — the video
+    stays in whatever state it was in. If the video happened to already be
+    paused, the user perceives "skip caused a pause", but really nothing
+    happened.
+
+    Reliable fix: after activating the window, do an `xdotool click 1`
+    inside the window roughly where the YouTube progress bar sits (45% from
+    the top — the progress bar area is "safe" because clicking it just
+    seeks by a tiny amount, but doesn't toggle play/pause like clicking
+    the video frame would, and unlike Escape it actually moves keyboard
+    focus into the page body). Then send the real shortcut.
+
+    For pause/play we DO want to use Escape instead — a click on the
+    progress bar would still seek the video. Pause/play commands can
+    succeed without an extra focus step because the user is almost always
+    already focused on the video for those.
     """
     import subprocess as _sp, shutil as _sh, time as _tm
     xdt_key = "+".join(keys)
+    is_pause_play = (xdt_key in ("k", "space"))
 
     if _platform.system() == "Linux":
         xdt = _sh.which("xdotool")
@@ -171,12 +191,55 @@ def _press_browser_key(*keys: str) -> Dict:
                 try:
                     r = _sp.run([xdt, "search"] + search_args,
                                 capture_output=True, text=True, timeout=2)
-                    if r.returncode == 0 and r.stdout.strip():
-                        wid = r.stdout.strip().split("\n")[-1]
-                        _sp.run([xdt, "windowactivate", "--sync", wid], timeout=2)
-                        _tm.sleep(0.2)
-                        _sp.run([xdt, "key", "--clearmodifiers", xdt_key], timeout=2)
-                        return {"success": True}
+                    if r.returncode != 0 or not r.stdout.strip():
+                        continue
+                    wid = r.stdout.strip().split("\n")[-1]
+                    _sp.run([xdt, "windowactivate", "--sync", wid], timeout=2)
+                    _tm.sleep(0.18)
+
+                    if not is_pause_play:
+                        # Move focus into the page body without toggling play.
+                        # Strategy: save the mouse position, click on the
+                        # YouTube progress bar (45% from top, center), restore
+                        # mouse. The seek caused by the click is < 1 sec (the
+                        # progress bar drag area) which is barely noticeable.
+                        try:
+                            geo_raw = _sp.run(
+                                [xdt, "getwindowgeometry", "--shell", wid],
+                                capture_output=True, text=True, timeout=2,
+                            ).stdout
+                            g = {}
+                            for line in geo_raw.splitlines():
+                                if "=" in line:
+                                    k, v = line.split("=", 1); g[k.strip()] = v.strip()
+                            w = int(g.get("WIDTH", 1200))
+                            h = int(g.get("HEIGHT", 800))
+                            mx, my = w // 2, int(h * 0.45)
+                            mouse_raw = _sp.run(
+                                [xdt, "getmouselocation", "--shell"],
+                                capture_output=True, text=True, timeout=2,
+                            ).stdout
+                            sm = {}
+                            for line in mouse_raw.splitlines():
+                                if "=" in line:
+                                    k, v = line.split("=", 1); sm[k.strip()] = v.strip()
+                            _sp.run([xdt, "mousemove", "--window", wid,
+                                     str(mx), str(my)], timeout=2)
+                            _sp.run([xdt, "click", "1"], timeout=2)
+                            _tm.sleep(0.10)
+                            if "X" in sm and "Y" in sm:
+                                _sp.run([xdt, "mousemove", sm["X"], sm["Y"]], timeout=2)
+                        except Exception:
+                            pass
+                    else:
+                        # Pause/play: just dismiss any URL-bar focus.
+                        _sp.run([xdt, "key", "--clearmodifiers",
+                                 "--window", wid, "Escape"], timeout=2)
+                        _tm.sleep(0.06)
+
+                    _sp.run([xdt, "key", "--clearmodifiers",
+                             "--window", wid, xdt_key], timeout=2)
+                    return {"success": True}
                 except Exception:
                     pass
     try:
@@ -252,19 +315,36 @@ def _youtube_play(query: str, browser: str = None) -> Dict:
     Falls back to the search-results page if no ID is found.
     Returns a result dict with action_taken, message, success.
     """
-    import urllib.request as _ur, urllib.parse as _up
+    import urllib.request as _ur, urllib.parse as _up, urllib.error as _ue
     encoded    = _up.quote(query)
     search_url = f"https://www.youtube.com/results?search_query={encoded}"
+    # YouTube returns 451 ("Unavailable for Legal Reasons") behind its GDPR
+    # consent gate when no consent cookie is present. Send CONSENT=YES
+    # (the value the "Reject all" button stores) to bypass it. Also send a
+    # current Chrome UA + Accept-Language so we look like a real browser.
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux x86_64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cookie": "CONSENT=YES+cb.20210328-17-p0.en+FX+999; SOCS=CAI",
+    }
+    def _fetch(url):
+        return _ur.urlopen(_ur.Request(url, headers=headers), timeout=10) \
+                  .read().decode("utf-8", errors="ignore")
     try:
-        req  = _ur.Request(
-            search_url,
-            headers={"User-Agent": (
-                "Mozilla/5.0 (X11; Linux x86_64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0 Safari/537.36"
-            )},
-        )
-        html = _ur.urlopen(req, timeout=10).read().decode("utf-8", errors="ignore")
+        try:
+            html = _fetch(search_url)
+        except _ue.HTTPError as he:
+            if he.code in (451, 429, 403):
+                # Last-ditch: try the consent-host first to set cookies, then retry.
+                try: _fetch("https://consent.youtube.com/m?continue=" + _up.quote(search_url))
+                except Exception: pass
+                html = _fetch(search_url)
+            else:
+                raise
         ids  = [v for v in re.findall(r'"videoId":"([A-Za-z0-9_-]{11})"', html) if len(v) == 11]
         if ids:
             video_url = f"https://www.youtube.com/watch?v={ids[0]}&autoplay=1"

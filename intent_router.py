@@ -126,7 +126,19 @@ def _ensure_ext(filename: str) -> str:
 # ── System / media action helpers ────────────────────────────────────────────
 
 def _browser_key(*keys: str) -> dict:
-    """Send a keyboard shortcut to a YouTube/browser window using xdotool, then pyautogui."""
+    """Send a keyboard shortcut to a YouTube/browser window using xdotool.
+
+    YouTube shortcuts (Shift+N for next, Shift+P for previous, k for
+    pause/play) only act when the page body — not the URL bar — has
+    keyboard focus. After windowactivate, focus is often on the URL bar,
+    so Shift+N either does nothing or types "N" into the address bar.
+    That was why "skip video" appeared to do nothing (or seemed to pause,
+    when really the video had been paused already).
+
+    The fix is to send `Escape` once after activation. Escape defocuses
+    the URL bar and any open menu without touching the player (unlike a
+    click in the video area, which would itself toggle pause/play).
+    """
     import platform as _plt, subprocess as _sp, shutil as _sh, time as _tm
     xdt_key = "+".join(keys)
     if _plt.system() == "Linux":
@@ -141,12 +153,16 @@ def _browser_key(*keys: str) -> dict:
                 try:
                     r = _sp.run([xdt, "search"] + search_args,
                                 capture_output=True, text=True, timeout=2)
-                    if r.returncode == 0 and r.stdout.strip():
-                        wid = r.stdout.strip().split("\n")[-1]
-                        _sp.run([xdt, "windowactivate", "--sync", wid], timeout=2)
-                        _tm.sleep(0.2)
-                        _sp.run([xdt, "key", "--clearmodifiers", xdt_key], timeout=2)
-                        return {"success": True}
+                    if r.returncode != 0 or not r.stdout.strip():
+                        continue
+                    wid = r.stdout.strip().split("\n")[-1]
+                    _sp.run([xdt, "windowactivate", "--sync", wid], timeout=2)
+                    _tm.sleep(0.18)
+                    # Defocus URL bar / close any open menu without disturbing playback.
+                    _sp.run([xdt, "key", "--clearmodifiers", "--window", wid, "Escape"], timeout=2)
+                    _tm.sleep(0.06)
+                    _sp.run([xdt, "key", "--clearmodifiers", "--window", wid, xdt_key], timeout=2)
+                    return {"success": True}
                 except Exception:
                     pass
     try:
@@ -170,6 +186,53 @@ def _xdg_open(path: str) -> None:
         _sp.Popen(["open", path])
     else:
         _sp.Popen(["xdg-open", path])
+
+
+def _focus_window(name: str) -> dict:
+    """Bring a window to the foreground by partial title or app class.
+    Tries wmctrl first (most reliable on X11), falls back to xdotool.
+    """
+    import platform as _plt, subprocess as _sp, shutil as _sh
+    if _plt.system() != "Linux":
+        return {"success": False, "error": "focus_window: Linux only for now"}
+    name = name.strip()
+    if not name:
+        return {"success": False, "error": "no window name given"}
+
+    # Map common aliases to better search terms
+    _aliases = {
+        "vs code": "code",      "vscode": "code",       "vs-code": "code",
+        "chrome":  "chrome",    "google chrome": "chrome",
+        "brave":   "brave",     "brave browser": "brave",
+        "terminal": "terminal", "konsole": "konsole",
+    }
+    target = _aliases.get(name.lower(), name)
+
+    # 1. wmctrl: search visible window titles, activate first match
+    if _sh.which("wmctrl"):
+        try:
+            r = _sp.run(["wmctrl", "-a", target], capture_output=True, text=True, timeout=2)
+            if r.returncode == 0:
+                return {"success": True, "tool": "wmctrl"}
+        except Exception:
+            pass
+
+    # 2. xdotool by name
+    if _sh.which("xdotool"):
+        for flag in ("--name", "--class"):
+            try:
+                r = _sp.run(
+                    ["xdotool", "search", flag, target],
+                    capture_output=True, text=True, timeout=2,
+                )
+                wids = [w for w in r.stdout.strip().split("\n") if w]
+                if wids:
+                    _sp.run(["xdotool", "windowactivate", "--sync", wids[-1]], timeout=2)
+                    return {"success": True, "tool": f"xdotool({flag})"}
+            except Exception:
+                pass
+
+    return {"success": False, "error": f"no '{name}' window found"}
 
 
 def _close_app(name: str) -> dict:
@@ -317,8 +380,42 @@ def _brightness_ctrl(direction: str) -> dict:
                 flag = "-inc" if direction == "up" else "-dec"
                 _sp.run(["xbacklight", flag, "10"], capture_output=True)
                 return {"success": True, "result": f"Brightness {label}."}
+            # xrandr software-gamma fallback (no sudo, no extra install).
+            # Not true backlight — adjusts display gamma instead — but works
+            # everywhere X11 runs.
+            if _sh.which("xrandr"):
+                try:
+                    out = _sp.run(["xrandr", "--current"], capture_output=True,
+                                  text=True, timeout=2).stdout
+                    # First connected output
+                    output_name = None
+                    for line in out.splitlines():
+                        if " connected" in line:
+                            output_name = line.split()[0]
+                            break
+                    if not output_name:
+                        return {"success": False, "error": "no connected display found"}
+                    # Read current brightness if available, else assume 1.0
+                    cur = 1.0
+                    bm = re.search(r"Brightness:\s*([0-9.]+)",
+                                    _sp.run(["xrandr", "--verbose"],
+                                            capture_output=True, text=True,
+                                            timeout=2).stdout)
+                    if bm:
+                        try:
+                            cur = float(bm.group(1))
+                        except Exception:
+                            pass
+                    delta = 0.10 if direction == "up" else -0.10
+                    new = max(0.30, min(1.00, cur + delta))
+                    _sp.run(["xrandr", "--output", output_name,
+                             "--brightness", f"{new:.2f}"], capture_output=True)
+                    return {"success": True, "result":
+                            f"Brightness {label} (~{int(new*100)}%, gamma)."}
+                except Exception as _e:
+                    pass
             return {"success": False,
-                    "error": "Install brightnessctl: sudo apt install brightnessctl"}
+                    "error": "No brightness tool found. Try: sudo apt install brightnessctl"}
         elif system == "Windows":
             import pyautogui
             key = "brightnessup" if direction == "up" else "brightnessdown"
