@@ -189,7 +189,26 @@ except ImportError:
 
 # ── App ────────────────────────────────────────────────────────────────────────
 app = Flask(__name__)
-CORS(app)
+
+# CORS — Phase 1.2. The old `CORS(app)` allowed every origin, which
+# combined with the missing auth gate meant any browser anywhere could
+# call the file-write / shell / self-upgrade endpoints. Lock it down to
+# the local UI by default; extend via env var when serving a phone.
+_cors_origins = [
+    o.strip()
+    for o in os.environ.get(
+        "ULTRON_ALLOWED_ORIGINS",
+        "http://localhost:5000,http://127.0.0.1:5000",
+    ).split(",")
+    if o.strip()
+]
+CORS(app, origins=_cors_origins, supports_credentials=True)
+
+# Auth gate — Phase 1.1. MUST be installed before any blueprint
+# registers routes so the before_request hook covers the whole surface.
+from auth import install_auth
+install_auth(app)
+
 app.register_blueprint(agent_bp)
 
 # ── ULTIMATE v4: new-blueprint registration (vector store, research, planner,
@@ -1489,4 +1508,17 @@ if __name__ == "__main__":
         print(f"\n[!] Missing keys: {', '.join(missing)}")
         print("    Affected features will be unavailable until added to .env\n")
 
-    app.run(debug=False, host="0.0.0.0", port=5000, threaded=True, use_reloader=False)
+    # Phase 1.3 — default to loopback. Set ULTRON_HOST=0.0.0.0 to expose
+    # on the LAN, but ONLY together with ULTRON_API_KEYS — bare 0.0.0.0
+    # without keys means anyone on Wi-Fi can hit /self_upgrade/run.
+    _host = os.environ.get("ULTRON_HOST", "127.0.0.1")
+    _port = int(os.environ.get("ULTRON_PORT", "5000"))
+    if _host == "0.0.0.0" and not cfg.ULTRON_API_KEYS:
+        print(
+            "[!] REFUSING to bind 0.0.0.0 without ULTRON_API_KEYS set — "
+            "every endpoint would be open to your LAN.\n"
+            "    Either set ULTRON_API_KEYS or unset ULTRON_HOST."
+        )
+        sys.exit(2)
+    print(f"[+] Binding {_host}:{_port}  (keys configured: {bool(cfg.ULTRON_API_KEYS)})")
+    app.run(debug=False, host=_host, port=_port, threaded=True, use_reloader=False)
