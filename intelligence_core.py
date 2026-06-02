@@ -61,6 +61,18 @@ _PERSONA_BLOCK = (
     "No 'as an AI' denials. No bullet lists or headers in chat. Direct, confident, done."
 )
 
+# Voice-mode block — appended only when /api/voice/stream_chat calls
+# think_and_stream(voice_mode=True). The reply is spoken aloud, so long
+# walls of text or markdown bullets become painful audio dumps. This
+# layer enforces tighter brevity than the chat default.
+_VOICE_MODE_BLOCK = (
+    "VOICE MODE — your reply will be spoken aloud by a TTS engine:\n"
+    "- Default to 1 sentence. Hard cap: 2 sentences unless Jeevan asks for details.\n"
+    "- For lists, name at most 3 items, then say 'I've shown the full list on screen.'\n"
+    "- No markdown, no bullets, no headers, no asterisks — plain spoken sentences only.\n"
+    "- If the answer is complex, give a one-line summary and offer to expand."
+)
+
 # Reasoning meta-instruction — injected FIRST in medium/complex prompts so the
 # model attends to it before any other content. Concreteness beats vague "think step by step".
 _COT_BLOCK = (
@@ -333,6 +345,7 @@ def think_and_stream(
     temperature: float = 0.7,
     search_context: str = "",
     provider: str = "auto",
+    voice_mode: bool = False,
 ) -> Generator:
     """
     The complete intelligence pipeline. Drop-in replacement for
@@ -399,6 +412,8 @@ def think_and_stream(
         if search_context:
             ws_simple = "=== Web Search Results ===\n" + search_context.strip()
         system_prompt = _build_simple_system_prompt(ws_simple, "")
+        if voice_mode:
+            system_prompt += "\n\n" + _VOICE_MODE_BLOCK
         for _chunk in _stream_with_intelligence_prompt(
             system_prompt, history, question, temperature,
             provider=provider, model=INTELLIGENCE_MODEL_FAST,
@@ -559,6 +574,8 @@ def think_and_stream(
         # ── MEDIUM PATH: CoT instruction + rich context ───────────────────────
         yield _status_token("🧠 Thinking...")
         system_prompt = _build_medium_system_prompt(world_state, jeevan_profile)
+        if voice_mode:
+            system_prompt += "\n\n" + _VOICE_MODE_BLOCK
         yield from _stream_with_intelligence_prompt(
             system_prompt, history, question, temperature,
             provider=provider, model=INTELLIGENCE_MODEL_FAST,
@@ -573,6 +590,8 @@ def think_and_stream(
     except ImportError:
         # Graceful fallback if react_engine not available
         system_prompt = _build_medium_system_prompt(world_state, jeevan_profile)
+        if voice_mode:
+            system_prompt += "\n\n" + _VOICE_MODE_BLOCK
         yield from _stream_with_intelligence_prompt(
             system_prompt, history, question, temperature,
             max_tokens=INTELLIGENCE_MAX_TOKENS_LONG,
@@ -645,6 +664,8 @@ def think_and_stream(
         enriched_context=enriched_context,
         complexity=complexity,
     )
+    if voice_mode:
+        system_prompt += "\n\n" + _VOICE_MODE_BLOCK
     yield from _stream_with_intelligence_prompt(
         system_prompt, history, question, temperature,
         max_tokens=INTELLIGENCE_MAX_TOKENS_LONG,

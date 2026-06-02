@@ -150,6 +150,8 @@ def api_voice_transcribe():
     audio_bytes = request.files["audio"].read()
     if not audio_bytes:
         return jsonify({"error": "Empty audio file"}), 400
+    if len(audio_bytes) > 10 * 1024 * 1024:
+        return jsonify({"error": "Audio too large (max 10MB)"}), 413
 
     result = stt(audio_bytes)
     return jsonify(result)
@@ -179,10 +181,15 @@ def api_voice_chat():
 
     audio_bytes = request.files["audio"].read()
     session_id  = request.form.get("session_id", "voice_default")
-    temperature = float(request.form.get("temperature", 0.7))
+    try:
+        temperature = float(request.form.get("temperature", 0.7))
+    except (ValueError, TypeError):
+        temperature = 0.7
 
     if not audio_bytes:
         return jsonify({"error": "Empty audio"}), 400
+    if len(audio_bytes) > 10 * 1024 * 1024:
+        return jsonify({"error": "Audio too large (max 10MB)"}), 413
 
     # Reject tiny blobs that cannot contain a real voice command — noise/click artefacts
     if len(audio_bytes) < 3000:
@@ -218,10 +225,10 @@ def api_voice_chat():
     if not user_text:
         return _no_speech_response()
 
-    # Reject low-confidence transcriptions. Real speech computes confidence from
-    # avg_logprob (geometric mean of token probs) — typically 0.55-0.85.
-    # Noise/hallucinations sit at 0.20-0.50. 0.55 is the safe cutoff.
-    if confidence < 0.55:
+    # Reject low-confidence transcriptions. Loosened to 0.45 (was 0.55) —
+    # Indian English / accented speech scores lower on Whisper; 0.55 was
+    # rejecting valid commands from users with non-US/UK accents.
+    if confidence < 0.45:
         return _no_speech_response("I'm not sure I heard that clearly. Could you repeat?")
 
     # Single-word utterances (greetings "hi", commands "stop", responses "yes")
@@ -229,7 +236,13 @@ def api_voice_chat():
     # remove single-word noise artefacts.
 
     # ── Step 2: Check for fast-path voice commands ────────────────────────────
-    voice_cmd = parse_voice_command(user_text)
+    try:
+        from voice_commands_upgrade import parse_upgraded_voice_command, execute_upgraded_voice_command
+        voice_cmd = parse_upgraded_voice_command(user_text)
+        _exec_cmd = lambda cmd: execute_upgraded_voice_command(cmd, session_id=session_id)
+    except ImportError:
+        voice_cmd = parse_voice_command(user_text)
+        _exec_cmd = execute_voice_command
     mood      = get_mood()
 
     # ── Step 2a: Orchestrator intercept (screenshot, open app, YouTube, etc.) ─
@@ -254,7 +267,7 @@ def api_voice_chat():
             return jsonify({"error": f"TTS failed: {e}", "text_response": response_text}), 500
 
     if voice_cmd:
-        response_text = execute_voice_command(voice_cmd)
+        response_text = _exec_cmd(voice_cmd)
         # Handle mode switches that modify app state
         if voice_cmd.startswith("MODE:"):
             set_mode(voice_cmd.split(":")[1])
@@ -439,10 +452,15 @@ def api_voice_stream_chat():
 
     audio_bytes = request.files["audio"].read()
     session_id  = request.form.get("session_id", "voice_stream")
-    temperature = float(request.form.get("temperature", 0.7))
+    try:
+        temperature = float(request.form.get("temperature", 0.7))
+    except (ValueError, TypeError):
+        temperature = 0.7
 
     if not audio_bytes:
         return jsonify({"error": "Empty audio"}), 400
+    if len(audio_bytes) > 10 * 1024 * 1024:
+        return jsonify({"error": "Audio too large (max 10MB)"}), 413
 
     # Reject tiny blobs that cannot contain a real voice command
     if len(audio_bytes) < 3000:
@@ -480,7 +498,7 @@ def api_voice_stream_chat():
             return
 
         # Reject low-confidence or single-word noise artefacts
-        if confidence < 0.55:
+        if confidence < 0.45:
             _msg = json.dumps({'type': 'error', 'msg': "I'm not sure I heard that clearly — please try again"})
             yield f"data: {_msg}\n\n"
             return
@@ -553,37 +571,63 @@ def api_voice_stream_chat():
         search_context = ""
         if needs_search(user_text):
             trigger_mood_change("search_started")
+            # Kick off search in a background thread immediately, then give
+            # instant audio feedback ("Let me search for that.") while it runs.
+            # The ~0.5s TTS synthesis gives search a head start so results are
+            # often ready by the time we call search_future.result().
+            from concurrent.futures import ThreadPoolExecutor as _STPE
+            _search_pool = _STPE(max_workers=1, thread_name_prefix="voice-search")
             try:
                 reframed = reframe_query(user_text)
                 days     = 3 if wants_fresh_news(user_text) else None
-                if TAVILY_API_KEY:
-                    tav = search_web_tavily(
-                        reframed, days=days,
-                        topic="news" if days else "general",
-                    )
-                    if tav.get("sources"):
-                        snippets = [
-                            f"• {s.get('title','')}: {s.get('content','')[:300]}"
-                            for s in tav["sources"][:4]
-                        ]
-                        search_context = "\n".join(snippets)
-                if not search_context:
-                    # Tavily empty or no key — fall back to local DDG scraper.
-                    try:
+            except Exception:
+                reframed, days = user_text, None
+
+            def _run_search():
+                _ctx = ""
+                try:
+                    if TAVILY_API_KEY:
+                        _tav = search_web_tavily(
+                            reframed, days=days,
+                            topic="news" if days else "general",
+                        )
+                        if _tav.get("sources"):
+                            _ctx = "\n".join(
+                                f"• {s.get('title','')}: {s.get('content','')[:300]}"
+                                for s in _tav["sources"][:4]
+                            )
+                    if not _ctx:
                         from local_engine import local_smart_search
                         _ddg = local_smart_search(reframed)
                         if _ddg:
-                            search_context = _ddg[:2000]
-                    except Exception:
-                        pass
+                            _ctx = _ddg[:2000]
+                except Exception:
+                    pass
+                return _ctx
+
+            search_fut = _search_pool.submit(_run_search)
+
+            # Immediate audio feedback — synthesise while search runs in parallel
+            try:
+                _ack_audio, _ = tts("Let me search for that.", mood=mood)
+                yield f"data: {json.dumps({'type': 'sentence', 'text': 'Let me search for that.', 'audio_b64': base64.b64encode(_ack_audio).decode(), 'index': -1})}\n\n"
+            except Exception:
+                pass  # audio ACK is nice-to-have, never block on it
+
+            # Collect search results — by now TTS synthesis gave search ~0.5s head start
+            try:
+                search_context = search_fut.result(timeout=8)
             except Exception as _se:
-                # Never block voice on a search failure — degrade silently.
                 print(f"[voice_stream_chat] search failed: {_se}")
+                search_context = ""
+            finally:
+                _search_pool.shutdown(wait=False)
 
         if INTELLIGENCE_AVAILABLE:
             llm_gen = think_and_stream(
                 user_text, session_id, history_rows, temperature,
                 search_context=search_context,
+                voice_mode=True,
             )
         else:
             perception_ctx = build_perception_context()

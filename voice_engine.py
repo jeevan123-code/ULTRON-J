@@ -51,26 +51,26 @@ except ImportError:
     OPENAI_API_KEY            = os.environ.get("OPENAI_API_KEY", "").strip() or None
     ELEVENLABS_VOICES         = {
         "FOCUSED":    {"voice_id": "onwK4N9gsSGsGA4xWAcb", "name": "Daniel"},
-        "CURIOUS":    {"voice_id": "21m00Tcm4TlvDq8ikWAM", "name": "Rachel"},
-        "ALERT":      {"voice_id": "ODq5zmih8GrVes37Dizd", "name": "Patrick"},
-        "CONCERNED":  {"voice_id": "Xb0lHlNL5OcN7IvsDmeB", "name": "Alice"},
-        "DETERMINED": {"voice_id": "iP3nJ0z0nHcGdpLBXOS9", "name": "Chris"},
-        "ANALYTICAL": {"voice_id": "yoZ06aMxZJJ28mfd3POQ", "name": "Sam"},
+        "CURIOUS":    {"voice_id": "onwK4N9gsSGsGA4xWAcb", "name": "Daniel"},
+        "ALERT":      {"voice_id": "onwK4N9gsSGsGA4xWAcb", "name": "Daniel"},
+        "CONCERNED":  {"voice_id": "onwK4N9gsSGsGA4xWAcb", "name": "Daniel"},
+        "DETERMINED": {"voice_id": "onwK4N9gsSGsGA4xWAcb", "name": "Daniel"},
+        "ANALYTICAL": {"voice_id": "onwK4N9gsSGsGA4xWAcb", "name": "Daniel"},
         "IDLE":       {"voice_id": "onwK4N9gsSGsGA4xWAcb", "name": "Daniel"},
     }
     OPENAI_TTS_VOICES         = {
-        "FOCUSED": "echo", "CURIOUS": "nova", "ALERT": "echo",
-        "CONCERNED": "alloy", "DETERMINED": "onyx",
-        "ANALYTICAL": "shimmer", "IDLE": "fable",
+        "FOCUSED": "onyx", "CURIOUS": "onyx", "ALERT": "onyx",
+        "CONCERNED": "onyx", "DETERMINED": "onyx",
+        "ANALYTICAL": "onyx", "IDLE": "onyx",
     }
     EDGE_TTS_VOICES           = {
-        "FOCUSED":    "en-US-GuyNeural",
-        "CURIOUS":    "en-US-AnaNeural",
+        "FOCUSED":    "en-US-ChristopherNeural",
+        "CURIOUS":    "en-US-ChristopherNeural",
         "ALERT":      "en-US-ChristopherNeural",
-        "CONCERNED":  "en-US-AriaNeural",
+        "CONCERNED":  "en-US-ChristopherNeural",
         "DETERMINED": "en-US-ChristopherNeural",
         "ANALYTICAL": "en-US-GuyNeural",
-        "IDLE":       "en-US-GuyNeural",
+        "IDLE":       "en-US-ChristopherNeural",
     }
     VOICE_SPEAKING_RATES      = {
         "FOCUSED": 1.1, "CURIOUS": 1.0, "ALERT": 1.25,
@@ -200,7 +200,7 @@ def prepare_for_tts(text: str) -> str:
     if len(words) > VOICE_RESPONSE_MAX_WORDS:
         trunc = " ".join(words[:VOICE_RESPONSE_MAX_WORDS])
         stop  = max(trunc.rfind("."), trunc.rfind("!"), trunc.rfind("?"))
-        clean = trunc[:stop + 1] if stop > len(trunc) * 0.6 else trunc + "..."
+        clean = trunc[:stop + 1] if stop > 0 and stop > len(trunc) * 0.6 else trunc + "..."
     return clean
 
 
@@ -246,7 +246,7 @@ def _tts_elevenlabs(text: str, mood: str) -> bytes:
         json={
             "text": text[:VOICE_MAX_TTS_CHARS],
             "model_id": "eleven_monolingual_v1",
-            "voice_settings": {"stability": 0.5, "similarity_boost": 0.75, "style": 0.3, "use_speaker_boost": True},
+            "voice_settings": {"stability": 0.65, "similarity_boost": 0.80, "style": 0.10, "use_speaker_boost": True},
         },
         timeout=30,
     )
@@ -414,23 +414,23 @@ def _tts_kokoro(text: str, mood: str) -> bytes:
     kokoro = _get_kokoro()
     # mood → voice mapping; af_bella is a clear neutral English voice
     voice_map = {
-        "FOCUSED":    "af_bella",
-        "CURIOUS":    "af_sky",
+        "FOCUSED":    "am_michael",
+        "CURIOUS":    "am_michael",
         "ALERT":      "am_michael",
-        "CONCERNED":  "af_nicole",
+        "CONCERNED":  "am_michael",
         "DETERMINED": "am_michael",
-        "ANALYTICAL": "af_bella",
-        "IDLE":       "af_bella",
+        "ANALYTICAL": "am_michael",
+        "IDLE":       "am_michael",
     }
-    voice = voice_map.get(mood, "af_bella")
+    voice = voice_map.get(mood, "am_michael")
     rate  = VOICE_SPEAKING_RATES.get(mood, 1.0)
     samples, sample_rate = kokoro.create(
         text[:VOICE_MAX_TTS_CHARS], voice=voice, speed=rate, lang="en-us"
     )
-    cache_key = hashlib.md5(f"{text}|{mood}|kokoro".encode()).hexdigest()[:8]
-    out_path  = os.path.join(VOICE_CACHE_DIR, f"kokoro_{cache_key}.wav")
-    _soundfile.write(out_path, samples, sample_rate)
-    return Path(out_path).read_bytes()
+    import io as _io
+    buf = _io.BytesIO()
+    _soundfile.write(buf, samples, sample_rate, format="WAV")
+    return buf.getvalue()
 
 
 # =============================================================================
@@ -530,24 +530,26 @@ def stream_tts_from_llm(
     pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="tts-stream")
     pending: List[tuple] = []          # [(idx, sentence, future), ...] in submission order
     pending_lock = threading.Lock()
+    flush_lock   = threading.Lock()    # serialises concurrent done-callbacks → no out-of-order audio
 
     def _flush_in_order():
         """Drain the head of `pending` while the next future is done."""
-        while True:
-            with pending_lock:
-                if not pending or not pending[0][2].done():
-                    return
-                idx, sentence, fut = pending.pop(0)
-            try:
-                audio_bytes = fut.result()
-                output_q.put({
-                    "type":      "sentence",
-                    "text":      sentence,
-                    "audio_b64": base64.b64encode(audio_bytes).decode(),
-                    "index":     idx,
-                })
-            except Exception:
-                output_q.put({"type": "text_only", "text": sentence, "index": idx})
+        with flush_lock:               # only one thread flushes at a time — prevents out-of-order audio
+            while True:
+                with pending_lock:
+                    if not pending or not pending[0][2].done():
+                        return
+                    idx, sentence, fut = pending.pop(0)
+                try:
+                    audio_bytes = fut.result()
+                    output_q.put({
+                        "type":      "sentence",
+                        "text":      sentence,
+                        "audio_b64": base64.b64encode(audio_bytes).decode(),
+                        "index":     idx,
+                    })
+                except Exception:
+                    output_q.put({"type": "text_only", "text": sentence, "index": idx})
 
     def _submit(sentence: str, idx: int):
         fut = pool.submit(lambda s=sentence: tts(s, mood=mood)[0])
@@ -580,6 +582,13 @@ def stream_tts_from_llm(
                 if d.get("_full"):
                     full_text = d["_full"]
                     break
+
+                # Skip status markers — these are for the chat UI's spinner
+                # ("⚡ Processing...", "🧠 Thinking...", "🔍 Analyzing deeply..."),
+                # NOT speech content. Previously these leaked into the TTS
+                # stream and were read aloud as "high voltage processing".
+                if d.get("type") == "status":
+                    continue
 
                 token = d.get("token", "")
                 if not token:
@@ -799,9 +808,10 @@ def _stt_groq(audio_bytes: bytes) -> Dict:
                 "provider": "groq_whisper", "error": "no_speech"}
 
     # Reject if Whisper itself flagged any segment as silence.
-    # Tightened from 0.5 → 0.4 — noise-only segments commonly score 0.4-0.95.
+    # 0.5 threshold is lenient enough for accented/noisy speech while still
+    # catching clear non-speech segments (was 0.4 — too tight for Indian English).
     max_no_speech = max(float(s.get("no_speech_prob", 0)) for s in segments)
-    if max_no_speech > 0.4:
+    if max_no_speech > 0.5:
         return {"text": "", "confidence": 0.0, "language": "en",
                 "provider": "groq_whisper", "error": "no_speech_prob_high",
                 "filtered_text": text, "no_speech_prob": round(max_no_speech, 3)}
@@ -820,8 +830,9 @@ def _stt_groq(audio_bytes: bytes) -> Dict:
     avg_logprob = sum(float(s.get("avg_logprob", -1.0)) for s in segments) / len(segments)
     confidence  = max(0.0, min(1.0, math.exp(avg_logprob)))
 
-    # Tightened from -0.7 → -0.6 — catches more borderline noise hallucinations.
-    if avg_logprob < -0.6:
+    # Loosened from -0.6 → -0.75 — Indian English / accented speech scores lower
+    # on Whisper (trained on US/UK data); -0.75 passes more real speech through.
+    if avg_logprob < -0.75:
         return {"text": "", "confidence": round(confidence, 3), "language": "en",
                 "provider": "groq_whisper", "error": "avg_logprob_low",
                 "filtered_text": text, "avg_logprob": round(avg_logprob, 3)}
@@ -853,15 +864,35 @@ def _stt_openai(audio_bytes: bytes) -> Dict:
         "https://api.openai.com/v1/audio/transcriptions",
         headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
         files={"file": ("audio.webm", audio_bytes, "audio/webm")},
-        data={"model": "whisper-1", "response_format": "verbose_json"},
+        data={"model": "whisper-1", "response_format": "verbose_json", "temperature": "0.0"},
         timeout=60,
     )
     resp.raise_for_status()
-    result = resp.json()
+    result   = resp.json()
+    text     = (result.get("text") or "").strip()
+    segments = result.get("segments") or []
+
+    if not segments or not text:
+        return {"text": "", "confidence": 0.0, "language": "en",
+                "provider": "openai_whisper", "error": "no_speech"}
+
+    max_no_speech = max(float(s.get("no_speech_prob", 0)) for s in segments)
+    if max_no_speech > 0.5:
+        return {"text": "", "confidence": 0.0, "language": "en",
+                "provider": "openai_whisper", "error": "no_speech_prob_high",
+                "filtered_text": text}
+
+    avg_logprob = sum(float(s.get("avg_logprob", -1.0)) for s in segments) / len(segments)
+    confidence  = max(0.0, min(1.0, math.exp(avg_logprob)))
+    if avg_logprob < -0.75:
+        return {"text": "", "confidence": round(confidence, 3), "language": "en",
+                "provider": "openai_whisper", "error": "avg_logprob_low",
+                "filtered_text": text}
+
     return {
-        "text":       result.get("text", "").strip(),
+        "text":       text,
         "language":   result.get("language", "en"),
-        "confidence": 0.93,
+        "confidence": round(confidence, 3),
         "provider":   "openai_whisper",
     }
 
@@ -954,32 +985,56 @@ def stt(audio_input, provider: str = "auto") -> Dict:
             elif prov == "openai":
                 result = _stt_openai(audio_bytes)
             elif prov in ("faster_whisper", "local_whisper"):
-                if audio_path is None:
-                    # Detect format from magic bytes; default to webm
-                    if audio_bytes[:4] == b'OggS':
-                        raw_suffix = ".ogg"
-                    elif audio_bytes[:4] == b'fLaC':
-                        raw_suffix = ".flac"
-                    elif audio_bytes[:3] == b'ID3' or audio_bytes[:2] == b'\xff\xfb':
-                        raw_suffix = ".mp3"
+                _local_audio = audio_path   # may already be a path if caller passed one
+                _raw_tmp = _wav_tmp = None
+                try:
+                    if _local_audio is None:
+                        if audio_bytes[:4] == b'OggS':
+                            raw_suffix = ".ogg"
+                        elif audio_bytes[:4] == b'fLaC':
+                            raw_suffix = ".flac"
+                        elif audio_bytes[:3] == b'ID3' or audio_bytes[:2] == b'\xff\xfb':
+                            raw_suffix = ".mp3"
+                        else:
+                            raw_suffix = ".webm"
+                        with tempfile.NamedTemporaryFile(suffix=raw_suffix, delete=False) as _t:
+                            _t.write(audio_bytes)
+                            _raw_tmp = _t.name
+                        _wav_tmp = _raw_tmp.rsplit(".", 1)[0] + ".wav"
+                        try:
+                            from pydub import AudioSegment
+                            # Export at 16kHz mono — avoids double-resampling inside faster-whisper
+                            (AudioSegment.from_file(_raw_tmp)
+                                .set_frame_rate(16000)
+                                .set_channels(1)
+                                .export(_wav_tmp, format="wav"))
+                            _local_audio = _wav_tmp
+                        except Exception:
+                            _local_audio = _raw_tmp
+                    if prov == "faster_whisper":
+                        result = _stt_faster_whisper(_local_audio)
                     else:
-                        raw_suffix = ".webm"
-                    with tempfile.NamedTemporaryFile(suffix=raw_suffix, delete=False) as tmp:
-                        tmp.write(audio_bytes)
-                        raw_path = tmp.name
-                    wav_path = raw_path.rsplit(".", 1)[0] + ".wav"
-                    try:
-                        from pydub import AudioSegment
-                        AudioSegment.from_file(raw_path).export(wav_path, format="wav")
-                        audio_path = wav_path
-                    except Exception:
-                        audio_path = raw_path
-                if prov == "faster_whisper":
-                    result = _stt_faster_whisper(audio_path)
-                else:
-                    result = _stt_local_whisper(audio_path)
+                        result = _stt_local_whisper(_local_audio)
+                finally:
+                    for _p in (_raw_tmp, _wav_tmp):
+                        if _p and os.path.exists(_p):
+                            try:
+                                os.unlink(_p)
+                            except Exception:
+                                pass
             else:
                 continue
+            # Apply hallucination/echo filtering for non-groq providers (groq filters internally)
+            if prov != "groq" and result.get("text"):
+                _wp = ("open close play pause search browser screenshot lock email "
+                       "volume type click scroll terminal calculator weather time")
+                if _is_prompt_echo(result["text"], _wp) or _is_whisper_hallucination(result["text"]):
+                    result = {
+                        "text": "", "confidence": 0.0,
+                        "language": result.get("language", "en"),
+                        "provider": prov, "error": "hallucination_filtered",
+                        "filtered_text": result["text"],
+                    }
             _log_voice("stt", {"preview": result.get("text", "")[:50], "provider": prov})
             return result
         except Exception as e:
@@ -1328,11 +1383,3 @@ def generate_voice_briefing(kind: str = "morning") -> str:
         f"You have {goal_str}. "
         "I'll keep monitoring things overnight."
     )
-    
-    # ================= TEST BLOCK =================
-if __name__ == "__main__":
-    import pyttsx3
-
-    engine = pyttsx3.init('sapi5')
-    engine.say("Voice engine test successful")
-    engine.runAndWait()

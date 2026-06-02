@@ -96,7 +96,12 @@ def matches_wake(spoken: str) -> bool:
     """
     if not spoken:
         return False
-    s = spoken.lower().strip()
+    # Strip ALL punctuation Whisper adds (commas, periods, question marks,
+    # apostrophes inside contractions like "i'll", quotes). Previously the
+    # bare-ok wake bailed because parts[0] was "okay," not "okay".
+    import re as _re
+    s = _re.sub(r"[^\w\s]", " ", spoken.lower()).strip()
+    s = _re.sub(r"\s+", " ", s)   # collapse double spaces
     if not s:
         return False
     # Strict words — match anywhere
@@ -126,6 +131,37 @@ SILENCE_THRESHOLD   = 900     # raised; auto-calibrated at startup anyway
 SILENCE_TIMEOUT     = 2.8
 VAD_CHECK_INTERVAL  = 0.3
 PICOVOICE_KEY       = os.environ.get("PICOVOICE_ACCESS_KEY", "").strip() or None
+
+# ── Finger-snap wake detector ──────────────────────────────────────────────
+# Tony-Stark style: double-snap within ~1.2s = wake. No voice needed,
+# no accent issues, no Whisper hallucinations. Detection signature:
+#   - A snap is a SHARP transient: current chunk energy spikes from quiet
+#     to very high in ONE chunk window (~64 ms at 16 kHz / 1024 samples).
+#   - Speech rises gradually over many chunks; a snap is one explosion.
+# So we look for: (current_energy / max(prev_energy, 1)) > rise_ratio,
+# AND current_energy > absolute floor (filters out tiny mic noise).
+# Single snaps are ignored. TWO snaps inside the window = wake.
+SNAP_WAKE_ENABLED    = os.environ.get("ULTRON_SNAP_WAKE", "1").strip() != "0"
+# Tunings reflect reality: many mics saturate at 32767 (int16 ceiling).
+# A 6× rise is physically impossible when ambient sits at 20k+. We instead
+# look for the PEAK itself: a single chunk reaching near-saturation,
+# even if ambient is already noisy. The double-snap pattern (two such
+# peaks inside the window) is the actual false-positive filter — a
+# single random thump won't fire, but two distinct snaps will.
+SNAP_RISE_RATIO      = 2.5    # stricter rise — speech bursts rise ~1.5× gradually,
+                              # snaps spike instantly. 2.5× is hard to fake with voice.
+SNAP_ABS_FLOOR       = 12000  # raised back from 7000 — was firing on any speech burst.
+                              # 12k cuts off normal speech (which peaks ~8-10k) while
+                              # still catching clear snaps (the user's good snaps were
+                              # 13k–22k). Combined with the rise-ratio bump above,
+                              # this should stop false wakes from TV / talking nearby.
+SNAP_DOUBLE_WINDOW_S = 1.2    # second snap must fall within this window
+SNAP_DOUBLE_MIN_S    = 0.35   # ...but not within 350 ms — filters snap echo
+                              # (room reverb fires a fake "second snap" ~150-300ms
+                              # after the first, causing false wakes followed by
+                              # "no speech detected" because the user never spoke).
+                              # Genuine human double-snaps land 400-700ms apart.
+SNAP_DEBUG           = False  # set True to log every near-miss for re-tuning
 
 # Jarvis mode — first N seconds after startup: listen without wake word
 # Reduced from 12 to 6; also uses a stricter energy threshold (×3 instead of ×1.5)
@@ -235,9 +271,18 @@ def _load_whisper():
     with _whisper_lock:
         if _whisper_model is None and FASTER_WHISPER_AVAILABLE:
             try:
-                log("Loading Whisper model (tiny — fast)...", "INFO")
-                _whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
-                log("Whisper ready", "OK")
+                # Model controlled by ULTRON_WHISPER_MODEL env var.
+                # Defaults to "base" (~142MB, much better than "tiny" at
+                # accented English, still fast enough for live wake-word).
+                #   tiny    ~75MB   weakest  fastest
+                #   base   ~142MB   good     fast    ← default
+                #   small  ~461MB   better   medium
+                #   medium ~1.5GB   strong   slow
+                #   large-v3 ~3.0GB best     slowest
+                model_size = os.environ.get("ULTRON_WHISPER_MODEL", "base").strip() or "base"
+                log(f"Loading Whisper model ({model_size})...", "INFO")
+                _whisper_model = WhisperModel(model_size, device="cpu", compute_type="int8")
+                log(f"Whisper ready ({model_size})", "OK")
             except Exception as e:
                 log(f"Whisper load failed: {e}", "ERR")
 
@@ -328,10 +373,23 @@ def _play_file(path: str):
         elif system == "Darwin":
             subprocess.run(["afplay", path], check=True, timeout=30)
         else:
-            # Linux — try multiple players
-            for player in ["mpg123", "mpg321", "ffplay", "aplay"]:
+            # Linux — try multiple players. Each has its OWN flag set;
+            # the previous "-q" applied to all was wrong (ffplay rejects -q
+            # as unknown, falls through to aplay, which then tries to play
+            # the MP3 as raw PCM → garbled noise). aplay only handles WAV,
+            # so we exclude MP3 files from it.
+            is_mp3 = path.lower().endswith(".mp3")
+            attempts = [
+                ["mpg123",  "-q", path],
+                ["mpg321",  "-q", path],
+                ["ffplay",  "-nodisp", "-autoexit", "-loglevel", "quiet", path],
+                ["paplay",  path],   # PulseAudio / PipeWire — handles wav + many formats
+            ]
+            if not is_mp3:
+                attempts.append(["aplay", "-q", path])    # aplay only for WAV
+            for cmd in attempts:
                 try:
-                    subprocess.run([player, "-q", path], timeout=30,
+                    subprocess.run(cmd, timeout=30,
                                    capture_output=True, check=True)
                     return
                 except (FileNotFoundError, subprocess.CalledProcessError):
@@ -380,7 +438,7 @@ def _in_open_ears_window() -> bool:
 # SEND TO ULTRON SERVER — full streaming loop
 # ─────────────────────────────────────────────────────────────────────────────
 def send_to_ultron(audio_path: str) -> bool:
-    global _is_processing
+    global _is_processing, _tts_playing
     _is_processing = True
     log("Sending to Ultron brain...", "INFO")
 
@@ -433,7 +491,15 @@ def send_to_ultron(audio_path: str) -> bool:
                         log(f"Ultron: {sentence}", "SPEAK")
                     else:
                         log(f"        {sentence}", "SPEAK")
-                    play_audio_bytes(audio_chunk)
+                    # Suppress wake-word listening while OUR audio is playing —
+                    # otherwise the mic picks up the speaker output, Whisper
+                    # transcribes it, and the bare-ok rule false-triggers on
+                    # Ultron's own response (we saw this loop happen live).
+                    _tts_playing = True
+                    try:
+                        play_audio_bytes(audio_chunk)
+                    finally:
+                        _tts_playing = False
                     audio_count += 1
                 else:
                     log(f"Ultron: {sentence}", "SPEAK")
@@ -447,7 +513,11 @@ def send_to_ultron(audio_path: str) -> bool:
                 log(f"Command executed: {cmd_text}", "OK")
                 if audio_b64:
                     import base64
-                    play_audio_bytes(base64.b64decode(audio_b64))
+                    _tts_playing = True
+                    try:
+                        play_audio_bytes(base64.b64decode(audio_b64))
+                    finally:
+                        _tts_playing = False
 
             elif t == "done":
                 if not full_text.strip():
@@ -459,7 +529,11 @@ def send_to_ultron(audio_path: str) -> bool:
                 log(f"Server error: {evt.get('msg', '')}", "ERR")
                 # Still try to speak the error so Jeevan knows
                 err_msg = evt.get("msg", "Something went wrong. Please try again.")
-                play_edge_tts_sync(err_msg[:200])
+                _tts_playing = True
+                try:
+                    play_edge_tts_sync(err_msg[:200])
+                finally:
+                    _tts_playing = False
                 break
 
         _is_processing = False
@@ -513,10 +587,15 @@ def record_until_silence(pa, stream) -> list:
 # PROCESS AND CLEANUP
 # ─────────────────────────────────────────────────────────────────────────────
 def _process_and_cleanup(audio_path: str):
+    global _tts_playing
     try:
         success = send_to_ultron(audio_path)
         if not success:
-            play_edge_tts_sync("Sorry, I couldn't process that. Make sure the server is running.")
+            _tts_playing = True
+            try:
+                play_edge_tts_sync("Sorry, I couldn't process that. Make sure the server is running.")
+            finally:
+                _tts_playing = False
     finally:
         try:
             os.unlink(audio_path)
@@ -655,10 +734,23 @@ def run_vad_listener():
     for _ in range(int(2 * SAMPLE_RATE / CHUNK)):
         d, _ = stream.read(CHUNK)
         cal_energies.append(rms(d.tobytes()))
-    ambient = sum(cal_energies) / max(len(cal_energies), 1)
+    # Use the QUIETEST 33% of samples as the ambient floor. Plain average
+    # gets ruined if speech, a cough, the startup greeting, or a fan-spin-up
+    # interrupts the 2-second calibration window — the quietest third is a
+    # much more honest estimate of true room ambient.
+    sorted_cal = sorted(cal_energies)
+    quiet_count = max(1, len(sorted_cal) // 3)
+    ambient = sum(sorted_cal[:quiet_count]) / quiet_count
     global SILENCE_THRESHOLD, _tts_playing
-    # 7x ambient + floor of 300 — filters AC/fan/TV; was 5x/120 which is too sensitive
-    SILENCE_THRESHOLD = max(300, ambient * 7)
+    # Threshold formula: 3x ambient, clamped to [300, 8000].
+    # - 3x ambient catches normal indoor speech while filtering fan/AC drone.
+    # - Floor 300 prevents zero-threshold edge cases.
+    # - Ceiling 8000 prevents bogus-calibration runaway (if the 2-second
+    #   calibration window happened to overlap with speech, TV, or the
+    #   startup greeting, ambient inflates and threshold becomes
+    #   unreachable — even shouting won't trigger). Normal indoor speech
+    #   measures 8000-25000 on most mics, so 8000 is a safe upper bound.
+    SILENCE_THRESHOLD = max(300, min(int(ambient * 3), 8000))
     log(f"Ambient noise: {ambient:.0f}  ->  threshold set to {SILENCE_THRESHOLD:.0f}", "OK")
 
     # Startup greeting
@@ -669,7 +761,18 @@ def run_vad_listener():
     wake_buffer        = []
     wake_buffer_max    = int(SAMPLE_RATE / CHUNK * 2.0)   # 2 seconds of rolling context (was 1.5)
     above_thresh_count = 0
-    ENERGY_TRIGGER     = 15   # ~0.96s of sustained speech needed (was 7 = 0.45s — a cough could trigger it)
+    # Snap-detector state
+    snap_prev_energy   = 0.0
+    snap_first_time    = None       # timestamp of unmatched first snap, or None
+    if SNAP_WAKE_ENABLED:
+        log("Snap wake ENABLED — double-snap your fingers to wake (Tony Stark mode)", "OK")
+    ENERGY_TRIGGER     = 8    # ~0.5s of sustained speech needed.
+                              # Was 15 (~1s) which natural inter-word pauses
+                              # break — short commands like "OK Ultron pause"
+                              # never accumulated 15 consecutive above-threshold
+                              # chunks. False-positives (cough, single loud noise)
+                              # are still filtered downstream by the 2-word
+                              # minimum + wake-word match.
     _debug_counter     = 0
 
     while _running:
@@ -683,6 +786,65 @@ def run_vad_listener():
             wake_buffer.append(data)
             if len(wake_buffer) > wake_buffer_max:
                 wake_buffer.pop(0)
+
+            # ── Finger-snap wake detection ─────────────────────────────────
+            # Runs first so a snap can fire even while speech-energy is also
+            # being accumulated. Sharp rise + high absolute peak = snap.
+            if SNAP_WAKE_ENABLED and not _is_processing:
+                rise_ratio = energy / max(snap_prev_energy, 1.0)
+                is_snap = (rise_ratio >= SNAP_RISE_RATIO and
+                           energy >= SNAP_ABS_FLOOR)
+                # Log near-misses so we can see how close real snaps are to
+                # the thresholds — invaluable for tuning per-mic.
+                if SNAP_DEBUG and energy >= SNAP_ABS_FLOOR * 0.6 and rise_ratio >= 1.5:
+                    log(f"[snap?] energy={energy:.0f} rise={rise_ratio:.1f}x "
+                        f"(need ≥{SNAP_ABS_FLOOR} and ≥{SNAP_RISE_RATIO}x) "
+                        f"{'FIRE' if is_snap else 'miss'}", "INFO")
+                snap_prev_energy = energy
+                if is_snap:
+                    now_s = time.time()
+                    if snap_first_time is None:
+                        snap_first_time = now_s
+                    else:
+                        gap = now_s - snap_first_time
+                        if gap < SNAP_DOUBLE_MIN_S:
+                            # Echo / glitch — keep waiting for a real second snap
+                            pass
+                        elif gap <= SNAP_DOUBLE_WINDOW_S:
+                            # DOUBLE SNAP — fire wake (Tony Stark mode)
+                            log(f"DOUBLE SNAP DETECTED (gap {gap*1000:.0f}ms) — waking", "WAKE")
+                            snap_first_time    = None
+                            above_thresh_count = 0
+                            _tts_playing = True
+                            try:
+                                play_edge_tts_sync("Yes?", STARTUP_VOICE)
+                            finally:
+                                _tts_playing = False
+                            # Flush 0.5s of mic after TTS — avoid hearing own tail
+                            try:
+                                for _ in range(int(0.5 * SAMPLE_RATE / CHUNK)):
+                                    stream.read(CHUNK)
+                            except Exception:
+                                pass
+                            wake_buffer = []
+                            frames = record_until_silence(None, stream)
+                            if len(frames) >= 3:
+                                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_f:
+                                    cmd_path = tmp_f.name
+                                save_wav(frames, cmd_path)
+                                threading.Thread(
+                                    target=_process_and_cleanup, args=(cmd_path,), daemon=True
+                                ).start()
+                            else:
+                                log("Too short — ignoring", "WARN")
+                            continue
+                        else:
+                            # First snap is stale — treat this one as the new first
+                            snap_first_time = now_s
+                elif snap_first_time is not None:
+                    # No snap this chunk — expire stale first-snap waiting
+                    if (time.time() - snap_first_time) > SNAP_DOUBLE_WINDOW_S:
+                        snap_first_time = None
 
             # Print energy every ~5 seconds so user can see mic is alive
             _debug_counter += 1

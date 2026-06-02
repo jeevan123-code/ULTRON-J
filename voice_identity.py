@@ -285,6 +285,7 @@ def delete_voiceprint():
 # =============================================================================
 
 _voiceprint_cache = None
+_voiceprint_mtime = 0.0
 
 def verify_speaker(audio_path: str, threshold: float = None) -> dict:
     """
@@ -299,20 +300,25 @@ def verify_speaker(audio_path: str, threshold: float = None) -> dict:
             "enrolled":    True/False,
         }
     """
-    global _voiceprint_cache
+    global _voiceprint_cache, _voiceprint_mtime
 
     # Not enrolled → allow everyone (open mode)
     if not is_enrolled():
         return {"is_owner": True, "similarity": 1.0, "enrolled": False,
                 "confidence": "open", "threshold": 0.0}
 
-    # Load voiceprint (cached)
-    if _voiceprint_cache is None:
+    # Load voiceprint — reload if voiceprint.json changed (re-enrollment invalidates the cache)
+    try:
+        current_mtime = os.path.getmtime(VOICEPRINT_FILE)
+    except OSError:
+        current_mtime = 0.0
+    if _voiceprint_cache is None or current_mtime > _voiceprint_mtime:
         result = load_voiceprint()
         if result is None:
             return {"is_owner": True, "similarity": 1.0, "enrolled": False,
                     "confidence": "open", "threshold": 0.0}
         _voiceprint_cache = result
+        _voiceprint_mtime = current_mtime
 
     stored_embedding, meta = _voiceprint_cache
     t = threshold or meta.get("threshold", SIMILARITY_THRESHOLD)
@@ -348,8 +354,9 @@ def verify_speaker(audio_path: str, threshold: float = None) -> dict:
 
 
 def clear_cache():
-    global _voiceprint_cache
+    global _voiceprint_cache, _voiceprint_mtime
     _voiceprint_cache = None
+    _voiceprint_mtime = 0.0
 
 
 # =============================================================================

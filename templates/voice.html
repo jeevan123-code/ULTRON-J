@@ -116,6 +116,9 @@ body{background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'SF
     <button id="manual-btn" class="nav-btn" onclick="toggleManualStop()" title="Manual stop: recording only ends when you tap the orb" style="cursor:pointer">
       <span id="manual-icon">⏱️</span>
     </button>
+    <button id="stop-btn" class="nav-btn" onclick="stopUltronNow()" title="Stop Ultron speaking — Escape key also works" style="cursor:pointer">
+      <span>⏹</span>
+    </button>
     <button id="debug-btn" class="nav-btn" onclick="toggleDebugOverlay()" title="Show live mic/wake diagnostics" style="cursor:pointer">
       <span>🐛</span>
     </button>
@@ -167,7 +170,7 @@ body{background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'SF
 // Build marker so we can verify the browser loaded the latest JS.
 // If this number doesn't match what's printed in the DevTools console,
 // you're seeing a cached page — hard-refresh (Ctrl+Shift+R).
-const ULTRON_VOICE_BUILD = '2026-05-30-v5-patient-recording';
+const ULTRON_VOICE_BUILD = '2026-05-31-v8-stop-listener';
 console.log('[ultron] voice.html build:', ULTRON_VOICE_BUILD);
 
 // =========================================================================
@@ -206,10 +209,11 @@ let state         = 'idle';
 let currentAudio  = null;
 
 // Recording-VAD bookkeeping
-let _silenceStart = null;
-let _recordStart  = null;
-let _voicedMs     = 0;
-let _lastVadTick  = null;
+let _silenceStart    = null;
+let _silenceDebounce = 0;    // ms spent below silence threshold (debounce)
+let _recordStart     = null;
+let _voicedMs        = 0;
+let _lastVadTick     = null;
 
 // Audio playback queue + barge-in
 let _audioQueue       = [];
@@ -227,20 +231,22 @@ let _manualStop  = localStorage.getItem('ultron_manualstop') === '1';
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 // ─── Calibration constants (offsets above ambient, not absolute thresholds)
-const VAD_SILENCE_MS         = 6000;   // auto-stop after 6s of true silence
-const VAD_MIN_SPEECH_MS      = 800;
-const VAD_MIN_VOICED_MS      = 250;
-const AMBIENT_INIT_DB        = -55;    // overwritten by calibration
-const VOICE_OVER_AMBIENT_DB  = 12;     // user voice = ambient + 12 dB
-const SILENCE_OVER_AMBIENT_DB= 5;      // silence threshold = ambient + 5 dB
-const BARGE_OVER_AMBIENT_DB  = 14;     // barge-in fires above ambient + 14 dB
-const BARGE_TRIGGER_MS       = 280;    // sustained for 280 ms = real speech
+const VAD_SILENCE_MS          = 6000;  // auto-stop after 6s of true silence
+const VAD_MIN_SPEECH_MS       = 2000;  // must record ≥ 2s before silence check can fire (was 800)
+const VAD_MIN_VOICED_MS       = 250;
+const VAD_SILENCE_DEBOUNCE_MS = 400;   // energy must stay below threshold for 400ms before silence timer starts
+const AMBIENT_INIT_DB         = -55;   // overwritten by calibration
+const VOICE_OVER_AMBIENT_DB   = 12;    // user voice = ambient + 12 dB
+const SILENCE_OVER_AMBIENT_DB = 3;     // silence threshold = ambient + 3 dB (was 5 — looser for pauses)
+const BARGE_OVER_AMBIENT_DB   = 14;    // barge-in fires above ambient + 14 dB
+const BARGE_TRIGGER_MS        = 280;   // sustained for 280 ms = real speech
 
 // =========================================================================
 // Persistent microphone — single getUserMedia for the page lifetime.
 // =========================================================================
 const _mic = {
   stream: null, ctx: null, source: null, analyser: null, buf: null,
+  compressedStream: null,   // DynamicsCompressor → MediaStreamDestination for MediaRecorder
   ambient: AMBIENT_INIT_DB, ready: false,
 };
 
@@ -266,8 +272,27 @@ async function _micEnsure() {
   _mic.source   = _mic.ctx.createMediaStreamSource(_mic.stream);
   _mic.analyser = _mic.ctx.createAnalyser();
   _mic.analyser.fftSize = 512;
-  _mic.source.connect(_mic.analyser);
+  _mic.source.connect(_mic.analyser);    // raw signal for VAD energy detection
   _mic.buf = new Float32Array(_mic.analyser.fftSize);
+
+  // DynamicsCompressor normalises quiet/loud speech to a consistent level.
+  // Improves Whisper accuracy for weak mic signals and accented speech where
+  // amplitude varies widely across words.
+  try {
+    const _comp = _mic.ctx.createDynamicsCompressor();
+    _comp.threshold.value = -24;
+    _comp.knee.value      = 30;
+    _comp.ratio.value     = 12;
+    _comp.attack.value    = 0.003;
+    _comp.release.value   = 0.25;
+    const _compDest = _mic.ctx.createMediaStreamDestination();
+    _mic.source.connect(_comp);
+    _comp.connect(_compDest);
+    _mic.compressedStream = _compDest.stream;
+  } catch (e) {
+    console.warn('[mic] DynamicsCompressor unavailable:', e);
+  }
+
   _mic.ready = true;
   _ensureKeepalive();           // needs _mic.ctx
   _calibrateAmbient(1200);
@@ -283,7 +308,7 @@ function _micRelease() {
   _workletNode = null;
   if (_mic.ctx)    { try { _mic.ctx.close(); } catch (e) {} }
   if (_mic.stream) { try { _mic.stream.getTracks().forEach(t => t.stop()); } catch (e) {} }
-  _mic.stream = _mic.ctx = _mic.source = _mic.analyser = _mic.buf = null;
+  _mic.stream = _mic.ctx = _mic.source = _mic.analyser = _mic.buf = _mic.compressedStream = null;
   _mic.ready = false;
 }
 
@@ -333,12 +358,13 @@ let _workletNode   = null;
 
 function _startMonitor() {
   if (_monitorTimer) return;
-  _silenceStart  = null;
-  _voicedMs      = 0;
-  _bargeVoicedMs = 0;
-  _bgVoicedMs    = 0;
-  _lastVadTick   = Date.now();
-  _monitorTimer  = setInterval(_monitorTick, 50);
+  _silenceStart    = null;
+  _silenceDebounce = 0;
+  _voicedMs        = 0;
+  _bargeVoicedMs   = 0;
+  _bgVoicedMs      = 0;
+  _lastVadTick     = Date.now();
+  _monitorTimer    = setInterval(_monitorTick, 50);
   _ensureAudioWorklet();
 }
 function _stopMonitor() {
@@ -491,7 +517,7 @@ async function _bgWakeCheck() {
   // the trigger doesn't end the recording before the user actually starts
   // speaking).
   const WAKE_MIN_SPEECH_MS = 1500;
-  const WAKE_SILENCE_MS    = 3500;
+  const WAKE_SILENCE_MS    = 5000;
   const WAKE_MAX_MS        = 14000;
   const start = Date.now();
   let lastVoiceTime = Date.now();
@@ -591,16 +617,22 @@ function _monitorTick() {
       return;
     }
     if (db < silenceDb) {
-      if (_silenceStart === null) _silenceStart = now;
-      const silenceDur = now - _silenceStart;
-      if (elapsed >= VAD_MIN_SPEECH_MS && silenceDur >= VAD_SILENCE_MS) {
-        stopRecording();
-      } else if (elapsed >= VAD_MIN_SPEECH_MS) {
-        const pct = Math.min(100, Math.round(silenceDur / VAD_SILENCE_MS * 100));
-        statusLabel.textContent = pct < 60 ? 'Listening…' : 'Almost done…';
+      // Debounce: energy must stay below threshold for VAD_SILENCE_DEBOUNCE_MS
+      // before the silence timer starts — prevents breathing pauses from counting.
+      _silenceDebounce += dt;
+      if (_silenceDebounce >= VAD_SILENCE_DEBOUNCE_MS) {
+        if (_silenceStart === null) _silenceStart = now - VAD_SILENCE_DEBOUNCE_MS;
+        const silenceDur = now - _silenceStart;
+        if (elapsed >= VAD_MIN_SPEECH_MS && silenceDur >= VAD_SILENCE_MS) {
+          stopRecording();
+        } else if (elapsed >= VAD_MIN_SPEECH_MS) {
+          const pct = Math.min(100, Math.round(silenceDur / VAD_SILENCE_MS * 100));
+          statusLabel.textContent = pct < 60 ? 'Listening…' : 'Almost done…';
+        }
       }
     } else {
-      _silenceStart = null;
+      _silenceDebounce = 0;
+      _silenceStart    = null;
       statusLabel.textContent = 'Listening…';
     }
   }
@@ -708,6 +740,13 @@ function setState(s) {
   } else {
     _stopWakeRecognition();
   }
+
+  // STOP-word listener is active only while Ultron is speaking.
+  if (s === 'speaking' && !_micOff) {
+    _startStopListener();
+  } else {
+    _stopStopListener();
+  }
 }
 
 // =========================================================================
@@ -734,8 +773,9 @@ async function startRecording() {
     MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
     : MediaRecorder.isTypeSupported('audio/webm')           ? 'audio/webm'
     : 'audio/ogg';
+  const _recStream = _mic.compressedStream || _mic.stream;
   try {
-    mediaRecorder = new MediaRecorder(_mic.stream, {mimeType});
+    mediaRecorder = new MediaRecorder(_recStream, {mimeType});
   } catch (e) {
     showError('Recording not supported: ' + e.message);
     return;
@@ -743,9 +783,10 @@ async function startRecording() {
   mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
   mediaRecorder.onstop = sendAudio;
   mediaRecorder.start(100);
-  _recordStart  = Date.now();
-  _silenceStart = null;
-  _voicedMs     = 0;
+  _recordStart     = Date.now();
+  _silenceStart    = null;
+  _silenceDebounce = 0;
+  _voicedMs        = 0;
   setState('recording');
 }
 
@@ -758,51 +799,82 @@ function stopRecording() {
 }
 
 // =========================================================================
-// Audio playback queue
+// Audio playback — Web Audio API scheduled player (zero-gap between chunks)
 // =========================================================================
-function _base64ToBlob(b64, mime) {
-  const bin = atob(b64);
-  const arr = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-  return new Blob([arr], {type: mime});
+// One shared AudioContext for playback. Chunks are decoded and scheduled
+// sample-accurately so there's no 80–200ms new-Audio() creation gap.
+let _playCtx           = null;
+let _playNextStartTime = 0;
+let _activeSources     = [];
+let _decodeChain       = Promise.resolve();
+
+function _getPlayCtx() {
+  if (!_playCtx || _playCtx.state === 'closed') {
+    _playCtx = new (window.AudioContext || window.webkitAudioContext)();
+    _playNextStartTime = 0;
+  }
+  if (_playCtx.state === 'suspended') _playCtx.resume().catch(() => {});
+  return _playCtx;
 }
 
 function _stopAudioPlayback() {
   _stopped = true;
-  _audioQueue.forEach(url => { try { URL.revokeObjectURL(url); } catch (e) {} });
-  _audioQueue   = [];
-  _audioPlaying = false;
-  if (currentAudio) {
-    try { currentAudio.pause(); } catch (e) {}
-    try { currentAudio.src = ''; }  catch (e) {}
-    currentAudio = null;
-  }
+  // Stop all currently scheduled/playing sources
+  _activeSources.forEach(s => { try { s.stop(); } catch (e) {} });
+  _activeSources  = [];
+  _audioQueue     = [];
+  _audioPlaying   = false;
+  _decodeChain    = Promise.resolve();
+  _playNextStartTime = 0;
   if (_streamController) {
     try { _streamController.abort(); } catch (e) {}
     _streamController = null;
   }
 }
 
-function _playNextChunk() {
-  if (_stopped || _audioQueue.length === 0) {
-    _audioPlaying = false;
-    if (state === 'speaking') setState('idle');
+async function _decodeAndSchedule(arrayBuf) {
+  if (_stopped) return;
+  const ctx = _getPlayCtx();
+  let audioBuf;
+  try {
+    audioBuf = await ctx.decodeAudioData(arrayBuf);
+  } catch (e) {
+    console.warn('[audio] decode failed:', e);
     return;
   }
+  if (_stopped) return;
+
+  const src = ctx.createBufferSource();
+  src.buffer = audioBuf;
+  src.connect(ctx.destination);
+  _activeSources.push(src);
+
+  const now       = ctx.currentTime;
+  const startAt   = Math.max(now + 0.01, _playNextStartTime);
+  _playNextStartTime = startAt + audioBuf.duration;
+
   _audioPlaying = true;
   setState('speaking');
-  const url = _audioQueue.shift();
-  currentAudio = new Audio(url);
-  currentAudio.onended = () => { URL.revokeObjectURL(url); _playNextChunk(); };
-  currentAudio.onerror = () => { URL.revokeObjectURL(url); _playNextChunk(); };
-  currentAudio.play().catch(() => _playNextChunk());
+  src.start(startAt);
+  src.onended = () => {
+    _activeSources = _activeSources.filter(s => s !== src);
+    if (_activeSources.length === 0 && _audioQueue.length === 0) {
+      _audioPlaying = false;
+      if (state === 'speaking') setState('idle');
+    }
+  };
 }
 
 function _enqueueAudio(b64) {
   if (_muted || _stopped) return;
-  const blob = _base64ToBlob(b64, 'audio/mpeg');
-  _audioQueue.push(URL.createObjectURL(blob));
-  if (!_audioPlaying) _playNextChunk();
+  _audioQueue.push(b64);  // track pending count
+  const bin = atob(b64);
+  const buf = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+  const arrayBuf = buf.buffer;
+  _decodeChain = _decodeChain
+    .then(() => { _audioQueue.shift(); return _decodeAndSchedule(arrayBuf); })
+    .catch(e => console.warn('[audio] chain error:', e));
 }
 
 // Energy monitor invokes this when sustained voice is heard while Ultron
@@ -903,11 +975,10 @@ async function sendAudio() {
 }
 
 // Strict full-utterance matches.
-const _STOP_ONLY_RE = /^(stop|ok|okay|ok\s*stop|okay\s*stop|stop\s*ultron|ultron\s*stop|shut\s*up|cancel|enough|be\s*quiet|quiet)[.!,?\s]*$/i;
-// Stop-word lead-ins for short utterances ("stop talking", "stop please",
-// "stop now", "stop all the time stop", etc.) — anything ≤5 words starting
+const _STOP_ONLY_RE = /^(stop|wait|pause|hold\s*on|enough|quiet|be\s*quiet|shut\s*up|cancel|nevermind|never\s*mind|ok|okay|ok\s*stop|okay\s*stop|stop\s*ultron|ultron\s*stop|that['']s\s*(enough|fine|ok)|stop\s*it|stop\s*please)[.!,?\s]*$/i;
+// Stop-word lead-ins for short utterances — anything ≤5 words starting
 // with a stop-ish word is treated as an interrupt, not a query.
-const _STOP_LEAD_RE = /^(stop|ok|okay|shut\s*up|cancel|enough|quiet|be\s+quiet)\b/i;
+const _STOP_LEAD_RE = /^(stop|wait|pause|hold\s*on|shut\s*up|cancel|enough|quiet|be\s+quiet|nevermind)\b/i;
 
 function _isStopOnlyTranscript(text) {
   const t = (text || '').trim();
@@ -1172,6 +1243,103 @@ _updateMuteUI();
 _updateMicUI();
 _updateWakeUI();
 _updateManualStopUI();
+
+// =========================================================================
+// State-aware STOP-word listener
+// ---------------------------------------------------------------------------
+// Runs ONLY while state === 'speaking'. Listens on the AEC-cleaned mic
+// stream (echoCancellation + noiseSuppression are on in getUserMedia, so
+// Ultron's own voice is subtracted before SR sees the audio).
+//
+// On any transcript matching _STOP_ONLY_RE (the existing strict stop regex),
+// fires stopUltronNow() → kills audio, drains queue, returns to idle.
+//
+// Debounce: after a STOP fires, ignore further triggers for 800 ms to
+// prevent the same utterance triggering twice (interim + final results).
+// =========================================================================
+let _stopListener      = null;
+let _stopListenerOn    = false;
+let _lastStopTriggerAt = 0;
+
+function _startStopListener() {
+  if (!SR || _micOff) return;
+  if (_stopListenerOn && _stopListener) return;
+  _stopStopListener();
+  let recog;
+  try { recog = new SR(); } catch (e) { return; }
+  _stopListener   = recog;
+  _stopListenerOn = true;
+  recog.continuous     = true;
+  recog.interimResults = true;
+  recog.lang           = 'en-US';
+
+  recog.onresult = (event) => {
+    if (state !== 'speaking' || _stopListener !== recog) return;
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const text = (event.results[i][0].transcript || '').trim();
+      if (!text) continue;
+      if (_isStopOnlyTranscript(text)) {
+        const now = Date.now();
+        if (now - _lastStopTriggerAt < 800) return;
+        _lastStopTriggerAt = now;
+        console.log('[stop-listener] STOP heard:', text);
+        stopUltronNow();
+        return;
+      }
+    }
+  };
+  recog.onerror = (e) => {
+    if (e.error && e.error !== 'no-speech' && e.error !== 'aborted') {
+      console.warn('[stop-listener] error:', e.error);
+    }
+    if (e.error === 'not-allowed') { _stopStopListener(); }
+  };
+  recog.onend = () => {
+    if (_stopListener !== recog) return;
+    if (state !== 'speaking' || _micOff) { _stopListenerOn = false; return; }
+    try { recog.start(); }
+    catch (e) {
+      setTimeout(() => {
+        if (_stopListener === recog && state === 'speaking') {
+          try { recog.start(); } catch (e2) { _stopListenerOn = false; }
+        }
+      }, 200);
+    }
+  };
+
+  try { recog.start(); }
+  catch (e) { _stopListenerOn = false; }
+}
+
+function _stopStopListener() {
+  if (_stopListener) {
+    try { _stopListener.onresult = null; } catch (e) {}
+    try { _stopListener.onerror  = null; } catch (e) {}
+    try { _stopListener.onend    = null; } catch (e) {}
+    try { _stopListener.abort();          } catch (e) {}
+    _stopListener = null;
+  }
+  _stopListenerOn = false;
+}
+
+// =========================================================================
+// Stop action — callable from the ⏹ button or Escape key.
+// Stops audio playback and aborts the SSE stream without starting a new
+// recording (unlike barge-in which starts listening again).
+// =========================================================================
+function stopUltronNow() {
+  if (state === 'recording') { stopRecording(); return; }
+  _stopAudioPlayback();   // aborts stream, stops audio sources, sets _stopped
+  setState('idle');
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !e.defaultPrevented) {
+    if (state === 'speaking' || state === 'recording' || state === 'processing') {
+      stopUltronNow();
+    }
+  }
+});
 
 // Browsers require a user gesture before getUserMedia / autoplay. Hook on
 // the first click anywhere on the page (orb click also counts).

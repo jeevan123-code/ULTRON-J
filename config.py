@@ -119,35 +119,34 @@ OPENAI_API_KEY           = os.environ.get("OPENAI_API_KEY", "").strip() or None
 # ElevenLabs voice IDs (mood → voice character)
 ELEVENLABS_VOICES = {
     "FOCUSED":    {"voice_id": "onwK4N9gsSGsGA4xWAcb", "name": "Daniel"},
-    "CURIOUS":    {"voice_id": "21m00Tcm4TlvDq8ikWAM", "name": "Rachel"},
-    "ALERT":      {"voice_id": "ODq5zmih8GrVes37Dizd", "name": "Patrick"},
-    "CONCERNED":  {"voice_id": "Xb0lHlNL5OcN7IvsDmeB", "name": "Alice"},
-    "DETERMINED": {"voice_id": "iP3nJ0z0nHcGdpLBXOS9", "name": "Chris"},
-    "ANALYTICAL": {"voice_id": "yoZ06aMxZJJ28mfd3POQ", "name": "Sam"},
+    "CURIOUS":    {"voice_id": "onwK4N9gsSGsGA4xWAcb", "name": "Daniel"},
+    "ALERT":      {"voice_id": "onwK4N9gsSGsGA4xWAcb", "name": "Daniel"},
+    "CONCERNED":  {"voice_id": "onwK4N9gsSGsGA4xWAcb", "name": "Daniel"},
+    "DETERMINED": {"voice_id": "onwK4N9gsSGsGA4xWAcb", "name": "Daniel"},
+    "ANALYTICAL": {"voice_id": "onwK4N9gsSGsGA4xWAcb", "name": "Daniel"},
     "IDLE":       {"voice_id": "onwK4N9gsSGsGA4xWAcb", "name": "Daniel"},
 }
 
-# OpenAI TTS voices (mood → voice name)
+# OpenAI TTS voices — "onyx" is the deepest, most authoritative voice
 OPENAI_TTS_VOICES = {
-    "FOCUSED":    "echo",     # clear, authoritative
-    "CURIOUS":    "nova",     # warm, engaging
-    "ALERT":      "echo",     # sharp, direct
-    "CONCERNED":  "alloy",    # calm, measured
-    "DETERMINED": "onyx",     # deep, commanding
-    "ANALYTICAL": "shimmer",  # thoughtful
-    "IDLE":       "fable",    # relaxed
+    "FOCUSED":    "onyx",
+    "CURIOUS":    "onyx",
+    "ALERT":      "onyx",
+    "CONCERNED":  "onyx",
+    "DETERMINED": "onyx",
+    "ANALYTICAL": "onyx",
+    "IDLE":       "onyx",
 }
 
-# Edge TTS voices (FREE — Microsoft Neural, no API key needed)
-# Best JARVIS-like voices: en-US-GuyNeural, en-US-ChristopherNeural
+# Edge TTS voices — Christopher is the deepest authoritative male voice
 EDGE_TTS_VOICES = {
-    "FOCUSED":    "en-US-GuyNeural",
-    "CURIOUS":    "en-US-AnaNeural",
+    "FOCUSED":    "en-US-ChristopherNeural",
+    "CURIOUS":    "en-US-ChristopherNeural",
     "ALERT":      "en-US-ChristopherNeural",
-    "CONCERNED":  "en-US-AriaNeural",
+    "CONCERNED":  "en-US-ChristopherNeural",
     "DETERMINED": "en-US-ChristopherNeural",
     "ANALYTICAL": "en-US-GuyNeural",
-    "IDLE":       "en-US-GuyNeural",
+    "IDLE":       "en-US-ChristopherNeural",
 }
 
 # Speech rate per mood (1.0 = normal)

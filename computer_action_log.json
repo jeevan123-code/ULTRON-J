@@ -772,5 +772,23 @@
     },
     "success": false,
     "error": "Couldn't open 'chrome and search hot stuff': none of ['chrome and search hot stuff'] found on PATH"
+  },
+  {
+    "timestamp": "2026-05-31T22:34:05.817380",
+    "action": "open_app",
+    "params": {
+      "app": "brave"
+    },
+    "success": true,
+    "error": ""
+  },
+  {
+    "timestamp": "2026-05-31T22:37:53.386637",
+    "action": "open_app",
+    "params": {
+      "app": "brave"
+    },
+    "success": true,
+    "error": ""
   }
 ]
