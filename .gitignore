@@ -4,6 +4,9 @@ __pycache__/
 *.db-journal
 *.log
 *.txt
+!requirements.txt
+!requirements-dev.txt
+!BASELINE_CAPABILITIES.txt
 memory.json
 episodic_memory.json
 entity_graph.json
