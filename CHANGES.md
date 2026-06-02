@@ -72,3 +72,98 @@ Acceptance verified:
 - `import app` succeeds and registers all 210 routes / 7 blueprints.
 - `pytest tests/test_capabilities.py` still **113 passed** (one record
   is parametrized so 113 tests = 114 records).
+
+---
+
+## Phase 1 — SECURITY LOCKDOWN
+
+The single most important phase. Before this, `app.py` had `CORS(app)`
+(all origins), `host="0.0.0.0"` (all interfaces), and **zero auth on
+~200 endpoints**. `config.ULTRON_API_KEYS` existed but was never
+checked. Anything reachable on Wi-Fi could call `/self_upgrade/run`
+(which rewrites code), `/computer/action` (which moves the mouse),
+`/phone/tap` (which controls the phone), etc.
+
+### 1.1 Auth gate (new file `auth.py`)
+- `install_auth(app)` registers a `before_request` hook that runs
+  before any blueprint route.
+- Keys configured → require `X-API-Key` header (or `?api_key=` query
+  param) match → otherwise 401.
+- Keys not configured → "dev mode": loopback (`127.0.0.1` / `::1`)
+  passes; remote callers get **403** with a hint pointing at `.env`.
+- Bypass list: `OPTIONS` preflight (CORS handles it), `/`, `/health`,
+  anything under `/static/`, plus anything in `ULTRON_PUBLIC_PATHS`
+  env var. The voice UI at `/voice` is NOT public by default; if the
+  user wants it open, set `ULTRON_PUBLIC_PATHS=/voice`.
+
+### 1.2 CORS lockdown (`app.py`)
+- Replaced `CORS(app)` with origins read from `ULTRON_ALLOWED_ORIGINS`
+  (defaults to `http://localhost:5000,http://127.0.0.1:5000`).
+- `supports_credentials=True` so the UI can still send the API-key
+  header alongside the request.
+
+### 1.3 Explicit network bind (`app.py`)
+- Default `app.run(host=...)` flipped from `0.0.0.0` to `127.0.0.1`.
+- `ULTRON_HOST` and `ULTRON_PORT` override.
+- **Hard refuse-to-bind**: if `ULTRON_HOST=0.0.0.0` is set without
+  `ULTRON_API_KEYS`, the app prints a warning and `sys.exit(2)`.
+  That combination was the original hole — we won't let it recur
+  silently.
+
+### 1.4 Confirm-token gate (new file `confirm_gate.py`)
+- Second layer beyond auth. Auth proves you're allowed to call ANY
+  endpoint; this proves you MEAN to call THIS endpoint.
+- Contract: caller must include
+  `{"confirm": "I CONFIRM <action_name>"}` in the JSON body or the
+  route returns **428 Precondition Required** with a self-describing
+  payload (action, required field, expected value).
+- Wired into 6 routes that rewrite code or run the upgrade:
+  | Route                             | Action name           |
+  |-----------------------------------|-----------------------|
+  | `POST /self_upgrade/run`          | `self_upgrade_run`    |
+  | `POST /self_modify/improve`       | `self_modify_improve` |
+  | `POST /self_modify/patch`         | `self_modify_patch`   |
+  | `POST /self_modify/rollback`      | `self_modify_rollback`|
+  | `POST /self_modify/apply/<id>`    | `self_modify_apply`   |
+  | `POST /self_modify/rollback/<id>` | `self_modify_rollback`|
+- `/self_modify/propose` and `/self_modify/proposals` are read-only
+  / queue-only — gated by auth only.
+- Phase 7.3 will consolidate this with the destructive-shell guards
+  in `task_orchestrator` and `intent_router`, and switch from the
+  literal-string token to a real signed challenge + dry-run preview.
+
+### 1.5 Phone + click input validation (`app.py`, `computer_control.py`)
+- `/phone/tap`: `x,y` coerced to int in `[0,4096]` or 400.
+- `/phone/key`: `keycode` coerced to int in `[0,300]` or 400.
+- `/phone/volume`: `action` restricted to allow-list `{up,down,mute}`
+  or 400.
+- `execute_computer_action("click", ...)`: `x,y` in `[0,4096]`,
+  `clicks` in `[1,10]` (prevents a typo'd `clicks=1_000_000` from
+  hammering the desktop for minutes).
+
+### Phase 1 acceptance — `tests/test_auth.py`
+33 tests covering all four properties from the plan:
+- No keys + remote → 403 (+ loopback dev-mode passes)
+- Keys + missing/wrong header → 401; correct header or `?api_key=` → passes
+- Public-path + `OPTIONS` preflight bypass
+- `/self_upgrade/run` + all 5 `/self_modify/*` write routes require
+  the confirm token; near-miss values (`"yes"`) still rejected
+- `/phone/tap`, `/phone/key`, `/phone/volume` reject non-int / out-of-
+  range / unknown-action inputs; valid inputs pass; float coords
+  coerce to int (acceptable behavior)
+
+Verified end-to-end:
+- `pytest tests/` → **146 passed** (113 capabilities + 33 auth, no regressions)
+- `import app` still boots cleanly (210 routes, 1 `before_request` hook)
+- Smoke: `/self_upgrade/run` with the right confirm actually kicks off
+  the upgrade pipeline (gate doesn't false-positive on legitimate intent)
+
+To use this from a phone or another device on the LAN:
+1. Add `ULTRON_API_KEYS=mySecret123` (and any others, comma-separated)
+   to `.env`.
+2. Add `ULTRON_HOST=0.0.0.0`.
+3. Add `ULTRON_ALLOWED_ORIGINS=http://<your-ip>:5000` if calling from
+   a browser at that origin.
+4. Send the key with every request:
+   `curl -H "X-API-Key: mySecret123" http://<your-ip>:5000/health`.
+The app will refuse to bind `0.0.0.0` if step 1 is missing.
