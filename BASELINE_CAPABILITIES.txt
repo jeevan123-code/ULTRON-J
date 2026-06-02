@@ -1,7 +1,7 @@
 === ULTRON-J CAPABILITY TABLE ===
 PASS=114  FAIL=0  SKIP=0  TOTAL=114
 
-PASS  create_file                                         Written 2 bytes to /tmp/pytest-of-jeevan/pytest-1/test_creat
+PASS  create_file                                         Written 2 bytes to /tmp/pytest-of-jeevan/pytest-2/test_creat
 PASS  file_read                                           got='hi'
 PASS  file_write                                          
 PASS  append_file                                         
