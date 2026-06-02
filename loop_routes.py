@@ -269,9 +269,15 @@ def self_modify_improve():
         "request": "Make the chat bubble wider with dark green theme",
         "target": "index.html",   // optional, auto-detected if omitted
         "use_claude": true,        // use Claude.ai loop (needs session)
-        "verify": true             // take before/after screenshots
+        "verify": true,            // take before/after screenshots
+        "confirm": "I CONFIRM self_modify_improve"   // Phase 1.4 — required
     }
     """
+    from confirm_gate import require_confirm
+    denial = require_confirm("self_modify_improve")
+    if denial:
+        return denial
+
     if not SELF_MODIFY_AVAILABLE:
         return jsonify({"success": False, "error": "self_modify module not available"})
 
@@ -290,8 +296,17 @@ def self_modify_improve():
 def self_modify_patch():
     """
     Directly patch a file with provided code (no LLM call).
-    Body: {"filename": "index.html", "code": "<!DOCTYPE html>..."}
+    Body: {
+        "filename": "index.html",
+        "code": "<!DOCTYPE html>...",
+        "confirm": "I CONFIRM self_modify_patch"     // Phase 1.4 — required
+    }
     """
+    from confirm_gate import require_confirm
+    denial = require_confirm("self_modify_patch")
+    if denial:
+        return denial
+
     if not SELF_MODIFY_AVAILABLE:
         return jsonify({"success": False, "error": "self_modify module not available"})
 
@@ -309,8 +324,16 @@ def self_modify_patch():
 def self_modify_rollback():
     """
     Roll back the last patch to a file.
-    Body: {"filename": "index.html"}
+    Body: {
+        "filename": "index.html",
+        "confirm": "I CONFIRM self_modify_rollback"  // Phase 1.4 — required
+    }
     """
+    from confirm_gate import require_confirm
+    denial = require_confirm("self_modify_rollback")
+    if denial:
+        return denial
+
     if not SELF_MODIFY_AVAILABLE:
         return jsonify({"success": False, "error": "self_modify module not available"})
 

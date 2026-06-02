@@ -884,11 +884,28 @@ def execute_computer_action(action: str, params: dict) -> Dict:
         return take_screenshot(region, save_path=save_path)
 
     elif action == "click":
+        # Phase 1.5 — coerce + bounds-check. pyautogui clamps coordinates
+        # internally on most platforms, but a bad clicks value (e.g.
+        # 1_000_000) would hammer the desktop for minutes. 4096 covers
+        # any plausible monitor width/height; 10 clicks covers any sane
+        # human double/triple-click chain.
+        def _coord(name, lo, hi, default):
+            try:
+                v = int(params.get(name, default))
+            except (TypeError, ValueError):
+                return None
+            return v if lo <= v <= hi else None
+        x = _coord("x", 0, 4096, 0)
+        y = _coord("y", 0, 4096, 0)
+        clicks_n = _coord("clicks", 1, 10, 1)
+        if x is None or y is None or clicks_n is None:
+            return {"success": False,
+                    "error": "x,y must be in [0,4096], clicks in [1,10]"}
         return click(
-            x      = int(params.get("x", 0)),
-            y      = int(params.get("y", 0)),
+            x      = x,
+            y      = y,
             button = params.get("button", "left"),
-            clicks = int(params.get("clicks", 1)),
+            clicks = clicks_n,
         )
 
     elif action in ("type", "type_text"):

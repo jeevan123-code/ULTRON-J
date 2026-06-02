@@ -1235,12 +1235,45 @@ def phone_wireless_status():
     })
 
 
+# ── Phone input validation helpers — Phase 1.5 ────────────────────────────────
+# These routes cast request.json values straight into `adb input` args. Before
+# the gate, an unvalidated string (or shell metacharacters in a clever payload)
+# would have been spliced into the adb command. subprocess.run([...]) without
+# shell=True already avoids the shell-injection class — but a bad value could
+# still cause adb to misbehave or DOS the phone. Coerce to int, bounds-check,
+# 400 on bad input.
+
+def _int_in_range(data: dict, name: str, lo: int, hi: int):
+    """Return int in [lo, hi] or None if missing/bad/out-of-range."""
+    raw = data.get(name)
+    try:
+        v = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return v if lo <= v <= hi else None
+
+
+# Android KeyEvent constants we actually want to permit. Anything outside this
+# range is either undefined, vendor-specific, or a power/system keycode we
+# don't want exposed over HTTP.
+_PHONE_KEYCODE_MAX = 300
+
+# Volume actions and their KeyEvent codes — single source of truth.
+_PHONE_VOLUME_KEYCODES = {"up": 24, "down": 25, "mute": 164}
+
+
 @app.route("/phone/tap", methods=["POST"])
 def phone_tap():
-    """Tap a specific coordinate on the phone screen. Body: {"x": 500, "y": 900}"""
+    """Tap a specific coordinate on the phone screen.
+    Body: {"x": 500, "y": 900}.  Phase 1.5 — x,y coerced to int in [0,4096].
+    """
     from task_orchestrator import PhoneBridge
-    data = request.json or {}
-    x, y = data.get("x", 540), data.get("y", 960)
+    data = request.get_json(silent=True) or {}
+    x = _int_in_range(data, "x", 0, 4096)
+    y = _int_in_range(data, "y", 0, 4096)
+    if x is None or y is None:
+        return jsonify({"success": False,
+                        "error": "x,y must be integers in [0,4096]"}), 400
     if not PhoneBridge.is_connected():
         return jsonify({"success": False, "error": "Phone not connected"})
     try:
@@ -1254,10 +1287,14 @@ def phone_tap():
 
 @app.route("/phone/key", methods=["POST"])
 def phone_key():
-    """Send a keyevent to the phone. Body: {"keycode": 3}  (3=HOME, 4=BACK, 26=POWER)"""
+    """Send a keyevent to the phone. Body: {"keycode": 3} (3=HOME, 4=BACK, ...).
+    Phase 1.5 — keycode coerced to int in [0,300]."""
     from task_orchestrator import PhoneBridge
-    data    = request.json or {}
-    keycode = data.get("keycode", 3)
+    data    = request.get_json(silent=True) or {}
+    keycode = _int_in_range(data, "keycode", 0, _PHONE_KEYCODE_MAX)
+    if keycode is None:
+        return jsonify({"success": False,
+                        "error": f"keycode must be an integer in [0,{_PHONE_KEYCODE_MAX}]"}), 400
     if not PhoneBridge.is_connected():
         return jsonify({"success": False, "error": "Phone not connected"})
     try:
@@ -1271,12 +1308,15 @@ def phone_key():
 
 @app.route("/phone/volume", methods=["POST"])
 def phone_volume():
-    """Adjust phone volume. Body: {"action": "up"/"down"/"mute"}"""
+    """Adjust phone volume. Body: {"action": "up"/"down"/"mute"}.
+    Phase 1.5 — action restricted to the allow-list."""
     from task_orchestrator import PhoneBridge
-    data   = request.json or {}
-    action = data.get("action", "up")
-    keycodes = {"up": 24, "down": 25, "mute": 164}
-    keycode  = keycodes.get(action, 24)
+    data   = request.get_json(silent=True) or {}
+    action = (data.get("action") or "").strip().lower()
+    if action not in _PHONE_VOLUME_KEYCODES:
+        return jsonify({"success": False,
+                        "error": f"action must be one of {sorted(_PHONE_VOLUME_KEYCODES)}"}), 400
+    keycode = _PHONE_VOLUME_KEYCODES[action]
     if not PhoneBridge.is_connected():
         return jsonify({"success": False, "error": "Phone not connected"})
     try:
@@ -1290,7 +1330,16 @@ def phone_volume():
 
 @app.route("/self_upgrade/run", methods=["POST"])
 def run_self_upgrade():
-    """Trigger the self-upgrade pipeline: diagnose → fix → validate → apply."""
+    """Trigger the self-upgrade pipeline: diagnose → fix → validate → apply.
+
+    Phase 1.4 — requires `{"confirm": "I CONFIRM self_upgrade_run"}` in
+    the JSON body. Rewriting code on an auth'd-but-careless POST was the
+    biggest accidental-destruction risk in the original API surface.
+    """
+    from confirm_gate import require_confirm
+    denial = require_confirm("self_upgrade_run")
+    if denial:
+        return denial
     try:
         from self_upgrade import run_upgrade
         return jsonify(run_upgrade())
