@@ -1,0 +1,117 @@
+=== ULTRON-J CAPABILITY TABLE ===
+PASS=114  FAIL=0  SKIP=0  TOTAL=114
+
+PASS  create_file                                         Written 2 bytes to /tmp/pytest-of-jeevan/pytest-1/test_creat
+PASS  file_read                                           got='hi'
+PASS  file_write                                          
+PASS  append_file                                         
+PASS  file_list                                           
+PASS  delete_file                                         
+PASS  calculate                                           result='12'
+PASS  run_python                                          result='10\n' err=
+PASS  note_create                                         
+PASS  git_status                                          
+PASS  path_normalize:/home/user                           resolved='/home/jeevan/Desktop'
+PASS  weather_fetch                                       Hyderabad: Partly Cloudy , 33°C (feels 26°C), Humidity 37%, 
+PASS  web_scrape                                          ok
+PASS  pattern_count==81                                   got=81
+PASS  handler:repeat_last                                 
+PASS  handler:repeat_last                                 
+PASS  handler:help_me_now                                 
+PASS  handler:help_me_now                                 
+PASS  handler:help_me_now                                 
+PASS  handler:run_script                                  
+PASS  handler:read_file                                   
+PASS  handler:read_file                                   
+PASS  handler:read_file                                   
+PASS  handler:write_file                                  
+PASS  handler:append_to_file                              
+PASS  handler:edit_file                                   
+PASS  handler:find_file_query                             
+PASS  handler:delete_folder                               
+PASS  handler:delete_file                                 
+PASS  handler:rename_file                                 
+PASS  handler:copy_file                                   
+PASS  handler:move_file                                   
+PASS  handler:zip_item                                    
+PASS  handler:list_dir                                    
+PASS  handler:list_dir                                    
+PASS  handler:list_dir                                    
+PASS  handler:list_dir                                    
+PASS  handler:list_dir                                    
+PASS  handler:create_file_named                           
+PASS  handler:create_file_in_dir                          
+PASS  handler:create_file_name_only                       
+PASS  handler:create_file_name_only                       
+PASS  handler:open_file                                   
+PASS  handler:open_folder                                 
+PASS  handler:open_and_play                               
+PASS  handler:open_and_search                             
+PASS  handler:open_app                                    
+PASS  handler:open_app                                    
+PASS  handler:open_app                                    
+PASS  handler:get_time                                    
+PASS  handler:get_time                                    
+PASS  handler:get_time                                    
+PASS  handler:get_time                                    
+PASS  handler:get_time                                    
+PASS  handler:get_date                                    
+PASS  handler:get_date                                    
+PASS  handler:take_screenshot_to                          
+PASS  handler:take_screenshot                             
+PASS  handler:take_screenshot                             
+PASS  handler:take_screenshot                             
+PASS  handler:volume_up                                   
+PASS  handler:volume_up                                   
+PASS  handler:volume_down                                 
+PASS  handler:volume_down                                 
+PASS  handler:volume_mute                                 
+PASS  handler:media_pause                                 
+PASS  handler:media_play                                  
+PASS  handler:media_next                                  
+PASS  handler:media_next                                  
+PASS  handler:media_prev                                  
+PASS  handler:media_prev                                  
+PASS  handler:minimize_window                             
+PASS  handler:maximize_window                             
+PASS  handler:close_window                                
+PASS  handler:close_app                                   
+PASS  handler:lock_screen                                 
+PASS  handler:sleep_computer                              
+PASS  handler:empty_trash                                 
+PASS  handler:system_info                                 
+PASS  handler:brightness_up                               
+PASS  handler:brightness_down                             
+PASS  handler:press_escape                                
+PASS  handler:press_enter                                 
+PASS  handler:press_tab                                   
+PASS  handler:press_backspace                             
+PASS  handler:press_delete                                
+PASS  handler:press_space                                 
+PASS  handler:press_key_name                              
+PASS  handler:scroll_down                                 
+PASS  handler:scroll_up                                   
+PASS  handler:type_text_cmd                               
+PASS  handler:play_media_on                               
+PASS  handler:play_media                                  
+PASS  handler:search_on                                   
+PASS  handler:search_web                                  
+PASS  phrase:open chrome                                  expected=open_app got=open_app
+PASS  phrase:open my resume.pdf                           expected=open_file got=open_file
+PASS  phrase:read notes.txt                               expected=read_file got=read_file
+PASS  phrase:list files in downloads folder               expected=list_dir got=list_dir
+PASS  phrase:what time is it                              expected=get_time got=get_time
+PASS  phrase:what's the date today                        expected=get_date got=get_date
+PASS  phrase:take a screenshot                            expected=take_screenshot got=take_screenshot
+PASS  phrase:volume up                                    expected=volume_up got=volume_up
+PASS  phrase:mute                                         expected=volume_mute got=volume_mute
+PASS  phrase:pause                                        expected=media_pause got=media_pause
+PASS  phrase:next track                                   expected=media_next got=media_next
+PASS  phrase:scroll down                                  expected=scroll_down got=scroll_down
+PASS  phrase:press enter                                  expected=press_enter got=press_enter
+PASS  phrase:press escape                                 expected=press_escape got=press_escape
+PASS  phrase:search the web for wheat disea               expected=search_web got=search_web
+PASS  phrase:repeat                                       expected=repeat_last got=repeat_last
+PASS  phrase:help me                                      expected=help_me_now got=help_me_now
+PASS  phrase:lock screen                                  expected=lock_screen got=lock_screen
+PASS  phrase:system info                                  expected=system_info got=system_info
