@@ -10,11 +10,17 @@
 # screen_engine.py, voice_identity.py and are not required for boot.
 #
 # Optional ML/voice deps (torch, torchaudio, openai-whisper, mem0ai,
-# browser-use, sentence-transformers, beautifulsoup4, opencv-python,
-# duckduckgo-search/ddgs, kokoro-onnx, langchain-*, noisereduce,
-# pvporcupine, pvrecorder, pyaudio, pynput, pypdf, soundfile,
-# speechbrain, wikipedia) are also try/except-guarded — install
-# on demand per feature, not by default.
+# browser-use, sentence-transformers, opencv-python, kokoro-onnx,
+# langchain-*, noisereduce, pvporcupine, pvrecorder, pyaudio, pynput,
+# pypdf, soundfile, speechbrain, wikipedia) are also try/except-guarded
+# — install on demand per feature, not by default.
+#
+# Phase 3.2 promoted from optional to required:
+#   beautifulsoup4 + lxml + soupsieve   web scraping (action_engine.scrape_url)
+#   ddgs + primp + fake-useragent       DuckDuckGo search backend
+#   brotli + h2 + hpack + hyperframe    transitive HTTP deps of the above
+#   socksio                             optional socks proxy support of ddgs
+# Reflection-engine proposal #0 ("Enable web scraping") is now obsolete.
 
 aiohappyeyeballs==2.6.2
 aiohttp==3.13.5
@@ -25,7 +31,9 @@ anyio==4.13.0
 attrs==26.1.0
 av==17.0.1
 bcrypt==5.0.0
+beautifulsoup4==4.14.3
 blinker==1.9.0
+brotli==1.2.0
 build==1.5.0
 certifi==2026.5.20
 cffi==2.0.0
@@ -33,9 +41,11 @@ charset-normalizer==3.4.7
 chromadb==1.5.9
 click==8.4.1
 ctranslate2==4.7.2
+ddgs==9.14.4
 distro==1.9.0
 durationpy==0.10
 edge-tts==7.2.8
+fake-useragent==2.2.0
 faster-whisper==1.2.1
 filelock==3.29.0
 Flask==3.1.3
@@ -48,11 +58,14 @@ greenlet==3.5.1
 groq==1.4.0
 grpcio==1.80.0
 h11==0.16.0
+h2==4.3.0
 hf-xet==1.5.0
+hpack==4.1.0
 httpcore==1.0.9
 httptools==0.8.0
 httpx==0.28.1
 huggingface_hub==1.17.0
+hyperframe==6.1.0
 idna==3.17
 importlib_resources==7.1.0
 itsdangerous==2.2.0
@@ -60,6 +73,7 @@ Jinja2==3.1.6
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 kubernetes==36.0.1
+lxml==6.1.1
 markdown-it-py==4.2.0
 MarkupSafe==3.0.3
 mdurl==0.1.2
@@ -85,6 +99,7 @@ pip==24.0
 piper-tts==1.4.2
 playsound3==3.3.1
 playwright==1.60.0
+primp==1.3.1
 propcache==0.5.2
 protobuf==6.33.6
 psutil==7.2.2
@@ -119,6 +134,8 @@ setuptools==82.0.1
 shellingham==1.5.4
 six==1.17.0
 sniffio==1.3.1
+socksio==1.0.0
+soupsieve==2.8.4
 sounddevice==0.5.5
 tabulate==0.10.0
 tenacity==9.1.4

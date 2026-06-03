@@ -1149,9 +1149,24 @@ def start_goal_execution(goal_id: str) -> bool:
 
 
 def execute_goal_step(goal_id: str, task: dict) -> dict:
-    """Execute one step of a goal and update its state."""
+    """Execute one step of a goal and update its state.
+
+    Phase 3.3 — params resolution: a task may carry an explicit
+    ``params`` dict (e.g. ``{"location": "Hyderabad"}`` for
+    weather_fetch, or ``{"title": "...", "content": "..."}`` for
+    note_create). Without this, every goal step gets a generic
+    ``{"content": desc, "prompt": desc}`` payload, which works for
+    ask_llm/run_code but never for tools that read named params —
+    making any concrete goal unable to complete.
+
+    Resolution order: task["params"] overrides the desc-based defaults.
+    Defaults stay so old templated tasks that rely on the
+    ``content``/``prompt`` shape still work.
+    """
     action_type = task.get("tool", "ask_llm")
-    params      = {"content": task.get("description", ""), "prompt": task.get("description", "")}
+    desc        = task.get("description", "")
+    params      = {"content": desc, "prompt": desc}
+    params.update(task.get("params") or {})
     update_goal(goal_id, status=GoalStatus.EXECUTING)
 
     result = execute_action(action_type, params)

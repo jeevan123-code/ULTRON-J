@@ -214,7 +214,19 @@ def observe_environment() -> dict:
     obs["ram_gb_free"]  = mem.get("free_gb", 0)
 
     disk = get_disk_usage()
-    obs["disk_critical"] = any(d.get("percent", 0) > 92 for d in disk.values())
+    # Phase 3.1 fix — exclude pseudo-filesystems and snap mounts. Snap
+    # packages mount as squashfs images that are 100% full BY DESIGN
+    # (read-only loop devices), so the old `any > 92` check fired every
+    # cycle on a system with any snap installed and short-circuited the
+    # entire goal-execution path into an alert spam.
+    _PSEUDO_MOUNT_PREFIXES = ("/snap/", "/var/lib/docker/", "/proc/", "/sys/", "/dev/")
+    def _is_real_disk(mountpoint: str) -> bool:
+        return not any(mountpoint.startswith(p) for p in _PSEUDO_MOUNT_PREFIXES)
+    obs["disk_critical"] = any(
+        d.get("percent", 0) > 92
+        for mp, d in disk.items()
+        if _is_real_disk(mp)
+    )
 
     # Desktop
     desktop = get_desktop_files()

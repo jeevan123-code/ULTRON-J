@@ -240,3 +240,109 @@ pytest tests/ --timeout=20 -q
 - network-dependent tools (weather_fetch, web_scrape): **PASS** (no
   skips when network is up)
 - 81-pattern intent dispatch audit: **all green** (no shadowing)
+
+---
+
+## Phase 3 — One autonomous goal completes end-to-end
+
+The reflection log had been flat-zero for weeks: `total_goals_ever=0`,
+`success_rate_pct=0`, `avg_execution_score=0`. The loop was healthy
+but idle. Phase 3 traced the lifecycle, found and fixed two real
+blockers, and drove one real goal through the full pipeline.
+
+### 3.1 Goal-lifecycle trace + disk-critical bug fix
+Live trace before any edit (per master-prompt rule #5):
+```
+load_goals()          -> [] (file doesn't exist)
+get_active_goals()    -> 0
+get_next_goal()       -> None
+3 decision cycles     -> {'action':'alert','msg':'Disk critical — cleanup needed'} x 3
+```
+Two root causes for the flat-zero metrics:
+1. **No goals exist** — `goals.json` was empty and no module
+   auto-creates one. The loop sits on `observe`/`self_evaluate` forever.
+2. **`disk_critical` false-positive bug** — `autonomous_loop.observe_environment`
+   was running `any(percent > 92 for d in get_disk_usage().values())`,
+   but `psutil.disk_partitions()` on this Linux box reports squashfs
+   snap mounts (`/snap/core22`, `/snap/ngrok`, `/snap/snapd`) at
+   **100.0% — by design** (they're read-only loop devices). The check
+   fired every cycle and short-circuited `decide_next_action` into
+   alert-spam, blocking the goal path even when goals did exist.
+   Fix: exclude `/snap/`, `/var/lib/docker/`, `/proc/`, `/sys/`, `/dev/`
+   mount-point prefixes from the disk_critical check. After the fix,
+   `disk_critical = False`, decisions flow to observe/self_evaluate
+   then start_goal once goals exist.
+
+### 3.2 Web-search dependency fix
+Reflection log flagged "Web search not being used — verify SearXNG
+and DDG integrations." Live probe before edit:
+```
+DDGS_AVAILABLE          False  (module 'ddgs' not installed)
+SEARXNG_URL probe       Connection refused (no local SearXNG server)
+import bs4              ModuleNotFoundError
+```
+Actioned proposal #0 from `proposals.json`:
+- Installed `ddgs==9.14.4` + `beautifulsoup4==4.14.3` plus transitive
+  deps (`brotli`, `lxml`, `soupsieve`, `primp`, `fake-useragent`,
+  `h2`, `hpack`, `hyperframe`, `socksio`) — 11 new packages total.
+- After install: `DDGS_AVAILABLE=True`, DDG returned 3 results for
+  "hyderabad weather", `web_scrape("https://example.com")` succeeded.
+- `requirements.txt` updated (now 154 lines). Header note added: bs4,
+  ddgs, lxml are now required, not optional.
+- `proposals.json` proposal #0 marked `status: applied`, with
+  applied_at + applied_by + notes. SearXNG remains optional (it's a
+  self-hosted server, beyond a pip install).
+
+### 3.3 Pre-populated-task fix + tests/test_autonomous_goal.py
+**Design gap discovered:** `action_engine.execute_goal_step` was
+building params as `{"content": desc, "prompt": desc}` and IGNORING
+any `task["params"]`. So a goal that wanted `weather_fetch` (needs
+`params.location`) or `note_create` (needs `title` + `content`) could
+never actually complete. Fix: merge `task.get("params") or {}` on top
+of the desc-based defaults — backward compatible with old ask_llm
+tasks.
+
+`tests/test_autonomous_goal.py` (NEW): seeds the demo goal
+"fetch Hyderabad weather → save a note" with two pre-populated tasks
+(weather_fetch + note_create), drives the observe→decide→plan→act→
+evaluate cycle in-process for ≤15 iterations, then asserts:
+- goal reaches `COMPLETED`
+- `execution_score > 0` and `progress_pct >= 80`
+- every task ended in `SUCCESS` (catches "goal marked complete but a
+  silent task failure" mode)
+- `reflection.analyze_performance()`:
+  - `completed_today >= 1`
+  - `success_rate_pct > 0`
+  - `avg_execution_score > 0`
+
+Backs up + restores `goals.json` / `execution_log.json` so the test
+doesn't pollute user state.
+
+### Phase 3 acceptance — live demonstration
+Ran the same flow OUTSIDE the test (no state restore) to leave a
+real completed goal on disk:
+```
+goal completed in 3 iterations
+
+=== final goal state ===
+status:           completed
+progress_pct:     100
+execution_score:  10
+result_summary:   Completed 2/2 tasks
+tasks:
+  [SUCCESS] step_0  weather_fetch   'Hyderabad: Sunny, 35°C ...'
+  [SUCCESS] step_1  note_create     "Note created: 'Phase 3 live demo...'"
+
+=== reflection.analyze_performance() ===
+  total_goals_ever          1
+  completed_ever            1
+  completed_today           1
+  success_rate_pct          100.0
+  total_actions_logged      2
+  avg_execution_score       10.0
+```
+Acceptance gate met: success rate **>0%** (actually 100%), at least
+one genuinely-completed goal logged.
+
+Suite after Phase 3: **229 passed in 8.63s** (was 228; +1 from the
+new autonomous-goal test). No regressions.

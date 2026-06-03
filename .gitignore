@@ -21,6 +21,8 @@ patterns.json
 proposals.json
 tool_stats.json
 error_log.json
+goals.json
+execution_log.json
 browser_log.json
 browser_session.json
 voice_log.json

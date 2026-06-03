@@ -11,13 +11,13 @@ file) is committed on this branch and verifiable from a fresh checkout.
 |---|--------------------|----------------------------------------------------------------------------|--------|
 | 1 | Security           | auth enforced; CORS locked; loopback default; dangerous ops gated          | 🟩 **green** — auth gate + CORS + loopback bind + confirm-token gate on 6 write-routes + phone/click input validation, all proved by 33 tests in `tests/test_auth.py` |
 | 2 | Core tools         | 100% on capability suite, repeatable                                       | 🟩 **green** — 228/228 PASS across capabilities + auth + 81-pattern intent audit; baseline locked in `BASELINE_CAPABILITIES.txt`; `/home/user` normalization verified end-to-end; poisoned `tool_stats.json` archived |
-| 3 | Autonomous loop    | >0 real goals completed; success rate trending up; no crashes              | ⬜ pending (Phase 3) |
+| 3 | Autonomous loop    | >0 real goals completed; success rate trending up; no crashes              | 🟩 **green** — disk_critical false-positive on squashfs mounts fixed; execute_goal_step now honors task["params"]; live demo: 1 goal completed end-to-end (weather_fetch + note_create), reflection metrics show 100% success rate, avg_execution_score 10.0; locked by `tests/test_autonomous_goal.py` |
 | 4 | Resource health    | health_score consistently high; no `mem_rising` anomalies                  | ⬜ pending (Phase 4) |
 | 5 | Voice              | TTS + STT round-trips pass; error rate ~0                                  | 🟨 likely already true (per plan) — no regression test yet |
 | 6 | Architecture       | one documented primary path; no dead/duplicate code                        | ⬜ pending (Phase 5) |
 | 7 | Error handling     | 0 naked excepts; core-path swallows logged                                 | ⬜ pending (Phase 7) |
 | 8 | Reproducibility    | requirements.txt pinned; fresh clone boots clean; LF line endings          | 🟨 **partial** — requirements pinned (Phase 0.2 ✅); LF normalization pending (Phase 7.2) |
-| 9 | Tests              | capabilities + intent(81) + auth + autonomous-goal + route-smoke green     | 🟨 **partial** — capabilities + full intent-audit(81) + auth green (228/228); autonomous-goal + route-smoke still owed |
+| 9 | Tests              | capabilities + intent(81) + auth + autonomous-goal + route-smoke green     | 🟨 **partial** — capabilities + full intent-audit(81) + auth + autonomous-goal green (229/229); route-smoke still owed |
 
 Legend: 🟩 green · 🟨 partial · 🟥 red · ⬜ not started
 
