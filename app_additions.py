@@ -131,8 +131,21 @@ def register_beyond_jarvis_routes(app: Flask):
 
     @app.route("/screen/errors", methods=["GET"])
     def screen_errors_route():
-        from screen_engine import detect_errors_on_screen
-        return jsonify(detect_errors_on_screen())
+        """detect_errors_on_screen takes a screenshot + runs OCR -- both
+        can fail (no display, missing tesseract, Pillow version mismatch,
+        screen-grab race with another process). Catch and return 503
+        rather than let an uncaught exception bubble up as a 500 with a
+        stack trace. Same hardening pattern as /verify/screenshot
+        (Phase 5)."""
+        try:
+            from screen_engine import detect_errors_on_screen
+            return jsonify(detect_errors_on_screen())
+        except Exception as e:
+            return jsonify({
+                "success": False,
+                "error":   f"screen error detection failed: {e}",
+                "hint":    "missing display / OCR engine / Pillow mismatch",
+            }), 503
 
     @app.route("/screen/status", methods=["GET"])
     def screen_status_route():
