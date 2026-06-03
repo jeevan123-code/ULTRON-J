@@ -660,3 +660,70 @@ POST /proposals/0/apply (confirm but not approved) -> 409
 - SSE wrapper transparent to existing /ask consumers
 - Suite: **438 passed in 52.75s** (was 436; +2 routes auto-picked up
   by the route-smoke test). Zero regressions.
+
+---
+
+## Phase 9 — Final scorecard verification + sandbox stress test
+
+### Phase 9 — scorecard
+All 9 rows in `PERFECTION_SCORECARD.md` now 🟩 **green**:
+1. Security · 2. Core tools · 3. Autonomous loop · 4. Resource health ·
+5. Voice · 6. Architecture · 7. Error handling · 8. Reproducibility ·
+9. Tests.
+
+Final acceptance evidence:
+- 438/438 tests passing pre-stress; **479/479** after the stress
+  suite was added (see below).
+- `BASELINE_CAPABILITIES.txt` snapshot: 114 PASS, 0 FAIL, 0 SKIP
+  (same as the Phase 0.3 baseline -- the suite kept its perfect
+  score across 8 phases of refactoring).
+- `git log hardening ^master` reads as a clean per-task story: 14
+  commits, each tagged with phase + sub-tasks + outcome + test count.
+
+### Sandbox stress test (user directive saved to memory)
+New `tests/test_full_sandbox_stress.py` — 41 horizontal probes
+covering: every action_engine tool with realistic params, confirm
+gate + destructive classifier edges, sandbox escape attempts
+(import os / subprocess / open / infinite loop), plugin contract
+round-trip (write -> load -> match -> run -> cleanup), loop
+supervisor defaults + env override + backpressure, auth gate
+edges, full goal lifecycle end-to-end (re-verified), real-shape
+assertions on /health + /health/capabilities + /proposals, and
+the Phase 7.5 autonomy guard.
+
+**Real bug found by the stress test:** `POST /claude_loop/login`
+called `input("Press ENTER after you are logged in...")` inside an
+HTTP handler -- there is no stdin over HTTP, so the call hung and
+the route-smoke test failed with a `selectors.Failed` exception.
+Per the "fix bugs, don't ignore them" rule, patched
+`claude_loop.do_manual_login` to detect `sys.stdin.isatty()`. When
+called over HTTP (non-tty), it now returns a structured 400-style
+payload with the exact CLI command to run instead:
+```
+{"success": false,
+ "error": "manual login requires an interactive terminal -- the
+           input() prompt has no stdin over HTTP. Run from the
+           Ultron CLI: `venv/bin/python -c
+           'from claude_loop import do_manual_login;
+            print(do_manual_login())'`"}
+```
+
+**2 minor test-script bugs in my stress harness** (NOT Ultron bugs)
+also caught and fixed during the run:
+- `run_code_sandbox` returns `{"output", "error", "success"}` (not
+  `"result"`) -- my probe assumed the wrong key
+- `/health` returns `{"ok", "modules": {<name>: <status>, ...}}` (not
+  flat `{<name>: <status>}`) -- my probe asserted the wrong shape
+
+Final suite: **479 passed** (438 pre-existing + 41 stress probes).
+Zero failures, zero regressions, one real production bug surfaced
+and fixed in the process.
+
+### Definition of "perfect" met
+Per Phase 9's stated final-acceptance criteria:
+- ✅ every scorecard row green
+- ✅ `BASELINE_CAPABILITIES.txt` shows improvement (or unchanged at 100%)
+- ✅ `git log` tells a clean per-task story (14 commits, semantic
+  phase tags, paired tests and CHANGES updates per commit)
+
+Ready for merge from `hardening` into `master`.

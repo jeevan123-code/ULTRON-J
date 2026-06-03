@@ -17,10 +17,26 @@ file) is committed on this branch and verifiable from a fresh checkout.
 | 6 | Architecture       | one documented primary path; no dead/duplicate code                        | 🟩 **green** — `ARCHITECTURE.md` documents the two primary flows (interactive `/ask` vs autonomous goal loop), `INTELLIGENCE_MODE` gates `react_engine` + `brain_orchestrator` (default off — one path), `system_monitor.add_proposal` confirmed as single writer of `proposals.json` (now with `source` tag) |
 | 7 | Error handling     | 0 naked excepts; core-path swallows logged                                 | 🟩 **green** — 0 naked `except:` across all 8 core files; autonomous_loop swallows now log via `error_tracker.log_failure` or narrow to the actual expected exceptions; remaining sites tagged as Phase 8 hygiene scope |
 | 8 | Reproducibility    | requirements.txt pinned; fresh clone boots clean; LF line endings          | 🟩 **green** — requirements pinned (Phase 0.2), LF normalized + `.gitattributes` (Phase 7.2), 92/92 .py compile clean |
-| 9 | Tests              | capabilities + intent(81) + auth + autonomous-goal + route-smoke green     | 🟩 **green** — all five test suites passing: 436/436 (113 capabilities + 33 auth + 82 intent-audit + 1 autonomous-goal + 207 route-smoke) |
+| 9 | Tests              | capabilities + intent(81) + auth + autonomous-goal + route-smoke green     | 🟩 **green** — all five test suites passing: **438/438** (113 capabilities + 33 auth + 82 intent-audit + 1 autonomous-goal + 209 route-smoke after Phase 8's +2 new endpoints) |
 
 Legend: 🟩 green · 🟨 partial · 🟥 red · ⬜ not started
 
 Final acceptance (Phase 9): every row green; `BASELINE_CAPABILITIES.txt`
 versus latest shows improvement (or unchanged at 100%); `git log` tells
 a clean per-task story.
+
+---
+
+## Phase 9 verdict — 🟩 **PERFECT**
+
+All 9 rows green. **479/479 tests pass** (438 across phases 0–8 + 41
+horizontal stress probes added in Phase 9).
+
+The stress test surfaced and fixed one real production bug:
+`POST /claude_loop/login` was calling `input("Press ENTER...")` inside
+an HTTP handler — there is no stdin over HTTP, so the call hung and
+returned 500. Patched `claude_loop.do_manual_login` to detect
+`sys.stdin.isatty()` and refuse cleanly with a 400-style payload
+pointing the caller at the CLI command instead.
+
+The `hardening` branch is ready to merge into `master`.
