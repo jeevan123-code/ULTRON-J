@@ -167,3 +167,76 @@ To use this from a phone or another device on the LAN:
 4. Send the key with every request:
    `curl -H "X-API-Key: mySecret123" http://<your-ip>:5000/health`.
 The app will refuse to bind `0.0.0.0` if step 1 is missing.
+
+---
+
+## Phase 2 — Make the core tools provably perfect
+
+### 2.1 `/home/user` normalization — verified, not blind-rewritten
+Per the plan's rule #5 ("verify first"). Ran the real code path:
+```
+_resolve_path('/home/user/Desktop')           -> '/home/jeevan/Desktop'
+_resolve_path('/home/user/Desktop/hello.txt') -> '/home/jeevan/Desktop/hello.txt'
+file_list  /home/user/Desktop                 -> 5 folders, 23 files
+file_read  /home/user/Desktop/hello.txt       -> Ultron-J Claude Code Plan content
+```
+The May-21 failures in `tool_stats.json` are stale — the
+normalization at `action_engine.py:117-119` already fixed them.
+Regression locked by `test_capabilities.py::test_home_user_path_normalization`.
+
+### 2.2 Poisoned `tool_stats.json` reset
+Moved root `tool_stats.json` (contained stale `file_list 7/11`,
+`file_read 6/9` from May 21) to `_archive/tool_stats.poisoned-2026-06-03.json`.
+The reflection engine no longer reads stale 0%/partial data;
+`load_tool_stats()` returns `{}` when the file is absent (verified)
+and the next real action call rebuilds it clean.
+
+(`tool_stats.json` itself is in `.gitignore` — the archived copy is
+preserved locally for forensics but isn't tracked. The move is
+documented here so the absence isn't mistaken for a deletion.)
+
+### 2.3 Full 81-pattern intent audit
+New `tests/test_intent_audit.py`: 81 sample phrases + 1 count assertion.
+For every regex in `intent_router._PATTERNS`, a representative phrase
+is fed through `detect_intent` and asserted to dispatch to the
+expected `action_type`. Catches three bug classes at once:
+  - broken regex (typo / forgotten alternative)
+  - shadowing (earlier broad pattern eats a later specific phrase)
+  - missing handler (already covered by `test_capabilities.py` but
+    re-confirmed at dispatch level)
+
+Where multiple patterns share a type (e.g. read_file has three
+phrasings: `read X`, `show X`, `cat X`), each pattern gets its own
+phrase using syntax only it matches.
+
+Findings:
+  - **No shadowing bugs.** All 81 patterns dispatch correctly when
+    given their intended phrasing.
+  - **One UX gap noted (deferred to Phase 8):** pattern 23
+    (`what's in / show me <qualifier> <path>`) only matches when the
+    folder/directory/files qualifier appears BEFORE the path
+    (`"what's in folder downloads"`). The more natural English
+    `"what's in downloads"` or `"what's in downloads folder"` falls
+    through to the LLM. The pattern is doing what it was written to
+    do; broadening it would shadow `"show me the time"` and other
+    `show me <something>` phrasings — needs a more careful redesign
+    in Phase 8.
+
+### Bonus: flaky-test fix in `test_capabilities.py`
+The `HAS_NET` probe was computed once at module import time with a
+1.5s timeout. A cold DNS lookup on the first run would set
+`HAS_NET=False` for the entire pytest session, silently skipping
+weather_fetch + web_scrape even when network was up. Symptom: 2
+skipped in the full suite, 0 skipped when run in isolation.
+Fix: probe per-test at 3s timeout. Each test now decides for itself.
+
+### Phase 2 acceptance
+Full test suite after Phase 2:
+```
+pytest tests/ --timeout=20 -q
+228 passed in 4.07s         (was 146 + 82 new audit tests)
+```
+- file + intent + calculate + note + sandbox tools: **100% PASS**
+- network-dependent tools (weather_fetch, web_scrape): **PASS** (no
+  skips when network is up)
+- 81-pattern intent dispatch audit: **all green** (no shadowing)

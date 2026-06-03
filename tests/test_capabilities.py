@@ -39,15 +39,16 @@ def _record(name: str, ok: bool, detail: str = "", *, skipped: bool = False) -> 
     return ok
 
 
-def _has_network(host: str = "1.1.1.1", port: int = 53, timeout: float = 1.5) -> bool:
+def _has_network(host: str = "1.1.1.1", port: int = 53, timeout: float = 3.0) -> bool:
+    """Probe DNS port on a public anycast IP. Called per-test so a cold
+    one-off slow probe at import time doesn't pin the whole suite into
+    skip-mode. A 3s timeout tolerates first-DNS lag on cold networks.
+    """
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
     except OSError:
         return False
-
-
-HAS_NET = _has_network()
 
 
 # ─── action_engine: file roundtrip ─────────────────────────────────────────────
@@ -132,7 +133,7 @@ def test_home_user_path_normalization():
 # ─── Network-gated tools ──────────────────────────────────────────────────────
 
 def test_weather_fetch():
-    if not HAS_NET:
+    if not _has_network():
         _record("weather_fetch", True, "no network", skipped=True)
         pytest.skip("no network")
     out = ae.execute_action("weather_fetch", {"location": "Hyderabad"})
@@ -144,7 +145,7 @@ def test_weather_fetch():
 
 
 def test_web_scrape():
-    if not HAS_NET:
+    if not _has_network():
         _record("web_scrape", True, "no network", skipped=True)
         pytest.skip("no network")
     out = ae.execute_action("web_scrape", {"url": "https://example.com"})
