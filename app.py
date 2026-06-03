@@ -562,6 +562,28 @@ def health():
 # CHAT ENDPOINT — CLOUD MODE
 # =============================================================================
 
+def _quick_sse(text: str, provider: str = "system") -> Response:
+    """Phase 9 post-merge fix — wrap a short-circuit reply in a real
+    SSE stream so the chat UI's `data: ` parser actually sees it.
+
+    Without this helper, `/ask` returned plain JSON for greetings /
+    calculator hits / mode switches. The browser's SSE reader at
+    templates/index.html:362 looks for `data: ` line prefixes -- it
+    silently skips a bare JSON body, leaves _thinkGone=false, and the
+    'thinking' bubble never gets text. Symptom: "hello" + "yo" stuck
+    at the thinking indicator (reported by user 2026-06-03).
+    """
+    def _gen():
+        # Stream the text token-by-token so the UI can animate it,
+        # then emit the same {_full, done} contract the LLM path uses.
+        for ch in text:
+            yield f"data: {json.dumps({'token': ch})}\n\n"
+        yield f"data: {json.dumps({'_full': text, 'provider': provider})}\n\n"
+        yield 'data: {"done": true}\n\n'
+    return Response(_gen(), content_type="text/event-stream",
+                    headers=STREAM_HEADERS)
+
+
 @app.route("/ask", methods=["POST"])
 def ask():
     data       = request.json or {}
@@ -591,8 +613,7 @@ def ask():
         pass
 
     if not question:
-        return jsonify({"response": "I didn't catch that. What would you like?",
-                        "mood": get_mood(), "mood_icon": get_mood_icon()})
+        return _quick_sse("I didn't catch that. What would you like?")
     if len(question) > MAX_QUESTION_LEN:
         question = question[:MAX_QUESTION_LEN]
 
@@ -600,12 +621,12 @@ def ask():
     new_tier = _detect_tier_switch(question)
     if new_tier:
         set_current_tier(new_tier)
-        return jsonify({"response": f"Switched to {new_tier.upper()} tier. Ready."})
+        return _quick_sse(f"Switched to {new_tier.upper()} tier. Ready.")
 
     new_mode = _detect_mode_switch(question)
     if new_mode:
         set_mode(new_mode)
-        return jsonify({"response": f"Switched to {new_mode.upper()} mode."})
+        return _quick_sse(f"Switched to {new_mode.upper()} mode.")
 
 
     # ── NEW: Orchestrator intercept (computer control, project builder) ───────────
@@ -712,23 +733,15 @@ def ask():
     intent_result = intent_agent(question)
     intent        = intent_result.get("intent", "chat")
 
-    # Special intents — handle directly
+    # Special intents — handle directly (SSE response so chat UI renders)
     if intent == "greeting" and len(question.split()) <= 2:
         restore_energy(0.02)
-        return jsonify({
-            "response": greeting_reply(),
-            "mood":     get_mood(),
-            "mood_icon": get_mood_icon(),
-    })
+        return _quick_sse(greeting_reply(), provider="greeting")
 
     if intent == "calculate":
         result = safe_calculate(question)
         if result.get("success"):
-            return jsonify({
-                "response":  f"= {result['result']}",
-                "mood":      get_mood(),
-                "mood_icon": get_mood_icon(),
-            })
+            return _quick_sse(f"= {result['result']}", provider="calculate")
 
     if intent == "weather":
         # Only handle short, direct weather queries — skip if it's a reasoning/logic question
