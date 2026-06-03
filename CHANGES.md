@@ -346,3 +346,103 @@ one genuinely-completed goal logged.
 
 Suite after Phase 3: **229 passed in 8.63s** (was 228; +1 from the
 new autonomous-goal test). No regressions.
+
+---
+
+## Phase 4 — Background loops: throttle + gate (health_score 17 → 98)
+
+The plan's diagnosis: ~17 always-on daemons + full-file JSON rewrites
+were keeping memory at 80-95% and pinning `health_score` to 17. Phase
+4 added a central loop registry, memory backpressure, and a
+sqlite-first hot-memory path — and along the way, found the disk
+false-positive ALSO lived in `get_system_health_score()`, which
+explained the entire 17 score.
+
+### 4.0 Survey
+13 boot-time daemons mapped: system_monitor (×2), perception (×2),
+autonomous_loop, activity_tracker, code_indexer, screen_monitor,
+plugin_watcher, distiller, evolution, proactive, predictive,
+skill_learner. Double-storage of episodes confirmed: 459 rows in
+`ultron.db` ~= 461 in `episodic_memory.json` (189KB rewritten on
+every store).
+
+### 4.1 Central LOOPS registry + loop_supervisor.py
+- `config.LOOPS` is the single source of truth — `{enabled, interval_s}`
+  per loop, plus `MEM_BACKPRESSURE_PCT` (default 70).
+- Default OFF: `evolution`, `proactive`, `skill_learner`,
+  `screen_monitor`. They were running on empty input or pulling
+  heavy resources (screen_monitor screenshots every 3s) for no payoff
+  until Phases 3/8 produce real signal.
+- Default ON, retuned: `predictive` 60s → **300s** (the dominant
+  source of mem_rising anomalies — was rewriting predictive_metrics.json
+  every minute).
+- Env override per loop: `LOOPS_<NAME>_ENABLED=0|1`,
+  `LOOPS_<NAME>_INTERVAL_S=<n>`.
+- `loop_supervisor.py` exposes 3 primitives — `loop_enabled(name)`,
+  `loop_interval_s(name, default)`, `should_skip_heavy_tick()` —
+  each `start_*` function calls them in a 5-line guard at the top.
+  No architectural rewrite required.
+- `loop_supervisor.snapshot()` reports configured + effective state +
+  live mem_pct; future `/loop/status` endpoint can use it (Phase 8.1).
+
+### 4.2 Memory backpressure
+`should_skip_heavy_tick()` returns True when `psutil.virtual_memory().percent`
+exceeds `MEM_BACKPRESSURE_PCT`. Heavy loops consult it at the top of
+each tick: `predictive_monitor._loop`, `code_indexer._run`,
+`screen_engine._loop`. Lightweight loops (heartbeat, plugin_watcher)
+intentionally don't — backpressure is the heavy loops' problem.
+
+### 4.3 sqlite-first hot memory
+The old `store_episode` did `load_episodes()` (full JSON read) →
+append → `save_episodes()` (full 189KB rewrite) → `INSERT INTO
+episodes` on every call. With ~460 episodes that's O(n) write
+amplification on every conversation turn.
+- New path: write one SQLite row → bump in-process counter →
+  `_flush_episodes_to_json()` only every `EPISODE_EXPORT_EVERY=50`
+  stores or when consolidation actually fires.
+- `load_episodes()` reads from SQLite (source of truth); falls back
+  to JSON only on cold-start (fresh clone, no DB).
+- One-time migration on import: any episode in JSON but not in SQLite
+  is `INSERT OR IGNORE`-imported. Safe to repeat across boots.
+- Added `consolidated` column to `episodes` table via idempotent
+  ALTER TABLE.
+- Fixed a long-standing pre-existing bug: the old consolidation
+  check was firing on every store (`unconsolidated >= 200` was true
+  forever once the threshold was crossed). New: consolidation check
+  happens only inside the periodic flush, not per-store.
+
+**Verified hot-path zero-write:**
+```
+mtime BEFORE 3 store_episode calls:  1780474386
+mtime AFTER  3 store_episode calls:  1780474386  (delta +0s)
+JSON size 186690 bytes — unchanged
+SQLite went from 462 -> 465 episodes
+```
+
+### Phase 4 acceptance — health_score
+`get_system_health_score()` had the **same disk false-positive** as
+the Phase 3 fix in `autonomous_loop`: it penalized -10 per mount
+>80% and -15 per mount >90%. On this Linux box there are 4 snap
+squashfs mounts at 100% (read-only loop devices, full by design) =
+−100 points alone. That was the entire health_score=17 explanation.
+
+Same fix applied: exclude `/snap/`, `/var/lib/docker/`, `/proc/`,
+`/sys/`, `/dev/` mount prefixes. Live result:
+```
+Pre-fix:   health_score = 17/100   (heartbeat.json snapshot)
+Post-fix:  health_score = 98/100   (computed inline; +81 points)
+```
+
+Boot verification (port 5099, idle, real loops respecting registry):
+```
+[distiller] loop started — interval=6.0h
+[evolution] loop disabled by config.LOOPS — not starting
+[proactive] loop disabled by config.LOOPS — not starting
+[predictive] monitor started — interval=300.0s
+[skill_learner] loop disabled by config.LOOPS — not starting
+```
+4 heavy daemons skipped vs the old boot. predictive interval 5x
+slower.
+
+Suite after Phase 4: **229 passed in 10.96s** — no regressions vs
+Phase 3 baseline.

@@ -409,6 +409,12 @@ def start_skill_learner(interval_hours: float = DEFAULT_INTERVAL_HOURS) -> bool:
     """Start the auto-learn daemon. Returns True on first start, False if
     already running. Idempotent."""
     global _loop_thread, _loop_interval_hours
+    # Phase 4.1 — gate through loop_supervisor / config.LOOPS
+    from loop_supervisor import loop_enabled, loop_interval_s
+    if not loop_enabled("skill_learner"):
+        print("[skill_learner] loop disabled by config.LOOPS — not starting")
+        return False
+    interval_hours = loop_interval_s("skill_learner", interval_hours * 3600) / 3600
     if _loop_thread and _loop_thread.is_alive():
         return False
     _loop_stop_event.clear()

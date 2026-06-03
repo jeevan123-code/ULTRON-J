@@ -437,6 +437,12 @@ def _distill_loop(interval_hours: float):
 
 def start_distiller(interval_hours: float = DEFAULT_INTERVAL_HOURS) -> bool:
     global _loop_thread
+    # Phase 4.1 — gate through loop_supervisor / config.LOOPS
+    from loop_supervisor import loop_enabled, loop_interval_s
+    if not loop_enabled("distiller"):
+        print("[distiller] loop disabled by config.LOOPS — not starting")
+        return False
+    interval_hours = loop_interval_s("distiller", interval_hours * 3600) / 3600
     if _loop_thread and _loop_thread.is_alive():
         return False
     _loop_stop_event.clear()

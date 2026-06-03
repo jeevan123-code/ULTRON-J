@@ -218,7 +218,14 @@ def get_system_health_score() -> int:
         score -= max(0, (mem.get("percent", 0) - 50) // 5)  # lose points over 50%
 
     disk = get_disk_usage()
+    # Phase 4 fix — exclude pseudo-filesystems and snap mounts. squashfs
+    # snap mounts are 100% used BY DESIGN (read-only loop devices) and
+    # were dragging health_score by -25 each. On this Linux box there
+    # are 4+ snap mounts, which alone pinned health_score around 17.
+    _PSEUDO_PREFIXES = ("/snap/", "/var/lib/docker/", "/proc/", "/sys/", "/dev/")
     for mount, d in disk.items():
+        if any(mount.startswith(p) for p in _PSEUDO_PREFIXES):
+            continue
         if d.get("percent", 0) > 80:
             score -= 10
         if d.get("percent", 0) > 90:
@@ -500,7 +507,14 @@ def _heartbeat_loop():
                 push_alert(f"🔋 Battery critical: {bat['percent']}%! Plug in now.")
 
             disk = get_disk_usage()
+            # Phase 4 — same pseudo-fs filter as get_system_health_score
+            # and autonomous_loop.observe_environment; snap squashfs
+            # mounts are 100% by design and would push a useless alert
+            # every heartbeat.
+            _PSEUDO_PREFIXES = ("/snap/", "/var/lib/docker/", "/proc/", "/sys/", "/dev/")
             for mount, d in disk.items():
+                if any(mount.startswith(p) for p in _PSEUDO_PREFIXES):
+                    continue
                 if d.get("percent", 0) > 92:
                     push_alert(f"⚡ Disk almost full: {mount} at {d['percent']}%")
 
@@ -655,6 +669,11 @@ def _save_snapshot(snap: dict):
 
 def start_monitor():
     """Start both the change monitor and the autonomous heartbeat loop."""
+    # Phase 4.1 — gate through loop_supervisor / config.LOOPS
+    from loop_supervisor import loop_enabled
+    if not loop_enabled("system_monitor"):
+        print("[Monitor] loop disabled by config.LOOPS — not starting")
+        return
     t1 = threading.Thread(target=_monitor_loop, daemon=True, name="UltronMonitor")
     t2 = threading.Thread(target=_heartbeat_loop, daemon=True, name="UltronHeartbeat")
     t1.start()

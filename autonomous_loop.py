@@ -724,6 +724,11 @@ _AGENT_NAME = "Ultron-J"
 
 def start_autonomous_loop() -> bool:
     global _loop_running, _loop_thread
+    # Phase 4.1 — gate through loop_supervisor / config.LOOPS
+    from loop_supervisor import loop_enabled
+    if not loop_enabled("autonomous"):
+        print("[autonomous] loop disabled by config.LOOPS — not starting")
+        return False
     with _loop_lock:
         if _loop_running:
             return True

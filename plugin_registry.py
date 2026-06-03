@@ -301,6 +301,12 @@ def _watch_plugins_dir(interval: int = 5):
 
 def start_plugin_watcher(interval: int = 5):
     global _watcher_running
+    # Phase 4.1 — gate through loop_supervisor / config.LOOPS
+    from loop_supervisor import loop_enabled, loop_interval_s
+    if not loop_enabled("plugin_watcher"):
+        print("[PluginRegistry] watcher disabled by config.LOOPS — not starting")
+        return
+    interval = int(loop_interval_s("plugin_watcher", interval))
     if _watcher_running:
         return
     _watcher_running = True

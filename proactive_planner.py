@@ -472,6 +472,12 @@ def _loop(interval_minutes: float):
 
 def start_proactive(interval_minutes: float = DEFAULT_INTERVAL_MINUTES) -> bool:
     global _loop_thread
+    # Phase 4.1 — gate through loop_supervisor / config.LOOPS
+    from loop_supervisor import loop_enabled, loop_interval_s
+    if not loop_enabled("proactive"):
+        print("[proactive] loop disabled by config.LOOPS — not starting")
+        return False
+    interval_minutes = loop_interval_s("proactive", interval_minutes * 60) / 60
     if _loop_thread and _loop_thread.is_alive():
         return False
     _stop.clear()

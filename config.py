@@ -393,6 +393,55 @@ TIER_CONFIG = {
 _raw_ultron_keys = os.environ.get("ULTRON_API_KEYS", "")
 ULTRON_API_KEYS = [k.strip() for k in _raw_ultron_keys.split(",") if k.strip()]
 
+# ── Phase 4.1 — Loop supervisor registry ──────────────────────────────────────
+# Single source of truth for which background loops boot and at what interval.
+# Heavy / experimental loops default OFF; essentials default ON. Edit here OR
+# override at runtime via the LOOPS_<NAME>_ENABLED env var (e.g.
+# LOOPS_PROACTIVE_ENABLED=1). loop_supervisor.py is the only consumer; every
+# start_* function in the repo consults it via _loop_enabled(name).
+#
+# What the dial does:
+#   * enabled=False    -> start_<name>() returns False immediately, no thread
+#                         is spawned. Saves a daemon + RAM + JSON-write churn.
+#   * interval_s       -> hint to the loop's own sleep call. Functions that
+#                         take interval_hours / interval_minutes convert as
+#                         needed; loop_supervisor.loop_interval_s(name, default)
+#                         returns the configured value or the default.
+#   * voice_listener   -> interval_s=0 marks it event-driven (no periodic tick).
+#                         Listed here only so /loop/status reports it.
+#
+# Tuning notes from Phase 4:
+#   * predictive: was 60s -- writing predictive_metrics.json every minute
+#     was the loudest source of mem-rising anomalies. 300s is plenty for an
+#     anomaly detector.
+#   * evolution / proactive / skill_learner: default OFF. They run on empty
+#     input until Phase 3 starts producing real goals + proposals. Turn ON
+#     via env vars once you actually have signal to act on.
+LOOPS = {
+    "autonomous":     {"enabled": True,  "interval_s": 30},
+    "perception":     {"enabled": True,  "interval_s": 15},
+    "system_monitor": {"enabled": True,  "interval_s": 30},
+    "voice_listener": {"enabled": True,  "interval_s": 0},      # event-driven
+    "distiller":      {"enabled": True,  "interval_s": 6 * 3600},
+    "predictive":     {"enabled": True,  "interval_s": 300},    # was 60s
+    "evolution":      {"enabled": False, "interval_s": 12 * 3600},
+    "proactive":      {"enabled": False, "interval_s": 1800},
+    "skill_learner":  {"enabled": False, "interval_s": 6 * 3600},
+    "code_indexer":   {"enabled": True,  "interval_s": 3600},
+    # not in the plan's seed list but boot-launched -- include so they're
+    # togglable too:
+    "screen_monitor": {"enabled": False, "interval_s": 3},      # OFF default
+                                                                # (screenshots
+                                                                # every 3s is
+                                                                # heavy)
+    "plugin_watcher": {"enabled": True,  "interval_s": 5},
+    "activity_tracker":{"enabled": True, "interval_s": 60},
+}
+
+# Memory backpressure -- heavy loop ticks skip while system memory exceeds
+# this percentage. Sampling reuses psutil.virtual_memory() (no new dep).
+MEM_BACKPRESSURE_PCT = int(os.environ.get("ULTRON_MEM_BACKPRESSURE_PCT", "70"))
+
 # ── Key rotation (thread-safe round-robin) ────────────────────────────────────
 _key_index      = {}
 _key_index_lock = threading.Lock()

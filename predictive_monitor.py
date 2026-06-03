@@ -348,6 +348,16 @@ def _loop(interval_sec: float):
             slept += 10
         if _stop.is_set():
             break
+        # Phase 4.2 — skip heavy tick when system memory is above the
+        # backpressure threshold. predictive run_check serializes
+        # predictive_metrics.json on every call (largest contributor to
+        # the old mem_rising anomaly storm).
+        try:
+            from loop_supervisor import should_skip_heavy_tick
+            if should_skip_heavy_tick():
+                continue
+        except Exception:
+            pass
         try:
             run_check()
         except Exception as e:
@@ -356,6 +366,12 @@ def _loop(interval_sec: float):
 
 def start_monitor(interval_sec: float = DEFAULT_INTERVAL_SEC) -> bool:
     global _loop_thread
+    # Phase 4.1 — gate through loop_supervisor / config.LOOPS
+    from loop_supervisor import loop_enabled, loop_interval_s
+    if not loop_enabled("predictive"):
+        print("[predictive] loop disabled by config.LOOPS — not starting")
+        return False
+    interval_sec = loop_interval_s("predictive", interval_sec)
     if _loop_thread and _loop_thread.is_alive():
         return False
     _stop.clear()

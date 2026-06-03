@@ -478,6 +478,11 @@ def build_screen_context() -> str:
 def start_perception():
     """Start all background perception threads."""
     global _running, _threads
+    # Phase 4.1 — gate through loop_supervisor / config.LOOPS
+    from loop_supervisor import loop_enabled
+    if not loop_enabled("perception"):
+        print("[Perception] loop disabled by config.LOOPS — not starting")
+        return
     if _running:
         return
     _running = True

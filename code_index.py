@@ -290,11 +290,26 @@ def build_code_index(force: bool = False):
 
 
 def start_code_indexer():
-    """Start background indexer. Initial index runs immediately, then every 5 min."""
+    """Start background indexer. Initial index runs immediately, then every
+    `code_indexer.interval_s` seconds (config.LOOPS, default 3600)."""
+    # Phase 4.1 — gate through loop_supervisor / config.LOOPS
+    from loop_supervisor import loop_enabled, loop_interval_s
+    if not loop_enabled("code_indexer"):
+        print("[code-indexer] disabled by config.LOOPS — not starting")
+        return
+    interval = loop_interval_s("code_indexer", 3600)
+
     def _run():
         build_code_index()
         while True:
-            time.sleep(300)
+            time.sleep(interval)
+            # Phase 4.2 — skip a rebuild tick under memory backpressure
+            try:
+                from loop_supervisor import should_skip_heavy_tick
+                if should_skip_heavy_tick():
+                    continue
+            except Exception:
+                pass
             try:
                 build_code_index()
             except Exception:
