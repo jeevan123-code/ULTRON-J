@@ -29,8 +29,12 @@ a clean per-task story.
 
 ## Phase 9 verdict — 🟩 **PERFECT**
 
-All 9 rows green. **479/479 tests pass** (438 across phases 0–8 + 41
-horizontal stress probes added in Phase 9).
+All 9 rows green. **481/481 tests pass in 3:08** (438 across phases
+0–8 + 43 horizontal stress probes added in Phase 9: every action_engine
+tool branch, confirm/destructive gates, sandbox escape attempts
+including the classic class-walk, plugin contract round-trip, loop
+supervisor, auth gate edges, full goal lifecycle, real-shape route
+assertions, autonomy guard).
 
 The stress test surfaced and fixed one real production bug:
 `POST /claude_loop/login` was calling `input("Press ENTER...")` inside

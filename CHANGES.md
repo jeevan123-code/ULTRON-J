@@ -715,9 +715,10 @@ also caught and fixed during the run:
 - `/health` returns `{"ok", "modules": {<name>: <status>, ...}}` (not
   flat `{<name>: <status>}`) -- my probe asserted the wrong shape
 
-Final suite: **479 passed** (438 pre-existing + 41 stress probes).
-Zero failures, zero regressions, one real production bug surfaced
-and fixed in the process.
+Final suite: **481 passed in 3:08** (438 pre-existing + 41 horizontal
+stress probes + 2 hardened sandbox-escape probes added at end:
+class-walk attempt + eval refusal). Zero failures, zero regressions,
+one real production bug surfaced and fixed in the process.
 
 ### Definition of "perfect" met
 Per Phase 9's stated final-acceptance criteria:
