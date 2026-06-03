@@ -596,3 +596,67 @@ fallbacks if Piper models aren't installed.
 
 Suite after Phase 7: **436 passed in 53.64s** — zero regressions.
 Scorecard rows 5 (Voice) and 7 (Error handling) and 8 (Reproducibility) → green.
+
+---
+
+## Phase 8 — Targeted new features (only after 1–7 green)
+
+### 8.1 `GET /health/capabilities`
+Serves the Phase 0.3 `BASELINE_CAPABILITIES.txt` snapshot over HTTP
+as structured JSON: `{counts: {pass, fail, skip, total}, rows: [...],
+snapshot_path, snapshot_age_s}`. `?refresh=1` re-runs the pytest
+suite first (caps at 60s, falls back to cached snapshot on failure).
+Behind the auth gate by default. Live response: 114/114 PASS, 776s
+snapshot age at moment of testing.
+
+### 8.2 Per-request cost/latency in SSE
+`intelligence_core.think_and_stream` now wraps an inner generator and
+emits a final SSE event:
+```
+data: {"_cost": {"provider": "groq", "tokens": 142, "elapsed_ms": 1820}}
+```
+after every `/ask` response. The wrapper inspects each SSE chunk to
+count emitted tokens (skipping `type=status` events) and tracks the
+last-seen provider. No behavior change for callers that ignore the
+event. Inner function preserved as `_think_and_stream_inner`.
+
+### 8.3 Plugin contract
+- `plugin_registry._load_plugin_file` now picks up an optional
+  `match(text) -> bool` function alongside `PLUGIN_META` + `run`.
+- `run_plugin_by_intent` resolution is now two-tier: any plugin with
+  an explicit `match()` wins first; tag-scoring stays as the
+  legacy fallback. Backward compatible — plugins without `match()`
+  work exactly as before.
+- New `write_skill_plugin(name, code, description="", tags=None)`:
+  validates code compiles (`compile(...)`), sanitizes the filename,
+  refuses overwrites, writes to `plugins/<name>.py`. The Phase 4.1
+  plugin watcher (5s interval) auto-loads it without restart. This
+  is the concrete write path the plan's Phase 8.3 asked for —
+  `skill_learner` now has a place to deposit new skills.
+
+### 8.4 Proposal review UI (routes)
+Three new/upgraded endpoints, all behind auth + (apply) confirm gate:
+- `GET /proposals[?status=pending]` — list + filter
+- `POST /proposals/<int:pid>/approve` — non-destructive bookkeeping
+- `POST /proposals/<int:pid>/reject` — non-destructive bookkeeping
+- `POST /proposals/<int:pid>/apply` — destructive; requires
+  `{"confirm": "I CONFIRM proposal_apply"}` AND prior `status=approved`,
+  else 428 or 409 respectively
+
+Verified end-to-end:
+```
+GET /proposals               -> {count:2, proposals:[...]}
+GET /proposals?status=pending -> {count:0, proposals:[]}
+POST /proposals/99/approve   -> 404 (not found)
+POST /proposals/99/reject    -> 404 (not found)
+POST /proposals/0/apply (no confirm)   -> 428
+POST /proposals/0/apply (confirm but not approved) -> 409
+```
+
+### Phase 8 acceptance
+- All 4 new endpoints reachable and return sensible JSON
+- New plugin contract additive — existing crypto_price plugin still
+  works unchanged
+- SSE wrapper transparent to existing /ask consumers
+- Suite: **438 passed in 52.75s** (was 436; +2 routes auto-picked up
+  by the route-smoke test). Zero regressions.

@@ -348,8 +348,70 @@ def think_and_stream(
     voice_mode: bool = False,
 ) -> Generator:
     """
+    Phase 8.2 wrapper — wraps _think_and_stream_inner with per-request
+    cost telemetry. Appends a final `_cost` SSE event so the UI / SSE
+    consumer can show `groq · 142 tokens · 1.8s` after each response
+    without needing to reach into each LLM provider's stats.
+
+    Public signature unchanged from the pre-Phase-8 version.
+    """
+    import time as _time
+    _start_ts  = _time.time()
+    _token_count = 0
+    _provider    = "unknown"
+
+    for _chunk in _think_and_stream_inner(
+        question=question,
+        session_id=session_id,
+        history=history,
+        temperature=temperature,
+        search_context=search_context,
+        provider=provider,
+        voice_mode=voice_mode,
+    ):
+        # Best-effort inspection of each SSE event to extract telemetry
+        # without changing the inner generator's emission logic.
+        try:
+            if _chunk.startswith("data: "):
+                _parsed = json.loads(_chunk[6:].strip())
+                if isinstance(_parsed, dict):
+                    if "token" in _parsed and _parsed.get("type") != "status":
+                        _token_count += 1
+                    if "provider" in _parsed and _parsed["provider"]:
+                        _provider = _parsed["provider"]
+        except (ValueError, json.JSONDecodeError):
+            pass
+        yield _chunk
+
+    _elapsed_ms = int((_time.time() - _start_ts) * 1000)
+    yield (
+        "data: "
+        + json.dumps({"_cost": {
+            "provider":   _provider,
+            "tokens":     _token_count,
+            "elapsed_ms": _elapsed_ms,
+        }})
+        + "\n\n"
+    )
+
+
+def _think_and_stream_inner(
+    question: str,
+    session_id: str,
+    history: list,
+    temperature: float = 0.7,
+    search_context: str = "",
+    provider: str = "auto",
+    voice_mode: bool = False,
+) -> Generator:
+    """
     The complete intelligence pipeline. Drop-in replacement for
     the stream_llm call in app.py's /ask route.
+
+    Renamed from `think_and_stream` in Phase 8.2 so the public function
+    can wrap this with cost telemetry. Internal callers in this file
+    that use `yield from` of itself are unaffected since this is the
+    only definition; external callers go through the wrapper.
 
     Args:
         question: The user's question

@@ -431,6 +431,76 @@ def index():
 # check_interval and kill+restart after 3 consecutive misses, so it must
 # stay cheap (no I/O, no third-party calls) and never raise. The richer
 # system snapshot lives at /agent/health.
+@app.route("/health/capabilities", methods=["GET"])
+def health_capabilities():
+    """Phase 8.1 — capability table over HTTP.
+
+    Reads the latest BASELINE_CAPABILITIES.txt snapshot (written by the
+    Phase 0.3 harness on every test run). Pass ?refresh=1 to re-run the
+    capability suite first; default is the cached snapshot because
+    re-running takes ~5s.
+
+    Sits behind the auth gate (Phase 1.1) like every other endpoint
+    except / and /health.
+    """
+    import re as _re
+    import subprocess as _sub
+    snapshot = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "BASELINE_CAPABILITIES.txt")
+
+    if request.args.get("refresh"):
+        try:
+            _sub.run(
+                ["venv/bin/python", "-m", "pytest",
+                 "tests/test_capabilities.py", "-q", "--timeout=20"],
+                cwd=os.path.dirname(snapshot),
+                capture_output=True,
+                timeout=60,
+            )
+        except Exception:
+            pass  # serve the existing snapshot on refresh failure
+
+    if not os.path.exists(snapshot):
+        return jsonify({
+            "error": "no capability snapshot yet — run `pytest "
+                     "tests/test_capabilities.py` to generate one",
+        }), 503
+
+    text = open(snapshot, encoding="utf-8").read()
+    counts = {}
+    hm = _re.search(r"PASS=(\d+)\s+FAIL=(\d+)\s+SKIP=(\d+)\s+TOTAL=(\d+)", text)
+    if hm:
+        counts = {
+            "pass":  int(hm.group(1)),
+            "fail":  int(hm.group(2)),
+            "skip":  int(hm.group(3)),
+            "total": int(hm.group(4)),
+        }
+    rows = []
+    for line in text.splitlines():
+        m = _re.match(r"^(PASS|FAIL|SKIP)\s+(\S+)\s*(.*)$", line)
+        if m:
+            rows.append({
+                "status": m.group(1),
+                "name":   m.group(2),
+                "detail": m.group(3).strip(),
+            })
+    snapshot_age_s = None
+    try:
+        snapshot_age_s = round(
+            datetime.datetime.now().timestamp() - os.path.getmtime(snapshot),
+            1,
+        )
+    except OSError:
+        pass
+    return jsonify({
+        "counts":         counts,
+        "rows":           rows,
+        "snapshot_path":  snapshot,
+        "snapshot_age_s": snapshot_age_s,
+    })
+
+
 @app.route("/health", methods=["GET"])
 def health():
     """Comprehensive health check — returns status of every module."""

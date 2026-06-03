@@ -140,21 +140,73 @@ def provider_health_endpoint():
 
 @system_bp.route("/proposals", methods=["GET"])
 def list_proposals():
-    return jsonify(load_proposals())
+    """Phase 8.4 — list with optional ?status=pending filter."""
+    proposals = load_proposals()
+    status_filter = request.args.get("status")
+    if status_filter:
+        proposals = [p for p in proposals if p.get("status") == status_filter]
+    return jsonify({
+        "proposals": proposals,
+        "count":     len(proposals),
+    })
 
 
 @system_bp.route("/proposals/<int:pid>/approve", methods=["POST"])
 def approve_proposal(pid):
+    """Mark a proposal `approved`. Does NOT modify code -- approving is
+    bookkeeping; the destructive step is /proposals/<id>/apply which
+    requires the Phase 7.3 confirm token."""
     proposals = load_proposals()
+    found = False
     for p in proposals:
         if p["id"] == pid:
             p["status"] = "approved"
+            found = True
     save_proposals(proposals)
+    if not found:
+        return jsonify({"ok": False, "error": f"proposal {pid} not found"}), 404
+    return jsonify({"ok": True, "next": f"POST /proposals/{pid}/apply with confirm token"})
+
+
+@system_bp.route("/proposals/<int:pid>/reject", methods=["POST"])
+def reject_proposal(pid):
+    """Phase 8.4 -- mark a proposal `rejected`. Idempotent + non-destructive."""
+    proposals = load_proposals()
+    found = False
+    for p in proposals:
+        if p["id"] == pid:
+            p["status"] = "rejected"
+            found = True
+    save_proposals(proposals)
+    if not found:
+        return jsonify({"ok": False, "error": f"proposal {pid} not found"}), 404
     return jsonify({"ok": True})
 
 
 @system_bp.route("/proposals/<int:pid>/apply", methods=["POST"])
 def apply_proposal_route(pid):
+    """Phase 8.4 — apply a previously-approved proposal. Behind the
+    Phase 7.3 confirm gate because this can rewrite source files.
+
+    Body: {"confirm": "I CONFIRM proposal_apply"}
+    Returns 428 without the confirm; 409 if proposal isn't approved yet.
+    """
+    from confirm_gate import require_confirm
+    denial = require_confirm("proposal_apply")
+    if denial:
+        return denial
+
+    proposals = load_proposals()
+    prop = next((p for p in proposals if p["id"] == pid), None)
+    if not prop:
+        return jsonify({"ok": False, "error": f"proposal {pid} not found"}), 404
+    if prop.get("status") != "approved":
+        return jsonify({
+            "ok": False,
+            "error": f"proposal {pid} status is {prop.get('status')!r}; "
+                     "must be 'approved' before apply",
+        }), 409
+
     result = apply_proposal(pid)
     return jsonify(result)
 
