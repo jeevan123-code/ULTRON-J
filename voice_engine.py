@@ -440,8 +440,20 @@ def _tts_kokoro(text: str, mood: str) -> bytes:
 def tts(text: str, mood: str = "FOCUSED", provider: str = "auto") -> Tuple[bytes, str]:
     """
     Convert text to MP3 bytes.
-    Auto-selects best available provider:
-      ElevenLabs (if key) → OpenAI (if key) → Edge TTS (free, no key)
+
+    Phase 7.6 — Piper-first chain (matches the original design intent
+    of the surrounding comment). Order:
+
+      auto: Piper (local, free, ~1s) -> Kokoro (local) -> ElevenLabs
+            (if key) -> OpenAI (if key) -> Edge (cloud, no key needed)
+
+    Local-first means zero per-call API cost, no network round-trip,
+    no API-key requirement, and offline operation. The cloud providers
+    stay as fallbacks if Piper/Kokoro models aren't installed.
+
+    Override with `provider=<name>` to force a specific backend; "edge"
+    is always appended as a last-resort no-key fallback.
+
     Returns: (audio_bytes, provider_name)
     """
     clean = prepare_for_tts(text) or "Done."
@@ -452,16 +464,16 @@ def tts(text: str, mood: str = "FOCUSED", provider: str = "auto") -> Tuple[bytes
 
     if provider == "auto":
         chain = []
-        # Piper Ryan (deep professional male, local, ~1s) is the default
-        # voice for Ultron. Cloud premium voices override only if a key is set.
-        if ELEVENLABS_API_KEY:
-            chain.append("elevenlabs")
-        if OPENAI_API_KEY:
-            chain.append("openai")
+        # Local providers first (free, no API cost, no network).
         if PIPER_AVAILABLE and os.path.exists(_PIPER_MODEL_PATH):
             chain.append("piper")
         if KOKORO_AVAILABLE:
             chain.append("kokoro")
+        # Cloud premium voices as fallback if local isn't installed.
+        if ELEVENLABS_API_KEY:
+            chain.append("elevenlabs")
+        if OPENAI_API_KEY:
+            chain.append("openai")
         chain.append("edge")
     else:
         chain = [provider, "edge"]

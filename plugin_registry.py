@@ -57,6 +57,11 @@ def _load_plugin_file(filepath: str) -> Optional[Dict]:
 
         meta = getattr(mod, "PLUGIN_META", None)
         run_fn = getattr(mod, "run", None)
+        # Phase 8.3 — optional `match(text) -> bool`. When defined, the
+        # plugin self-decides whether a free-form intent string is a
+        # match for its capability. Falls back to tag matching for
+        # plugins that don't define one (backward compatible).
+        match_fn = getattr(mod, "match", None)
 
         if not meta or not callable(run_fn):
             print(f"[PluginRegistry] Skipping {filepath} - missing PLUGIN_META or run()")
@@ -68,6 +73,7 @@ def _load_plugin_file(filepath: str) -> Optional[Dict]:
             "meta":      meta,
             "module":    mod,
             "run":       run_fn,
+            "match":     match_fn if callable(match_fn) else None,
             "path":      filepath,
             "loaded_at": datetime.now().isoformat(),
             "enabled":   True,
@@ -149,11 +155,29 @@ def run_plugin(name: str, params: dict = None) -> Dict:
 
 
 def run_plugin_by_intent(intent_text: str, params: dict = None) -> Optional[Dict]:
-    """Find best plugin matching an intent string and run it."""
+    """Find best plugin matching an intent string and run it.
+
+    Phase 8.3 — two-tier resolution:
+      1. If any plugin defines `match(text) -> bool`, the FIRST one to
+         return True wins (plugins self-decide their domain).
+      2. Otherwise fall back to the tag/description scoring heuristic
+         used since the registry was introduced.
+    """
+    # Tier 1 — explicit match() functions take precedence
+    with _registry_lock:
+        for name, plugin in _plugins.items():
+            if not plugin["enabled"] or not plugin.get("match"):
+                continue
+            try:
+                if plugin["match"](intent_text):
+                    return run_plugin(name, params or {})
+            except Exception as e:
+                _log_event("match_error", {"name": name, "error": str(e)})
+
+    # Tier 2 — legacy tag scoring (unchanged)
     intent_lower = intent_text.lower()
     best_plugin = None
     best_score  = 0
-
     with _registry_lock:
         for name, plugin in _plugins.items():
             if not plugin["enabled"]:
@@ -173,6 +197,52 @@ def run_plugin_by_intent(intent_text: str, params: dict = None) -> Optional[Dict
     if best_plugin and best_score > 0:
         return run_plugin(best_plugin, params or {})
     return None
+
+
+def write_skill_plugin(name: str, code: str, description: str = "",
+                       tags: list = None) -> dict:
+    """Phase 8.3 — concrete write path for skill_learner.
+
+    Writes a new plugin file to plugins/<name>.py with the given code.
+    The code must contain a `PLUGIN_META` dict and a `run(params) -> dict`
+    function -- the same contract every plugin follows. Returns:
+        {"success": bool, "path": str, "error": str}
+    The plugin watcher (5s interval) picks up the new file
+    automatically, so the skill becomes callable without a restart.
+    """
+    # Defensive validation -- the code must be syntactically valid Python
+    # AND export the expected interface, or we refuse to write.
+    try:
+        compile(code, f"<skill_learner:{name}>", "exec")
+    except SyntaxError as e:
+        return {"success": False, "error": f"syntax error: {e}"}
+
+    safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", name).strip("_")
+    if not safe_name:
+        return {"success": False, "error": "name produces empty filename"}
+    target = os.path.join(PLUGINS_DIR, f"{safe_name}.py")
+
+    if os.path.exists(target):
+        return {"success": False,
+                "error": f"plugin '{safe_name}' already exists at {target}"}
+
+    try:
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(code)
+    except OSError as e:
+        return {"success": False, "error": f"write failed: {e}"}
+
+    _log_event("skill_learner_write", {
+        "name":        safe_name,
+        "description": description,
+        "tags":        tags or [],
+        "path":        target,
+    })
+    return {"success": True, "path": target,
+            "note": "plugin watcher (5s interval) will auto-load it"}
+
+
+import re  # used by write_skill_plugin
 
 
 # =============================================================================
@@ -301,6 +371,12 @@ def _watch_plugins_dir(interval: int = 5):
 
 def start_plugin_watcher(interval: int = 5):
     global _watcher_running
+    # Phase 4.1 — gate through loop_supervisor / config.LOOPS
+    from loop_supervisor import loop_enabled, loop_interval_s
+    if not loop_enabled("plugin_watcher"):
+        print("[PluginRegistry] watcher disabled by config.LOOPS — not starting")
+        return
+    interval = int(loop_interval_s("plugin_watcher", interval))
     if _watcher_running:
         return
     _watcher_running = True

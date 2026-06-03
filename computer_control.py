@@ -489,7 +489,14 @@ def open_url(url: str, browser: str = None) -> Dict:
                 except Exception:
                     pass  # fall through to shell
             try:
-                subprocess.Popen(f'start {browser} "{url}"', shell=True)
+                # Phase 7.4 — quote interpolated values. browser + url
+                # can both come from an LLM; `start` is a cmd.exe
+                # built-in so we can't drop shell=True here.
+                import shlex
+                subprocess.Popen(
+                    f'start {shlex.quote(browser)} "{shlex.quote(url)}"',
+                    shell=True,
+                )
                 result = {"success": True, "url": url, "browser": browser, "method": "shell"}
                 _log_action("open_url", {"url": url, "browser": browser}, result)
                 return result
@@ -673,7 +680,14 @@ def open_app(app_name: str) -> Dict:
         # 4. Shell fallback — only if the exe is resolvable on PATH
         if shutil.which(app_name):
             try:
-                subprocess.Popen(f'start "" "{app_name}"', shell=True)
+                # Phase 7.4 — app_name was validated by shutil.which but
+                # quote it anyway: defense in depth, and the empty `""`
+                # title argument stays literal.
+                import shlex
+                subprocess.Popen(
+                    f'start "" "{shlex.quote(app_name)}"',
+                    shell=True,
+                )
                 result = {"success": True, "app": app_name, "method": "shell"}
             except Exception as e:
                 result = {"success": False, "error": str(e)}
@@ -884,11 +898,28 @@ def execute_computer_action(action: str, params: dict) -> Dict:
         return take_screenshot(region, save_path=save_path)
 
     elif action == "click":
+        # Phase 1.5 — coerce + bounds-check. pyautogui clamps coordinates
+        # internally on most platforms, but a bad clicks value (e.g.
+        # 1_000_000) would hammer the desktop for minutes. 4096 covers
+        # any plausible monitor width/height; 10 clicks covers any sane
+        # human double/triple-click chain.
+        def _coord(name, lo, hi, default):
+            try:
+                v = int(params.get(name, default))
+            except (TypeError, ValueError):
+                return None
+            return v if lo <= v <= hi else None
+        x = _coord("x", 0, 4096, 0)
+        y = _coord("y", 0, 4096, 0)
+        clicks_n = _coord("clicks", 1, 10, 1)
+        if x is None or y is None or clicks_n is None:
+            return {"success": False,
+                    "error": "x,y must be in [0,4096], clicks in [1,10]"}
         return click(
-            x      = int(params.get("x", 0)),
-            y      = int(params.get("y", 0)),
+            x      = x,
+            y      = y,
             button = params.get("button", "left"),
-            clicks = int(params.get("clicks", 1)),
+            clicks = clicks_n,
         )
 
     elif action in ("type", "type_text"):

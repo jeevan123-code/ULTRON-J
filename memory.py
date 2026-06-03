@@ -149,6 +149,12 @@ def init_db():
             recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Phase 4.3 — sqlite is now source of truth for episodes; the
+    # `consolidated` flag used to live in the JSON-only schema.
+    # ALTER TABLE ADD COLUMN is idempotent-friendly via a pragma check.
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(episodes)").fetchall()}
+    if "consolidated" not in cols:
+        conn.execute("ALTER TABLE episodes ADD COLUMN consolidated INTEGER DEFAULT 0")
     conn.commit()
     conn.close()
 
@@ -448,11 +454,95 @@ def get_stale_projects(days_threshold: int = 7) -> list:
 # LAYER 5 — EPISODIC MEMORY (NEW)
 # =============================================================================
 
-_episode_lock = threading.Lock()
+_episode_lock        = threading.Lock()
+_export_lock         = threading.Lock()
+_episodes_since_flush = 0
+EPISODE_EXPORT_EVERY  = 50      # flush JSON every N stores
+
+
+def _row_to_episode(row: tuple) -> dict:
+    """SQLite row -> dict in the JSON shape callers expect."""
+    (_id, ep_id, kind, summary, detail, entities_json,
+     valence, importance, session_id, recorded_at, consolidated) = row
+    try:
+        entities = json.loads(entities_json) if entities_json else []
+    except Exception:
+        entities = []
+    return {
+        "id":         ep_id,
+        "kind":       kind,
+        "summary":    summary or "",
+        "detail":     detail or "",
+        "entities":   entities,
+        "valence":    valence,
+        "importance": importance,
+        "session_id": session_id or "",
+        "at":         recorded_at,
+        "consolidated": bool(consolidated),
+    }
+
+
+def _migrate_json_into_sqlite():
+    """Phase 4.3 — one-time-per-boot import of any JSON episodes not
+    already in SQLite (matched by episode_id). Safe to call repeatedly:
+    INSERT OR IGNORE on the UNIQUE episode_id column skips dupes."""
+    if not os.path.exists(EPISODE_FILE):
+        return 0
+    try:
+        with open(EPISODE_FILE, "r", encoding="utf-8") as f:
+            json_eps = json.load(f)
+    except Exception:
+        return 0
+    conn = _db_conn()
+    n = 0
+    try:
+        for ep in json_eps:
+            try:
+                conn.execute(
+                    "INSERT OR IGNORE INTO episodes "
+                    "(episode_id, kind, summary, detail, entities, valence, importance, session_id, consolidated) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        ep.get("id", str(uuid.uuid4())[:8]),
+                        ep.get("kind", ""),
+                        (ep.get("summary") or "")[:300],
+                        (ep.get("detail")  or "")[:1000],
+                        json.dumps(ep.get("entities") or []),
+                        float(ep.get("valence", 0)),
+                        float(ep.get("importance", 0.5)),
+                        ep.get("session_id", ""),
+                        1 if ep.get("consolidated") else 0,
+                    ),
+                )
+                n += conn.total_changes  # increments per insert
+            except Exception:
+                pass
+        conn.commit()
+    finally:
+        conn.close()
+    return n
+
+
+_migrate_json_into_sqlite()
 
 
 def load_episodes() -> list:
-    """Load all episodic memories."""
+    """Phase 4.3 — read from SQLite (source of truth). Falls back to JSON
+    only if SQLite is empty AND the JSON file exists (cold-start edge)."""
+    conn = _db_conn()
+    try:
+        cur = conn.execute(
+            "SELECT id, episode_id, kind, summary, detail, entities, "
+            "valence, importance, session_id, recorded_at, consolidated "
+            "FROM episodes ORDER BY id ASC LIMIT ?",
+            (MAX_EPISODES,),
+        )
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+    if rows:
+        return [_row_to_episode(r) for r in rows]
+    # Cold-start fallback (fresh clone, no DB yet)
     if os.path.exists(EPISODE_FILE):
         try:
             with open(EPISODE_FILE, "r", encoding="utf-8") as f:
@@ -463,8 +553,23 @@ def load_episodes() -> list:
 
 
 def save_episodes(episodes: list):
+    """Phase 4.3 — explicit JSON snapshot. After the sqlite-first refactor
+    this is only called from the periodic flush + on shutdown; per-store
+    writes go to SQLite directly. Kept as a public function so existing
+    callers (memory_vault backup, etc.) still work."""
     with _episode_lock:
         atomic_json_write(EPISODE_FILE, episodes[-MAX_EPISODES:])
+
+
+def _flush_episodes_to_json():
+    """Snapshot the current SQLite episodes table into the legacy JSON
+    file. Called every EPISODE_EXPORT_EVERY stores and on consolidation."""
+    global _episodes_since_flush
+    with _export_lock:
+        eps = load_episodes()
+        if eps:
+            save_episodes(eps)
+        _episodes_since_flush = 0
 
 
 def store_episode(
@@ -484,41 +589,54 @@ def store_episode(
     importance: how significant this episode is
     entities:   list of entity names involved (people, projects, tools)
     """
-    episodes = load_episodes()
+    # Phase 4.3 — sqlite-first. The old path called load_episodes()
+    # (full JSON read) THEN save_episodes() (full atomic rewrite of a
+    # 189KB file) on EVERY store. With ~460 episodes that's O(n) write
+    # amplification on every conversation turn -- the dominant source
+    # of `mem_rising` anomalies. New path: write one row to SQLite,
+    # flush to JSON every EPISODE_EXPORT_EVERY=50 stores or when
+    # consolidation kicks in.
+    global _episodes_since_flush
     ep_id = str(uuid.uuid4())[:8]
-    episode = {
-        "id":         ep_id,
-        "kind":       kind,
-        "summary":    summary[:300],
-        "detail":     detail[:1000],
-        "entities":   entities or [],
-        "valence":    round(valence, 2),
-        "importance": round(importance, 2),
-        "session_id": session_id,
-        "at":         datetime.datetime.now().isoformat(),
-        "consolidated": False,
-    }
-    episodes.append(episode)
-    save_episodes(episodes)
-
-    # Also write to SQLite for fast querying
     try:
         conn = _db_conn()
         conn.execute(
-            "INSERT OR IGNORE INTO episodes (episode_id, kind, summary, detail, entities, valence, importance, session_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO episodes (episode_id, kind, summary, detail, entities, valence, importance, session_id, consolidated) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
             (ep_id, kind, summary[:300], detail[:1000],
-             json.dumps(entities or []), valence, importance, session_id),
+             json.dumps(entities or []), round(valence, 2),
+             round(importance, 2), session_id),
         )
         conn.commit()
         conn.close()
     except Exception:
         pass
 
-    # Check if consolidation is needed
-    unconsolidated = [e for e in episodes if not e.get("consolidated")]
-    if len(unconsolidated) >= CONSOLIDATION_THRESHOLD:
-        _consolidate_episodes_background(episodes)
+    _episodes_since_flush += 1
+
+    # Phase 4.3 — periodic JSON snapshot + consolidation check. SQLite
+    # is authoritative; JSON is a snapshot for tooling that still
+    # expects the legacy file (memory_vault backup, dashboard, etc.).
+    # Consolidation is bundled into the same trigger so we don't
+    # re-scan the table on every store -- the pre-refactor code did
+    # `if len(unconsolidated) >= 200` on every call, which fired
+    # forever once the threshold was crossed (long-standing bug).
+    if _episodes_since_flush >= EPISODE_EXPORT_EVERY:
+        try:
+            _flush_episodes_to_json()
+        except Exception:
+            pass
+        try:
+            conn = _db_conn()
+            unconsolidated = conn.execute(
+                "SELECT COUNT(*) FROM episodes WHERE consolidated = 0"
+            ).fetchone()[0]
+            conn.close()
+            if unconsolidated >= CONSOLIDATION_THRESHOLD:
+                _consolidate_episodes_background(load_episodes())
+                _flush_episodes_to_json()   # re-snapshot after consolidation
+        except Exception:
+            pass
 
     return ep_id
 

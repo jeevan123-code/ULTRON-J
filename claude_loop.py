@@ -138,9 +138,30 @@ def do_manual_login() -> Dict:
     """
     Open a visible browser window so Jeevan can log in manually to Claude.ai.
     Once logged in, session cookies are saved for future headless runs.
+
+    Phase 9 hardening: this function calls `input()` to pause until the
+    human finishes the login. Over HTTP (POST /claude_loop/login) there
+    is no terminal, so `input()` would block on a non-existent stdin
+    and hang the request. We detect non-interactive stdin and refuse
+    with a 400-style payload that points the caller at the CLI form.
     """
     if not PLAYWRIGHT_AVAILABLE:
         return {"success": False, "error": "playwright not installed. Run: pip install playwright && playwright install chromium"}
+
+    # Bail out cleanly if we have no terminal -- the input() call below
+    # would hang the request forever.
+    import sys as _sys
+    if not _sys.stdin.isatty():
+        return {
+            "success": False,
+            "error": (
+                "manual login requires an interactive terminal -- the "
+                "input() prompt has no stdin over HTTP. Run from the "
+                "Ultron CLI: `venv/bin/python -c "
+                "'from claude_loop import do_manual_login; "
+                "print(do_manual_login())'`"
+            ),
+        }
 
     result = {"success": False}
     try:

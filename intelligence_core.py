@@ -348,8 +348,70 @@ def think_and_stream(
     voice_mode: bool = False,
 ) -> Generator:
     """
+    Phase 8.2 wrapper — wraps _think_and_stream_inner with per-request
+    cost telemetry. Appends a final `_cost` SSE event so the UI / SSE
+    consumer can show `groq · 142 tokens · 1.8s` after each response
+    without needing to reach into each LLM provider's stats.
+
+    Public signature unchanged from the pre-Phase-8 version.
+    """
+    import time as _time
+    _start_ts  = _time.time()
+    _token_count = 0
+    _provider    = "unknown"
+
+    for _chunk in _think_and_stream_inner(
+        question=question,
+        session_id=session_id,
+        history=history,
+        temperature=temperature,
+        search_context=search_context,
+        provider=provider,
+        voice_mode=voice_mode,
+    ):
+        # Best-effort inspection of each SSE event to extract telemetry
+        # without changing the inner generator's emission logic.
+        try:
+            if _chunk.startswith("data: "):
+                _parsed = json.loads(_chunk[6:].strip())
+                if isinstance(_parsed, dict):
+                    if "token" in _parsed and _parsed.get("type") != "status":
+                        _token_count += 1
+                    if "provider" in _parsed and _parsed["provider"]:
+                        _provider = _parsed["provider"]
+        except (ValueError, json.JSONDecodeError):
+            pass
+        yield _chunk
+
+    _elapsed_ms = int((_time.time() - _start_ts) * 1000)
+    yield (
+        "data: "
+        + json.dumps({"_cost": {
+            "provider":   _provider,
+            "tokens":     _token_count,
+            "elapsed_ms": _elapsed_ms,
+        }})
+        + "\n\n"
+    )
+
+
+def _think_and_stream_inner(
+    question: str,
+    session_id: str,
+    history: list,
+    temperature: float = 0.7,
+    search_context: str = "",
+    provider: str = "auto",
+    voice_mode: bool = False,
+) -> Generator:
+    """
     The complete intelligence pipeline. Drop-in replacement for
     the stream_llm call in app.py's /ask route.
+
+    Renamed from `think_and_stream` in Phase 8.2 so the public function
+    can wrap this with cost telemetry. Internal callers in this file
+    that use `yield from` of itself are unaffected since this is the
+    only definition; external callers go through the wrapper.
 
     Args:
         question: The user's question
@@ -540,14 +602,18 @@ def think_and_stream(
         _sc_block = "=== Web Search Results ===\n" + search_context.strip()
         world_state = (world_state + "\n\n" + _sc_block) if world_state else _sc_block
 
-    # ── Step 3b: Planner intercept (NEW) ──────────────────────────────────────
-    # For COMPLEX requests, optionally route through the DAG planner. Opt-in
-    # via the USE_BRAIN_ORCHESTRATOR env var OR the "kartha plan" phrase so
-    # we don't change behaviour for unprepared users.
+    # ── Step 3b: Planner intercept ────────────────────────────────────────────
+    # Phase 5.2 — opt-in DAG planner. Three equivalent triggers:
+    #   * INTELLIGENCE_MODE=plan       (canonical, matches Phase 5 design)
+    #   * USE_BRAIN_ORCHESTRATOR=1     (legacy env var, kept working)
+    #   * "plan this" / "plan:" / "kartha plan" in the question
+    # Only fires for COMPLEX queries to avoid planner overhead on simple chat.
     use_planner = False
     ql = question.lower()
+    _intelligence_mode_early = os.environ.get("INTELLIGENCE_MODE", "").strip().lower()
     if ("plan this" in ql or "plan:" in ql or "kartha plan" in ql or
-            os.environ.get("USE_BRAIN_ORCHESTRATOR") == "1"):
+            os.environ.get("USE_BRAIN_ORCHESTRATOR") == "1" or
+            _intelligence_mode_early == "plan"):
         use_planner = (complexity == "COMPLEX")
 
     if use_planner:
@@ -582,13 +648,34 @@ def think_and_stream(
         )
         return
 
-    # ── COMPLEX PATH: Full ReAct reasoning loop ───────────────────────────────
+    # ── COMPLEX PATH ──────────────────────────────────────────────────────────
+    # Phase 5.2 — by default, COMPLEX uses the same CoT-prompt path as MEDIUM
+    # but with the long model. react_engine's full ReAct tool-loop is now
+    # opt-in via INTELLIGENCE_MODE=react. The previous default was "always
+    # react", which mixed two distinct reasoning systems on every COMPLEX
+    # query and made behaviour hard to predict.
     yield _status_token("🔍 Analyzing deeply...")
 
+    _intelligence_mode = os.environ.get("INTELLIGENCE_MODE", "").strip().lower()
+    _use_react = _intelligence_mode == "react"
+
+    if not _use_react:
+        # Default path — prompt-based, single LLM call
+        system_prompt = _build_medium_system_prompt(world_state, jeevan_profile)
+        if voice_mode:
+            system_prompt += "\n\n" + _VOICE_MODE_BLOCK
+        yield from _stream_with_intelligence_prompt(
+            system_prompt, history, question, temperature,
+            max_tokens=INTELLIGENCE_MAX_TOKENS_LONG,
+            provider=provider, model=INTELLIGENCE_MODEL,
+        )
+        return
+
+    # Opt-in ReAct mode
     try:
         from react_engine import reason, get_reasoning_system_for_stream
     except ImportError:
-        # Graceful fallback if react_engine not available
+        # Graceful fallback if react_engine not available even when requested
         system_prompt = _build_medium_system_prompt(world_state, jeevan_profile)
         if voice_mode:
             system_prompt += "\n\n" + _VOICE_MODE_BLOCK

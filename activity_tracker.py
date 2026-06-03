@@ -63,6 +63,11 @@ def _poll_mouse_position():
 
 
 def start_tracker():
+    # Phase 4.1 — gate through loop_supervisor / config.LOOPS
+    from loop_supervisor import loop_enabled
+    if not loop_enabled("activity_tracker"):
+        print("[ActivityTracker] disabled by config.LOOPS — not starting")
+        return
     if _state["running"]:
         return
     try:

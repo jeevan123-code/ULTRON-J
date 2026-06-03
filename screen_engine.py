@@ -290,6 +290,13 @@ def start_screen_monitor(interval: float = 3.0,
     - Calls on_window_change(old, new) on app switch
     """
     global _monitor_thread, _monitor_running, _monitor_interval
+    # Phase 4.1 — gate through loop_supervisor / config.LOOPS. Screen
+    # monitor takes screenshots + runs OCR — defaults OFF in the registry.
+    from loop_supervisor import loop_enabled, loop_interval_s, should_skip_heavy_tick
+    if not loop_enabled("screen_monitor"):
+        print("[ScreenEngine] loop disabled by config.LOOPS — not starting")
+        return
+    interval = loop_interval_s("screen_monitor", interval)
     if _monitor_running:
         return
 
@@ -301,6 +308,10 @@ def start_screen_monitor(interval: float = 3.0,
         _last_ocr_at = 0.0
 
         while _monitor_running:
+            # Phase 4.2 — skip OCR + screenshot tick under memory backpressure
+            if should_skip_heavy_tick():
+                time.sleep(_monitor_interval)
+                continue
             try:
                 # Active window check
                 current_window = get_active_window_title()

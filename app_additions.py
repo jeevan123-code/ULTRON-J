@@ -252,6 +252,9 @@ def register_beyond_jarvis_routes(app: Flask):
 
     @app.route("/self_modify/propose", methods=["POST"])
     def self_modify_propose_route():
+        # Proposing a change does NOT modify the codebase — it just queues
+        # a proposal for review. No confirm-gate needed at this step; the
+        # apply step below is gated instead.
         from smart_home import get_self_modify
         data    = request.json or {}
         fpath   = data.get("filepath", "")
@@ -268,11 +271,22 @@ def register_beyond_jarvis_routes(app: Flask):
 
     @app.route("/self_modify/apply/<proposal_id>", methods=["POST"])
     def self_modify_apply_route(proposal_id):
+        """Apply a queued proposal — actually rewrites the file. Phase 1.4
+        requires {"confirm": "I CONFIRM self_modify_apply"} in the body."""
+        from confirm_gate import require_confirm
+        denial = require_confirm("self_modify_apply")
+        if denial:
+            return denial
         from smart_home import get_self_modify
         return jsonify(get_self_modify().apply_proposal(proposal_id))
 
     @app.route("/self_modify/rollback/<proposal_id>", methods=["POST"])
     def self_modify_rollback_route(proposal_id):
+        """Roll back an applied proposal. Also rewrites files, so also gated."""
+        from confirm_gate import require_confirm
+        denial = require_confirm("self_modify_rollback")
+        if denial:
+            return denial
         from smart_home import get_self_modify
         return jsonify(get_self_modify().rollback(proposal_id))
 

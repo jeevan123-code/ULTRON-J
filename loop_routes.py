@@ -188,11 +188,23 @@ def verify_screenshot():
     """
     Take a labeled screenshot and return path + base64.
     Body: {"label": "before_patch"}
+
+    Phase 5 hardening: take_labeled_screenshot can raise (gnome-screenshot
+    binary not installed, headless display, X server refused, etc.).
+    Catch and surface as 503 instead of letting an uncaught exception
+    bubble up as a 500 stack-trace.
     """
     if not VISUAL_VERIFY_AVAILABLE:
-        return jsonify({"success": False, "error": "visual_verify module not available"})
+        return jsonify({"success": False, "error": "visual_verify module not available"}), 503
     label = (request.json or {}).get("label", "manual")
-    result = take_labeled_screenshot(label)
+    try:
+        result = take_labeled_screenshot(label)
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": f"screenshot capture failed: {e}",
+            "hint":  "missing gnome-screenshot binary, no X display, or wrong Pillow version",
+        }), 503
     return jsonify(result)
 
 
@@ -269,9 +281,15 @@ def self_modify_improve():
         "request": "Make the chat bubble wider with dark green theme",
         "target": "index.html",   // optional, auto-detected if omitted
         "use_claude": true,        // use Claude.ai loop (needs session)
-        "verify": true             // take before/after screenshots
+        "verify": true,            // take before/after screenshots
+        "confirm": "I CONFIRM self_modify_improve"   // Phase 1.4 — required
     }
     """
+    from confirm_gate import require_confirm
+    denial = require_confirm("self_modify_improve")
+    if denial:
+        return denial
+
     if not SELF_MODIFY_AVAILABLE:
         return jsonify({"success": False, "error": "self_modify module not available"})
 
@@ -290,8 +308,17 @@ def self_modify_improve():
 def self_modify_patch():
     """
     Directly patch a file with provided code (no LLM call).
-    Body: {"filename": "index.html", "code": "<!DOCTYPE html>..."}
+    Body: {
+        "filename": "index.html",
+        "code": "<!DOCTYPE html>...",
+        "confirm": "I CONFIRM self_modify_patch"     // Phase 1.4 — required
+    }
     """
+    from confirm_gate import require_confirm
+    denial = require_confirm("self_modify_patch")
+    if denial:
+        return denial
+
     if not SELF_MODIFY_AVAILABLE:
         return jsonify({"success": False, "error": "self_modify module not available"})
 
@@ -309,8 +336,16 @@ def self_modify_patch():
 def self_modify_rollback():
     """
     Roll back the last patch to a file.
-    Body: {"filename": "index.html"}
+    Body: {
+        "filename": "index.html",
+        "confirm": "I CONFIRM self_modify_rollback"  // Phase 1.4 — required
+    }
     """
+    from confirm_gate import require_confirm
+    denial = require_confirm("self_modify_rollback")
+    if denial:
+        return denial
+
     if not SELF_MODIFY_AVAILABLE:
         return jsonify({"success": False, "error": "self_modify module not available"})
 

@@ -136,10 +136,15 @@ def save_loop_status(status: dict):
 
 def load_loop_status() -> dict:
     if os.path.exists(LOOP_STATUS_FILE):
+        # Phase 7.1 — narrowed from blanket `except Exception`. These are
+        # the only failure modes that can occur on a json.load of a known
+        # path: file vanished mid-read, OS-level error, or partial write
+        # leaving non-JSON content. Anything else is a real bug we want to
+        # see, not swallow.
         try:
             with open(LOOP_STATUS_FILE, "r") as f:
                 return json.load(f)
-        except Exception:
+        except (OSError, json.JSONDecodeError, ValueError):
             pass
     return {"running": False, "cycle": 0, "phase": "idle", "last_action": None}
 
@@ -161,11 +166,15 @@ def _check_connectivity() -> bool:
     """Check if internet is reachable."""
     import socket
     for host in CONNECTIVITY_CHECK_HOSTS:
+        # Phase 7.1 — narrowed. Connectivity probes legitimately fail
+        # in a small set of ways (timeout, DNS, refused, network down).
+        # We deliberately swallow these -- the function's whole purpose
+        # is to return True/False on reachability, not to log.
         try:
             socket.setdefaulttimeout(CONNECTIVITY_TIMEOUT)
             socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, 53))
             return True
-        except Exception:
+        except (OSError, socket.timeout, socket.gaierror):
             pass
     return False
 
@@ -214,7 +223,19 @@ def observe_environment() -> dict:
     obs["ram_gb_free"]  = mem.get("free_gb", 0)
 
     disk = get_disk_usage()
-    obs["disk_critical"] = any(d.get("percent", 0) > 92 for d in disk.values())
+    # Phase 3.1 fix — exclude pseudo-filesystems and snap mounts. Snap
+    # packages mount as squashfs images that are 100% full BY DESIGN
+    # (read-only loop devices), so the old `any > 92` check fired every
+    # cycle on a system with any snap installed and short-circuited the
+    # entire goal-execution path into an alert spam.
+    _PSEUDO_MOUNT_PREFIXES = ("/snap/", "/var/lib/docker/", "/proc/", "/sys/", "/dev/")
+    def _is_real_disk(mountpoint: str) -> bool:
+        return not any(mountpoint.startswith(p) for p in _PSEUDO_MOUNT_PREFIXES)
+    obs["disk_critical"] = any(
+        d.get("percent", 0) > 92
+        for mp, d in disk.items()
+        if _is_real_disk(mp)
+    )
 
     # Desktop
     desktop = get_desktop_files()
@@ -478,10 +499,12 @@ def _run_self_evaluation() -> str:
 def _append_self_improve_log(entry: dict):
     log = []
     if os.path.exists(SELF_IMPROVE_LOG):
+        # Phase 7.1 — narrowed. Partial-write / vanished file is the
+        # expected failure; recover gracefully and overwrite.
         try:
             with open(SELF_IMPROVE_LOG, "r") as f:
                 log = json.load(f)
-        except Exception:
+        except (OSError, json.JSONDecodeError, ValueError):
             pass
     log.append(entry)
     if len(log) > 100:
@@ -492,10 +515,11 @@ def _append_self_improve_log(entry: dict):
 
 def get_self_improvement_log() -> list:
     if os.path.exists(SELF_IMPROVE_LOG):
+        # Phase 7.1 — narrowed (same rationale as _append_self_improve_log).
         try:
             with open(SELF_IMPROVE_LOG, "r") as f:
                 return json.load(f)
-        except Exception:
+        except (OSError, json.JSONDecodeError, ValueError):
             pass
     return []
 
@@ -530,6 +554,9 @@ def _generate_proactive_suggestions(obs: dict):
 
     # Stale projects check (once a day)
     if hour == 9:
+        # Phase 7.1 — was silent-pass. Now logs so we notice if
+        # get_stale_projects starts throwing (real signal that memory
+        # is mis-shaped).
         try:
             stale = get_stale_projects(days_threshold=7)
             for proj in stale[:2]:
@@ -538,8 +565,12 @@ def _generate_proactive_suggestions(obs: dict):
                     f"Still active?",
                     priority="low"
                 )
-        except Exception:
-            pass
+        except Exception as _e:
+            try:
+                from error_tracker import log_failure
+                log_failure("autonomous_loop", "_morning_check_stale", _e)
+            except Exception:
+                pass
 
     # RAM warning
     if obs.get("ram_pct", 0) > 80:
@@ -591,7 +622,13 @@ def _generate_daily_plan(obs: dict):
 
 
 def _weather_morning_briefing():
-    """Fetch weather and include in morning briefing."""
+    """Fetch weather and include in morning briefing.
+
+    Phase 7.1 — the surrounding try/except used to silent-pass; now logs
+    so a broken weather provider (rate limit, API change, network) shows
+    up in error_log.json instead of being mistaken for "no briefing
+    today".
+    """
     try:
         weather = fetch_weather()
         if weather.get("success"):
@@ -600,8 +637,12 @@ def _weather_morning_briefing():
                 f"Humidity {weather['humidity']}%.",
                 priority="normal"
             )
-    except Exception:
-        pass
+    except Exception as _e:
+        try:
+            from error_tracker import log_failure
+            log_failure("autonomous_loop", "_weather_morning_briefing", _e)
+        except Exception:
+            pass
 
 # =============================================================================
 # MAIN AUTONOMOUS LOOP
@@ -622,6 +663,9 @@ def _continuous_loop():
             # T28 — skip cycle if user is mid-conversation
             # Read from sys.modules to avoid re-importing app.py as a second
             # module object (which would re-run all module-level init code).
+            # Phase 7.1 — narrowed. The only failures here are normal
+            # Python attribute lookups + a sleep call; KeyError /
+            # AttributeError are the documented failure modes.
             try:
                 import sys as _sys
                 _app = _sys.modules.get('__main__') or _sys.modules.get('app')
@@ -629,7 +673,7 @@ def _continuous_loop():
                 if _conv_active and _conv_active.is_set():
                     time.sleep(1)
                     continue
-            except Exception:
+            except (AttributeError, KeyError):
                 pass
 
             cycle += 1
@@ -712,6 +756,11 @@ _AGENT_NAME = "Ultron-J"
 
 def start_autonomous_loop() -> bool:
     global _loop_running, _loop_thread
+    # Phase 4.1 — gate through loop_supervisor / config.LOOPS
+    from loop_supervisor import loop_enabled
+    if not loop_enabled("autonomous"):
+        print("[autonomous] loop disabled by config.LOOPS — not starting")
+        return False
     with _loop_lock:
         if _loop_running:
             return True

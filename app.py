@@ -189,7 +189,26 @@ except ImportError:
 
 # ── App ────────────────────────────────────────────────────────────────────────
 app = Flask(__name__)
-CORS(app)
+
+# CORS — Phase 1.2. The old `CORS(app)` allowed every origin, which
+# combined with the missing auth gate meant any browser anywhere could
+# call the file-write / shell / self-upgrade endpoints. Lock it down to
+# the local UI by default; extend via env var when serving a phone.
+_cors_origins = [
+    o.strip()
+    for o in os.environ.get(
+        "ULTRON_ALLOWED_ORIGINS",
+        "http://localhost:5000,http://127.0.0.1:5000",
+    ).split(",")
+    if o.strip()
+]
+CORS(app, origins=_cors_origins, supports_credentials=True)
+
+# Auth gate — Phase 1.1. MUST be installed before any blueprint
+# registers routes so the before_request hook covers the whole surface.
+from auth import install_auth
+install_auth(app)
+
 app.register_blueprint(agent_bp)
 
 # ── ULTIMATE v4: new-blueprint registration (vector store, research, planner,
@@ -412,6 +431,76 @@ def index():
 # check_interval and kill+restart after 3 consecutive misses, so it must
 # stay cheap (no I/O, no third-party calls) and never raise. The richer
 # system snapshot lives at /agent/health.
+@app.route("/health/capabilities", methods=["GET"])
+def health_capabilities():
+    """Phase 8.1 — capability table over HTTP.
+
+    Reads the latest BASELINE_CAPABILITIES.txt snapshot (written by the
+    Phase 0.3 harness on every test run). Pass ?refresh=1 to re-run the
+    capability suite first; default is the cached snapshot because
+    re-running takes ~5s.
+
+    Sits behind the auth gate (Phase 1.1) like every other endpoint
+    except / and /health.
+    """
+    import re as _re
+    import subprocess as _sub
+    snapshot = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "BASELINE_CAPABILITIES.txt")
+
+    if request.args.get("refresh"):
+        try:
+            _sub.run(
+                ["venv/bin/python", "-m", "pytest",
+                 "tests/test_capabilities.py", "-q", "--timeout=20"],
+                cwd=os.path.dirname(snapshot),
+                capture_output=True,
+                timeout=60,
+            )
+        except Exception:
+            pass  # serve the existing snapshot on refresh failure
+
+    if not os.path.exists(snapshot):
+        return jsonify({
+            "error": "no capability snapshot yet — run `pytest "
+                     "tests/test_capabilities.py` to generate one",
+        }), 503
+
+    text = open(snapshot, encoding="utf-8").read()
+    counts = {}
+    hm = _re.search(r"PASS=(\d+)\s+FAIL=(\d+)\s+SKIP=(\d+)\s+TOTAL=(\d+)", text)
+    if hm:
+        counts = {
+            "pass":  int(hm.group(1)),
+            "fail":  int(hm.group(2)),
+            "skip":  int(hm.group(3)),
+            "total": int(hm.group(4)),
+        }
+    rows = []
+    for line in text.splitlines():
+        m = _re.match(r"^(PASS|FAIL|SKIP)\s+(\S+)\s*(.*)$", line)
+        if m:
+            rows.append({
+                "status": m.group(1),
+                "name":   m.group(2),
+                "detail": m.group(3).strip(),
+            })
+    snapshot_age_s = None
+    try:
+        snapshot_age_s = round(
+            datetime.datetime.now().timestamp() - os.path.getmtime(snapshot),
+            1,
+        )
+    except OSError:
+        pass
+    return jsonify({
+        "counts":         counts,
+        "rows":           rows,
+        "snapshot_path":  snapshot,
+        "snapshot_age_s": snapshot_age_s,
+    })
+
+
 @app.route("/health", methods=["GET"])
 def health():
     """Comprehensive health check — returns status of every module."""
@@ -1216,12 +1305,45 @@ def phone_wireless_status():
     })
 
 
+# ── Phone input validation helpers — Phase 1.5 ────────────────────────────────
+# These routes cast request.json values straight into `adb input` args. Before
+# the gate, an unvalidated string (or shell metacharacters in a clever payload)
+# would have been spliced into the adb command. subprocess.run([...]) without
+# shell=True already avoids the shell-injection class — but a bad value could
+# still cause adb to misbehave or DOS the phone. Coerce to int, bounds-check,
+# 400 on bad input.
+
+def _int_in_range(data: dict, name: str, lo: int, hi: int):
+    """Return int in [lo, hi] or None if missing/bad/out-of-range."""
+    raw = data.get(name)
+    try:
+        v = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return v if lo <= v <= hi else None
+
+
+# Android KeyEvent constants we actually want to permit. Anything outside this
+# range is either undefined, vendor-specific, or a power/system keycode we
+# don't want exposed over HTTP.
+_PHONE_KEYCODE_MAX = 300
+
+# Volume actions and their KeyEvent codes — single source of truth.
+_PHONE_VOLUME_KEYCODES = {"up": 24, "down": 25, "mute": 164}
+
+
 @app.route("/phone/tap", methods=["POST"])
 def phone_tap():
-    """Tap a specific coordinate on the phone screen. Body: {"x": 500, "y": 900}"""
+    """Tap a specific coordinate on the phone screen.
+    Body: {"x": 500, "y": 900}.  Phase 1.5 — x,y coerced to int in [0,4096].
+    """
     from task_orchestrator import PhoneBridge
-    data = request.json or {}
-    x, y = data.get("x", 540), data.get("y", 960)
+    data = request.get_json(silent=True) or {}
+    x = _int_in_range(data, "x", 0, 4096)
+    y = _int_in_range(data, "y", 0, 4096)
+    if x is None or y is None:
+        return jsonify({"success": False,
+                        "error": "x,y must be integers in [0,4096]"}), 400
     if not PhoneBridge.is_connected():
         return jsonify({"success": False, "error": "Phone not connected"})
     try:
@@ -1235,10 +1357,14 @@ def phone_tap():
 
 @app.route("/phone/key", methods=["POST"])
 def phone_key():
-    """Send a keyevent to the phone. Body: {"keycode": 3}  (3=HOME, 4=BACK, 26=POWER)"""
+    """Send a keyevent to the phone. Body: {"keycode": 3} (3=HOME, 4=BACK, ...).
+    Phase 1.5 — keycode coerced to int in [0,300]."""
     from task_orchestrator import PhoneBridge
-    data    = request.json or {}
-    keycode = data.get("keycode", 3)
+    data    = request.get_json(silent=True) or {}
+    keycode = _int_in_range(data, "keycode", 0, _PHONE_KEYCODE_MAX)
+    if keycode is None:
+        return jsonify({"success": False,
+                        "error": f"keycode must be an integer in [0,{_PHONE_KEYCODE_MAX}]"}), 400
     if not PhoneBridge.is_connected():
         return jsonify({"success": False, "error": "Phone not connected"})
     try:
@@ -1252,12 +1378,15 @@ def phone_key():
 
 @app.route("/phone/volume", methods=["POST"])
 def phone_volume():
-    """Adjust phone volume. Body: {"action": "up"/"down"/"mute"}"""
+    """Adjust phone volume. Body: {"action": "up"/"down"/"mute"}.
+    Phase 1.5 — action restricted to the allow-list."""
     from task_orchestrator import PhoneBridge
-    data   = request.json or {}
-    action = data.get("action", "up")
-    keycodes = {"up": 24, "down": 25, "mute": 164}
-    keycode  = keycodes.get(action, 24)
+    data   = request.get_json(silent=True) or {}
+    action = (data.get("action") or "").strip().lower()
+    if action not in _PHONE_VOLUME_KEYCODES:
+        return jsonify({"success": False,
+                        "error": f"action must be one of {sorted(_PHONE_VOLUME_KEYCODES)}"}), 400
+    keycode = _PHONE_VOLUME_KEYCODES[action]
     if not PhoneBridge.is_connected():
         return jsonify({"success": False, "error": "Phone not connected"})
     try:
@@ -1271,7 +1400,16 @@ def phone_volume():
 
 @app.route("/self_upgrade/run", methods=["POST"])
 def run_self_upgrade():
-    """Trigger the self-upgrade pipeline: diagnose → fix → validate → apply."""
+    """Trigger the self-upgrade pipeline: diagnose → fix → validate → apply.
+
+    Phase 1.4 — requires `{"confirm": "I CONFIRM self_upgrade_run"}` in
+    the JSON body. Rewriting code on an auth'd-but-careless POST was the
+    biggest accidental-destruction risk in the original API surface.
+    """
+    from confirm_gate import require_confirm
+    denial = require_confirm("self_upgrade_run")
+    if denial:
+        return denial
     try:
         from self_upgrade import run_upgrade
         return jsonify(run_upgrade())
@@ -1489,4 +1627,17 @@ if __name__ == "__main__":
         print(f"\n[!] Missing keys: {', '.join(missing)}")
         print("    Affected features will be unavailable until added to .env\n")
 
-    app.run(debug=False, host="0.0.0.0", port=5000, threaded=True, use_reloader=False)
+    # Phase 1.3 — default to loopback. Set ULTRON_HOST=0.0.0.0 to expose
+    # on the LAN, but ONLY together with ULTRON_API_KEYS — bare 0.0.0.0
+    # without keys means anyone on Wi-Fi can hit /self_upgrade/run.
+    _host = os.environ.get("ULTRON_HOST", "127.0.0.1")
+    _port = int(os.environ.get("ULTRON_PORT", "5000"))
+    if _host == "0.0.0.0" and not cfg.ULTRON_API_KEYS:
+        print(
+            "[!] REFUSING to bind 0.0.0.0 without ULTRON_API_KEYS set — "
+            "every endpoint would be open to your LAN.\n"
+            "    Either set ULTRON_API_KEYS or unset ULTRON_HOST."
+        )
+        sys.exit(2)
+    print(f"[+] Binding {_host}:{_port}  (keys configured: {bool(cfg.ULTRON_API_KEYS)})")
+    app.run(debug=False, host=_host, port=_port, threaded=True, use_reloader=False)

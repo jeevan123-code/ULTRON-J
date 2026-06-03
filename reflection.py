@@ -327,6 +327,7 @@ def run_reflection() -> dict:
                 title=p["title"],
                 description=p["description"],
                 target_file=p.get("target_file", ""),
+                source="reflection",
             )
     except Exception:
         pass

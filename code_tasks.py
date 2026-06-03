@@ -233,29 +233,36 @@ Please give me all the code files I need, clearly separated with filenames."""
 
             ext = Path(main_file).suffix.lower()
 
+            # Phase 7.4 — quote interpolated paths. main_file comes from
+            # filesystem scan; project_dir from class state. Both stay
+            # under user control but a path with spaces / quotes would
+            # still break the cmd parse.
+            import shlex
+            _q_main = shlex.quote(main_file)
+            _q_proj = shlex.quote(self.project_dir)
             if ext == ".py":
                 req_file = os.path.join(self.project_dir, "requirements.txt")
                 if os.path.exists(req_file):
                     subprocess.Popen(
-                        f'start cmd /k "pip install -r requirements.txt && python {main_file}"',
+                        f'start cmd /k "pip install -r requirements.txt && python {_q_main}"',
                         shell=True, cwd=self.project_dir,
                     )
                 else:
                     subprocess.Popen(
-                        f'start cmd /k "python {main_file}"',
+                        f'start cmd /k "python {_q_main}"',
                         shell=True, cwd=self.project_dir,
                     )
             elif ext == ".html":
                 webbrowser.open(f"file:///{main_file}")
             elif ext in (".js", ".ts"):
                 subprocess.Popen(
-                    f'start cmd /k "node {main_file}"',
+                    f'start cmd /k "node {_q_main}"',
                     shell=True, cwd=self.project_dir,
                 )
             else:
                 os.startfile(main_file)
 
-            subprocess.Popen(f'explorer "{self.project_dir}"', shell=True)
+            subprocess.Popen(f'explorer {_q_proj}', shell=True)
 
             return {
                 "success":    True,
