@@ -209,23 +209,15 @@ def _resolve_folder_target(name: str) -> Optional[str]:
 # to `rm X` more often than not — and a single wrong "yes" deletes the file.
 # We refuse these at the staging boundary so they never reach the user as
 # something to approve.
-_DESTRUCTIVE_SHELL_RE = re.compile(
-    r"^\s*(?:rm|del|erase|rmdir|rd|unlink|format|fdisk|mkfs|"
-    r"shutdown|reboot|halt|poweroff|"
-    r"Remove-Item|ri|Clear-Recycle|Remove-Computer|Stop-Computer|"
-    r"Restart-Computer|Format-Volume|Clear-Content|Remove-PSDrive|"
-    r"sc(?:\s+delete)?|reg\s+delete|taskkill|wmic|net\s+user)\b",
-    re.I,
-)
-
+#
+# Phase 7.3 — the regex now lives in confirm_gate so there's ONE definition,
+# not two. _is_destructive_shell here is a thin re-export that keeps existing
+# call sites in this file working.
 
 def _is_destructive_shell(cmd: str) -> bool:
-    """True if `cmd` looks like it would delete files, kill processes, or
-    otherwise change persistent state. Conservative — matches the verb at
-    the start of the command line."""
-    if not cmd:
-        return False
-    return bool(_DESTRUCTIVE_SHELL_RE.search(cmd))
+    """Delegates to the consolidated gate in confirm_gate (Phase 7.3)."""
+    from confirm_gate import is_destructive_shell
+    return is_destructive_shell(cmd)
 
 
 _KNOWN_SITES = {
@@ -1524,8 +1516,11 @@ def orchestrate(text: str, session_id: str = "default") -> Dict[str, Any]:
                     filepath = c
                     break
         if filepath:
+            # Phase 7.4 — quote filepath; LLM-resolved paths can carry
+            # spaces / metacharacters even though we validate existence.
+            import shlex
             subprocess.Popen(
-                f'start cmd /k "python {filepath}"',
+                f'start cmd /k "python {shlex.quote(filepath)}"',
                 shell=True,
                 cwd=os.path.dirname(filepath),
             )

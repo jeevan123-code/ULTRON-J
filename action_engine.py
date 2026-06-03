@@ -496,8 +496,37 @@ def _check_code_safety(code: str) -> tuple:
 
 def run_code_sandbox(code: str, timeout: int = None) -> dict:
     """
-    Execute Python code safely in a restricted sandbox.
-    Returns {"output": str, "error": str, "success": bool}
+    Execute Python code in a restricted-builtins sandbox.
+    Returns {"output": str, "error": str, "success": bool}.
+
+    SECURITY NOTE (Phase 7.5):
+      This sandbox uses the standard restricted-__builtins__ approach.
+      It is NOT a security boundary against an adversarial Python
+      payload. The classic escape pattern -- walking the class hierarchy
+      via ().__class__.__base__.__subclasses__() to reach `os` or
+      `subprocess` -- bypasses the restricted dict by design. CPython
+      offers no fully sandboxed exec; the only complete answer is OS-
+      level isolation (Docker, gVisor, nsjail, Firejail).
+
+      What this sandbox is intentionally good for:
+        * User-pasted snippets that the human typed
+        * /calculate-style expressions sent through `safe_calculate`
+        * Trivial probes the agent runs against its own knowledge
+
+      What it MUST NOT be used for, without the Phase 7.3 confirm gate:
+        * LLM-generated code emitted by react_engine / brain_orchestrator
+          / proactive_planner -- any of those producing executable code
+          must funnel through confirm_gate.require_confirm before
+          reaching this function.
+        * Anything from a network / clipboard source the user didn't
+          explicitly approve in the same interaction.
+
+      `_check_code_safety` (line 489) is a substring blocklist that
+      catches the most obvious dangerous patterns ('import os',
+      'subprocess', etc.) BEFORE the sandbox runs. It's a tripwire,
+      not a guarantee. The combination of blocklist + restricted
+      builtins + 5s timeout + thread isolation is enough for trusted
+      input -- not for adversarial input.
     """
     timeout = int(timeout) if timeout and str(timeout).isdigit() else CODE_SANDBOX_TIMEOUT
 
@@ -1162,11 +1191,37 @@ def execute_goal_step(goal_id: str, task: dict) -> dict:
     Resolution order: task["params"] overrides the desc-based defaults.
     Defaults stay so old templated tasks that rely on the
     ``content``/``prompt`` shape still work.
+
+    Phase 7.5 autonomy guard — code execution from the autonomous loop
+    requires an explicit ``{"human_confirmed": True}`` marker on the
+    task. Without it, ``run_python`` / ``run_code`` is refused even if
+    the rest of the goal would otherwise proceed. This blocks the
+    plausible-but-dangerous chain "LLM planner writes a goal whose
+    next task is `tool=run_python, params={code: <LLM output>}`" --
+    the sandbox in run_code_sandbox is NOT a security boundary against
+    adversarial code (see its docstring). Human-typed tasks via the
+    UI / explicit /run_code endpoint stay unaffected.
     """
     action_type = task.get("tool", "ask_llm")
     desc        = task.get("description", "")
     params      = {"content": desc, "prompt": desc}
     params.update(task.get("params") or {})
+
+    # Phase 7.5 — autonomy guard for code execution
+    if action_type in ("run_python", "run_code") and not task.get("human_confirmed"):
+        refusal = {
+            "success": False,
+            "result":  "",
+            "error":   (
+                "autonomy guard: code execution from the autonomous loop "
+                "requires task['human_confirmed']=True. Add the marker via "
+                "an approved-by-human review flow before queuing this task."
+            ),
+        }
+        log_execution(goal_id, task.get("id", "?"), action_type,
+                      refusal["error"], False)
+        return refusal
+
     update_goal(goal_id, status=GoalStatus.EXECUTING)
 
     result = execute_action(action_type, params)

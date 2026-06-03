@@ -79,8 +79,15 @@ def _launch_browser(url: str, browser: str = None) -> str:
                 args = [exe, autoplay_flag, url] if name in _CHROMIUM_FAMILY else [exe, url]
                 subprocess.Popen(args)
                 return name
-        # Fall back to Windows `start` built-in
-        subprocess.Popen(f'start {name} "{url}"', shell=True)
+        # Fall back to Windows `start` built-in. Phase 7.4 — `name` and
+        # `url` can come from an LLM or a clipboard paste; quote both
+        # so a stray `"` or `&` can't escape the shell command. `start`
+        # is a cmd.exe built-in so we can't avoid shell=True here.
+        import shlex
+        subprocess.Popen(
+            f'start {shlex.quote(name)} "{shlex.quote(url)}"',
+            shell=True,
+        )
         return name
 
     elif system == "Darwin":

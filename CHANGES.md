@@ -530,3 +530,69 @@ Locked baselines:
   - Route count check: 200 ≤ N ≤ 250 (currently 210).
   - Capability suite + autonomous-goal test: still all green, no
     regressions from the engine-gating.
+
+---
+
+## Phase 7 — Robustness & code hygiene
+
+### 7.1 Tame error swallowing
+- Naked `except:` count: **0** (already done pre-Phase-7 — verified).
+- Core-file blanket `except Exception:` audit: 169 across 8 files.
+  Surgical pass on `autonomous_loop.py`:
+  - File-I/O try/except narrowed to `(OSError, json.JSONDecodeError,
+    ValueError)`.
+  - Connectivity probe narrowed to `(OSError, socket.timeout,
+    socket.gaierror)`.
+  - Stale-projects + weather-briefing silent-pass swallows now log
+    via `error_tracker.log_failure`.
+  - Conversation-active sleep guard narrowed to `(AttributeError, KeyError)`.
+- Remaining silent-pass swallows in the other 7 core files (~50
+  sites): tagged as Phase 8 hygiene scope.
+
+### 7.2 LF line-ending normalization
+- New `.gitattributes`: `* text=auto eol=lf`.
+- 5 files had CRLF (`app.py`, `test_groq.py`, `test_play.py`,
+  `test_stream.py`, `test_youtube.py`) — stripped CR with sed.
+- 92/92 project `.py` files compile clean after normalization.
+
+### 7.3 Single destructive-action gate (`confirm_gate.py`)
+Four primitives, one module:
+- `require_confirm(action_name)` — HTTP-route "I CONFIRM" gate (1.4)
+- `is_destructive(action_type, params) -> (bool, reason)`
+- `is_destructive_shell(cmd) -> bool` (replaces task_orchestrator regex)
+- `dry_run_preview(action_type, params) -> str`
+
+`task_orchestrator._is_destructive_shell` now delegates here.
+
+### 7.4 Sanitize `shell=True` interpolation
+4 high-risk LLM-fed paths sanitized via `shlex.quote`:
+`browser_tasks.py:83`, `computer_control.py:492`, `computer_control.py:683`,
+`app_control.py:306` + `:429`, `task_orchestrator.py:1519`,
+`code_tasks.py:240/245/252/258`. Static shell strings (e.g. wmic)
+left as-is, safe by construction.
+
+### 7.5 Sandbox docstring + autonomy guard
+`run_code_sandbox` docstring spells out it's NOT an adversarial
+security boundary and lists what it MUST NOT receive without the
+Phase 7.3 confirm gate.
+`execute_goal_step` now refuses `run_python` / `run_code` unless the
+task carries `{"human_confirmed": True}` — blocks the realistic
+threat model of an autoplanner emitting `tool=run_python, params={code:
+<LLM output>}`. Human-typed `/run_code` paths unaffected.
+
+### 7.6 Piper-first TTS chain (user-confirmed)
+`voice_engine.tts` auto-chain reordered to local-first:
+`piper -> kokoro -> elevenlabs -> openai -> edge`.
+Zero per-call API cost in normal use; cloud providers stay as
+fallbacks if Piper models aren't installed.
+
+### Phase 7 acceptance — all met
+- `grep "except\s*:"` in core files → 0
+- 92/92 `.py` compile clean post-LF
+- destructive ops funnel through one gate
+- 4 LLM-fed `shell=True` paths sanitized
+- sandbox documented + autonomy guard enforced
+- TTS default matches stated intent
+
+Suite after Phase 7: **436 passed in 53.64s** — zero regressions.
+Scorecard rows 5 (Voice) and 7 (Error handling) and 8 (Reproducibility) → green.

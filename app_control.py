@@ -303,7 +303,12 @@ class ChromeController:
         """Open a new Chrome tab."""
         try:
             if SYSTEM == "Windows":
-                subprocess.Popen(f'start chrome "{url}"', shell=True)
+                # Phase 7.4 — url can come from LLM; quote it.
+                import shlex
+                subprocess.Popen(
+                    f'start chrome "{shlex.quote(url)}"',
+                    shell=True,
+                )
             elif SYSTEM == "Darwin":
                 subprocess.Popen(["open", "-a", "Google Chrome", url])
             else:
@@ -426,7 +431,13 @@ class VSCodeController:
         """Open a file in VS Code."""
         try:
             if SYSTEM == "Windows":
-                subprocess.Popen(f'code "{filepath}"', shell=True)
+                # Phase 7.4 — filepath could carry shell metacharacters
+                # (e.g. clipboard paste, LLM output); quote it.
+                import shlex
+                subprocess.Popen(
+                    f'code "{shlex.quote(filepath)}"',
+                    shell=True,
+                )
             else:
                 subprocess.Popen(["code", filepath])
             _log({"action": "vscode_open_file", "file": filepath})

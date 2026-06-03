@@ -489,7 +489,14 @@ def open_url(url: str, browser: str = None) -> Dict:
                 except Exception:
                     pass  # fall through to shell
             try:
-                subprocess.Popen(f'start {browser} "{url}"', shell=True)
+                # Phase 7.4 — quote interpolated values. browser + url
+                # can both come from an LLM; `start` is a cmd.exe
+                # built-in so we can't drop shell=True here.
+                import shlex
+                subprocess.Popen(
+                    f'start {shlex.quote(browser)} "{shlex.quote(url)}"',
+                    shell=True,
+                )
                 result = {"success": True, "url": url, "browser": browser, "method": "shell"}
                 _log_action("open_url", {"url": url, "browser": browser}, result)
                 return result
@@ -673,7 +680,14 @@ def open_app(app_name: str) -> Dict:
         # 4. Shell fallback — only if the exe is resolvable on PATH
         if shutil.which(app_name):
             try:
-                subprocess.Popen(f'start "" "{app_name}"', shell=True)
+                # Phase 7.4 — app_name was validated by shutil.which but
+                # quote it anyway: defense in depth, and the empty `""`
+                # title argument stays literal.
+                import shlex
+                subprocess.Popen(
+                    f'start "" "{shlex.quote(app_name)}"',
+                    shell=True,
+                )
                 result = {"success": True, "app": app_name, "method": "shell"}
             except Exception as e:
                 result = {"success": False, "error": str(e)}

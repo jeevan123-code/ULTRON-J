@@ -1,0 +1,10 @@
+# Phase 7.2 — line-ending normalization. The repo had mixed CRLF/LF
+# (app.py was CRLF, voice_engine.py was LF, etc.), which made diffs
+# noisy and broke some tools' expectations. Force LF for everything
+# Git sees as text; let Git's auto-detection figure out what's text
+# based on the file's content (`text=auto`).
+
+* text=auto eol=lf
+
+# Specific overrides (none yet; pin per file if a tool ever insists
+# on a particular encoding).
