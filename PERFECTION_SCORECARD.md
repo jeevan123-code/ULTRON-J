@@ -14,10 +14,10 @@ file) is committed on this branch and verifiable from a fresh checkout.
 | 3 | Autonomous loop    | >0 real goals completed; success rate trending up; no crashes              | 🟩 **green** — disk_critical false-positive on squashfs mounts fixed; execute_goal_step now honors task["params"]; live demo: 1 goal completed end-to-end (weather_fetch + note_create), reflection metrics show 100% success rate, avg_execution_score 10.0; locked by `tests/test_autonomous_goal.py` |
 | 4 | Resource health    | health_score consistently high; no `mem_rising` anomalies                  | 🟩 **green** — health_score 17 → 98 (snap-mount false-positive in `get_system_health_score` was the entire gap); loop registry gates 4 heavy daemons OFF by default; predictive 60s → 300s; sqlite-first episodes eliminates the 189KB-per-store JSON rewrite |
 | 5 | Voice              | TTS + STT round-trips pass; error rate ~0                                  | 🟨 likely already true (per plan) — no regression test yet |
-| 6 | Architecture       | one documented primary path; no dead/duplicate code                        | ⬜ pending (Phase 5) |
+| 6 | Architecture       | one documented primary path; no dead/duplicate code                        | 🟩 **green** — `ARCHITECTURE.md` documents the two primary flows (interactive `/ask` vs autonomous goal loop), `INTELLIGENCE_MODE` gates `react_engine` + `brain_orchestrator` (default off — one path), `system_monitor.add_proposal` confirmed as single writer of `proposals.json` (now with `source` tag) |
 | 7 | Error handling     | 0 naked excepts; core-path swallows logged                                 | ⬜ pending (Phase 7) |
 | 8 | Reproducibility    | requirements.txt pinned; fresh clone boots clean; LF line endings          | 🟨 **partial** — requirements pinned (Phase 0.2 ✅); LF normalization pending (Phase 7.2) |
-| 9 | Tests              | capabilities + intent(81) + auth + autonomous-goal + route-smoke green     | 🟨 **partial** — capabilities + full intent-audit(81) + auth + autonomous-goal green (229/229); route-smoke still owed |
+| 9 | Tests              | capabilities + intent(81) + auth + autonomous-goal + route-smoke green     | 🟩 **green** — all five test suites passing: 436/436 (113 capabilities + 33 auth + 82 intent-audit + 1 autonomous-goal + 207 route-smoke) |
 
 Legend: 🟩 green · 🟨 partial · 🟥 red · ⬜ not started
 

@@ -444,7 +444,16 @@ def save_proposals(proposals: list):
     atomic_json_write(PROPOSALS_FILE, proposals)
 
 
-def add_proposal(title, description, code_snippet="", target_file=""):
+def add_proposal(title, description, code_snippet="", target_file="", source=""):
+    """Canonical single writer for proposals.json (Phase 5.3).
+
+    Every improvement-generating module (reflection, evolution_loop,
+    predictive_monitor, proactive_planner) funnels through this
+    function. Dedups by exact title to keep proposers from spamming the
+    file with the same suggestion. `source` is a short tag identifying
+    which generator produced the proposal -- helps when triaging from
+    the UI.
+    """
     proposals = load_proposals()
     # Deduplicate by title
     if any(p.get("title") == title for p in proposals):
@@ -457,6 +466,7 @@ def add_proposal(title, description, code_snippet="", target_file=""):
         "description": description,
         "code":        code_snippet,
         "target_file": target_file,
+        "source":      source or "unspecified",
     })
     save_proposals(proposals)
 

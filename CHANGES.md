@@ -446,3 +446,87 @@ slower.
 
 Suite after Phase 4: **229 passed in 10.96s** — no regressions vs
 Phase 3 baseline.
+
+---
+
+## Phase 5 — Consolidate the over-wired brain
+
+The plan's diagnosis: too many overlapping reasoning engines
+(`intelligence_core`, `react_engine`, `brain_orchestrator`,
+`decision_engine`, `task_orchestrator`, `autonomous_loop`,
+`evolution_loop`, `proactive_planner`), and `react_engine` /
+`brain_orchestrator` only reachable via `intelligence_core`. Phase 5
+documented the real graph, gated the optional engines, confirmed the
+proposal-writing path is already single-source, and added a
+route-smoke regression test.
+
+### 5.1 Real call graph + `ARCHITECTURE.md`
+Static AST scan + manual dynamic-import sweep computed fan-in per
+module. Top 12 are the canonical spine (config 35, llm_engine 23,
+memory 22, computer_control 14, loop_supervisor 12, decision_engine
+12, system_monitor 11, personality 11, action_engine 7, vector_store
+7, screen_engine 6, perception 6). `task_orchestrator` and
+`decision_engine` stay canonical for autonomous-flow; `intelligence_core`
+stays canonical for interactive `/ask` flow.
+
+`ARCHITECTURE.md` (new) documents:
+  - The TWO independent primary flows (interactive `/ask` vs
+    autonomous goal loop) — they're often confused for one engine
+  - Full background loop table (Phase 4.1 registry effective state)
+  - Single-writer proposal flow (Phase 5.3)
+  - Runtime file ownership (who writes / reads `ultron.db`,
+    `goals.json`, `proposals.json`, etc.)
+  - The "orphan"-looking modules that are actually wired via
+    `ultimate_routes._safe_import` — and the 8 genuine orphans
+    (test scripts) staged for Phase 7 archive
+
+### 5.2 One primary decision path
+`intelligence_core.think_and_stream` no longer routes COMPLEX
+questions through `react_engine` by default. Both opt-in engines now
+share a single environment-variable gate, `INTELLIGENCE_MODE`:
+
+|        | `INTELLIGENCE_MODE` value | What it does                  |
+|--------|---------------------------|-------------------------------|
+| (none) | unset / empty             | Default — prompt-based path   |
+| react  | `react`                   | Enable `react_engine.reason`  |
+| plan   | `plan`                    | Enable `brain_orchestrator`   |
+
+Legacy `USE_BRAIN_ORCHESTRATOR=1` and the `"plan this"` /
+`"kartha plan"` natural-language triggers still work. Neither
+`react_engine` nor `brain_orchestrator` was deleted — both still
+import cleanly, just no longer wire themselves in by default.
+
+The default COMPLEX path now goes through the same
+`_stream_with_intelligence_prompt` as MEDIUM but with the long
+model — one route through the file instead of three.
+
+### 5.3 Single-writer proposal flow
+Audit found `system_monitor.add_proposal` is ALREADY the only writer
+of `proposals.json` (verified by grep — `smart_home.py` writes to a
+separate `code_proposals.json`, different domain). Four generators
+funnel through it: `reflection`, `evolution_loop`,
+`predictive_monitor`, `proactive_planner`. Title-dedup prevents
+generators from spamming the file with duplicate suggestions.
+
+Improvement: added a `source` field to every proposal so the UI can
+show which generator produced each one. `reflection`, `evolution_loop`,
+`predictive_monitor` now pass their `source` tag through; legacy
+proposals get `"unspecified"`.
+
+### Phase 5 acceptance — route smoke + green tests
+New `tests/test_route_smoke.py`: parametrize over EVERY registered
+Flask route (across all 7 blueprints), send a GET or POST with empty
+body, assert the response is NOT a server crash (200-499 OK; 503
+accepted as the documented "feature not installed" mode).
+
+Bug caught + fixed during this work:
+  - `POST /verify/screenshot` was returning **500** (uncaught
+    exception) when `gnome-screenshot` binary wasn't installed.
+    Wrapped `take_labeled_screenshot` in try/except, returns 503
+    with a precise hint about what's missing.
+
+Locked baselines:
+  - Suite: **436 passed in 58.48s** (was 229; +207 route-smoke tests).
+  - Route count check: 200 ≤ N ≤ 250 (currently 210).
+  - Capability suite + autonomous-goal test: still all green, no
+    regressions from the engine-gating.

@@ -51,7 +51,7 @@ except ImportError:
 try:
     from system_monitor import add_proposal
 except ImportError:
-    def add_proposal(title, description, code_snippet="", target_file=""):
+    def add_proposal(title, description, code_snippet="", target_file="", source=""):
         return {"success": False, "error": "system_monitor not available"}
 
 try:
@@ -298,6 +298,7 @@ def propose_evolutions() -> Dict:
                 description=description,
                 code_snippet="",
                 target_file=target.split()[0] if target else "",
+                source="evolution_loop",
             )
             if r and r.get("id") is not None:
                 written_ids.append(r["id"])

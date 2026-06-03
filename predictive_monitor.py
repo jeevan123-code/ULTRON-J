@@ -309,6 +309,7 @@ def run_check() -> Dict:
                         description=f"{a['summary']}\n\nRecommended: {a['action']}",
                         code_snippet="",
                         target_file="",
+                        source="predictive_monitor",
                     )
                 except Exception:
                     pass
