@@ -121,3 +121,17 @@ def resolve_references(raw: str, context: Dict[str, Any]) -> Dict[str, str]:
         return {}
     except Exception:
         return {}
+
+
+def enrich(parsed: ParsedUtterance, context: Dict[str, Any]) -> ParsedUtterance:
+    """Enrich a ParsedUtterance with tone, references, and (if chat/unknown) intent classification.
+
+    Mutates and returns the same ParsedUtterance for convenience.
+    """
+    parsed.tone = detect_tone(parsed.raw)
+    parsed.references = resolve_references(parsed.raw, context)
+
+    if parsed.primary.kind == IntentKind.CHAT and parsed.primary.confidence < 0.5:
+        parsed.primary = classify_intent(parsed.raw)
+
+    return parsed

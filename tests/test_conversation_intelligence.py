@@ -101,3 +101,40 @@ def test_resolve_references_llm_failure_returns_empty():
     with patch.object(ci, "_llm_ask", side_effect=RuntimeError("down")):
         refs = ci.resolve_references("look up that thing", {"recent_topics": ["x"]})
     assert refs == {}
+
+
+def test_enrich_populates_tone_and_references_for_chat_utterance():
+    import conversation_intelligence as ci
+    from compound_intent_parser import parse
+
+    register_response("TONE_OF_UTTERANCE: look up that thing we discussed",
+                      json.dumps({"tone": "casual"}))
+    register_response("RESOLVE_REFERENCE: that thing we discussed",
+                      json.dumps({"resolved": "wheat-3d-explorer", "confidence": 0.85}))
+    register_response("CLASSIFY_INTENT: look up that thing we discussed",
+                      json.dumps({"kind": "research", "topic": "wheat-3d-explorer"}))
+
+    parsed = parse("look up that thing we discussed")
+    context = {"recent_topics": ["wheat-3d-explorer"]}
+
+    with patch.object(ci, "_llm_ask", side_effect=fake_ask):
+        enriched = ci.enrich(parsed, context)
+
+    assert enriched.tone == "casual"
+    assert enriched.references.get("that thing we discussed") == "wheat-3d-explorer"
+    assert enriched.primary.kind == IntentKind.RESEARCH
+
+
+def test_enrich_leaves_affirm_intent_alone():
+    """For AFFIRM/DENY/DEFER, primary intent is already correct — only tone/refs enriched."""
+    import conversation_intelligence as ci
+    from compound_intent_parser import parse
+
+    register_response("TONE_OF_UTTERANCE: yes go ahead", json.dumps({"tone": "casual"}))
+
+    parsed = parse("yes go ahead")
+    with patch.object(ci, "_llm_ask", side_effect=fake_ask):
+        enriched = ci.enrich(parsed, {})
+
+    assert enriched.primary.kind == IntentKind.AFFIRM
+    assert enriched.tone == "casual"
