@@ -31,13 +31,14 @@ _RESPONSES: Dict[str, str] = {
 def fake_ask(prompt: str, **kwargs) -> str:
     """Drop-in replacement for llm_engine.ask().
 
-    Returns deterministic content based on substring match.
+    Returns the response for the LONGEST matching substring key, so registered
+    specific keys override shorter defaults.
     Raises if no case matches — forces tests to be explicit.
     """
-    for key, response in _RESPONSES.items():
-        if key in prompt:
-            return response
-    raise AssertionError(f"No mock response matches prompt: {prompt[:200]}")
+    matching = [k for k in _RESPONSES if k in prompt]
+    if not matching:
+        raise AssertionError(f"No mock response matches prompt: {prompt[:200]}")
+    return _RESPONSES[max(matching, key=len)]
 
 
 def register_response(key: str, response: str) -> None:
