@@ -39,7 +39,7 @@ def store_verified_facts(report: ResearchReport, min_confidence: float = 0.6) ->
             "tiers": ",".join(t.value for t in fact.tiers),
         }
         try:
-            vs.add(text=fact.text, metadata=metadata)
+            vs.remember(text=fact.text, kind="research_fact", metadata=metadata)
             stored += 1
         except Exception:
             try:
@@ -54,6 +54,6 @@ def recall_facts(topic: str, k: int = 5) -> List[Dict[str, Any]]:
     """Recall up to k verified facts similar to the topic. Returns [] on failure."""
     try:
         vs = _get_vector_store()
-        return list(vs.query(topic, k=k))
+        return list(vs.recall(topic, n=k, kind="research_fact"))
     except Exception:
         return []

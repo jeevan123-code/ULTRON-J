@@ -32,8 +32,8 @@ def test_store_only_persists_high_confidence_facts():
     with patch.object(research_facts, "_get_vector_store", return_value=fake_store):
         n = research_facts.store_verified_facts(report, min_confidence=0.5)
     assert n == 1
-    fake_store.add.assert_called_once()
-    added_text = fake_store.add.call_args[1]["text"]
+    fake_store.remember.assert_called_once()
+    added_text = fake_store.remember.call_args[1]["text"]
     assert "Puccinia" in added_text
 
 
@@ -43,12 +43,12 @@ def test_store_no_facts_when_all_low_confidence():
     with patch.object(research_facts, "_get_vector_store", return_value=fake_store):
         n = research_facts.store_verified_facts(report, min_confidence=0.9)
     assert n == 0
-    fake_store.add.assert_not_called()
+    fake_store.remember.assert_not_called()
 
 
 def test_recall_returns_top_k_facts():
     fake_store = MagicMock()
-    fake_store.query.return_value = [
+    fake_store.recall.return_value = [
         {"text": "fact 1", "score": 0.95, "metadata": {"query": "q1"}},
         {"text": "fact 2", "score": 0.90, "metadata": {"query": "q2"}},
     ]
@@ -61,7 +61,7 @@ def test_recall_returns_top_k_facts():
 def test_store_handles_vector_store_failure():
     report = _sample_report()
     fake_store = MagicMock()
-    fake_store.add.side_effect = RuntimeError("store down")
+    fake_store.remember.side_effect = RuntimeError("store down")
     with patch.object(research_facts, "_get_vector_store", return_value=fake_store):
         n = research_facts.store_verified_facts(report, min_confidence=0.5)
     assert n == 0
