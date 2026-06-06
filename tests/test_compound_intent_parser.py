@@ -120,3 +120,38 @@ def test_two_modifiers_in_one_utterance():
     kinds = {m.kind for m in result.modifiers}
     assert ModifierKind.ADD in kinds
     assert ModifierKind.PRE_CHECK in kinds
+
+
+def test_corpus_primary_intent_correctness():
+    """Every entry in the utterances corpus should have its expected_primary detected.
+
+    Exceptions: 'research', 'command', 'chat' kinds are NOT detected by the parser
+    alone — they're set later by conversation_intelligence. We skip those here.
+    """
+    corpus = _load_corpus()
+    parser_kinds = {"affirm", "deny", "defer"}
+    failures = []
+    for entry in corpus:
+        expected = entry["expected_primary"]
+        if expected not in parser_kinds:
+            continue
+        result = parse(entry["raw"])
+        if result.primary.kind.value != expected:
+            failures.append(f'{entry["raw"]!r} → expected {expected}, got {result.primary.kind.value}')
+    assert not failures, "Corpus mismatches:\n" + "\n".join(failures)
+
+
+def test_corpus_modifier_extraction():
+    """For corpus entries with expected_modifiers, parser should extract matching kinds."""
+    corpus = _load_corpus()
+    failures = []
+    for entry in corpus:
+        expected_mods = entry.get("expected_modifiers")
+        if not expected_mods:
+            continue
+        result = parse(entry["raw"])
+        got_kinds = {m.kind.value for m in result.modifiers}
+        for em in expected_mods:
+            if em["kind"] not in got_kinds:
+                failures.append(f'{entry["raw"]!r} → missing modifier kind {em["kind"]} (got {got_kinds})')
+    assert not failures, "Modifier mismatches:\n" + "\n".join(failures)
