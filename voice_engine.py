@@ -1153,6 +1153,20 @@ _VOICE_CMDS = {
 
 
 def parse_voice_command(text: str) -> Optional[str]:
+    import os as _os
+    if _os.environ.get("ULTRON_PHASE1_ENABLED", "0") == "1":
+        try:
+            from phase1_pipeline import process_user_utterance as _process_p1
+            _p1_plan = _process_p1(raw=text, context={"recent_topics": []}, last_action=None)
+            with open("ultron_log.txt", "a") as _f:
+                _f.write(f"[phase1] plan = {_p1_plan.to_dict()}\n")
+        except Exception as _e:
+            try:
+                with open("ultron_log.txt", "a") as _f:
+                    _f.write(f"[phase1][error] {_e!r}\n")
+            except Exception:
+                pass
+
     tl = text.lower().strip()
     for pattern, cmd in _VOICE_CMDS.items():
         m = re.search(pattern, tl)
