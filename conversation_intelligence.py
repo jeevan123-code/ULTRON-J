@@ -37,3 +37,36 @@ def detect_tone(raw: str) -> str:
         return "neutral"
     except Exception:
         return "neutral"
+
+
+_CLASSIFY_PROMPT = """CLASSIFY_INTENT: {raw}
+
+Classify the utterance into one of:
+  - research  : user wants information on a topic
+  - command   : user wants the system to do an action (open app, file op, etc.)
+  - chat      : casual conversation, no actionable request
+  - clarify   : the utterance is ambiguous and needs follow-up
+
+Respond ONLY with JSON: {{"kind": "<one_of_those>", "topic": "<optional>", "verb": "<optional>", "target": "<optional>"}}
+"""
+
+
+_VALID_KINDS = {"research", "command", "chat", "clarify"}
+
+
+def classify_intent(raw: str) -> Intent:
+    """Classify a free-form utterance into an Intent.
+
+    Returns Intent(kind=CHAT, confidence=0.3) on any error — caller decides how to handle.
+    """
+    try:
+        resp = _llm_ask(_CLASSIFY_PROMPT.format(raw=raw))
+        data = json.loads(resp)
+        kind_str = data.get("kind", "chat")
+        if kind_str not in _VALID_KINDS:
+            kind_str = "chat"
+        kind = IntentKind(kind_str)
+        payload = {k: v for k, v in data.items() if k != "kind"}
+        return Intent(kind=kind, payload=payload, confidence=0.85)
+    except Exception:
+        return Intent(kind=IntentKind.CHAT, payload={"raw": raw}, confidence=0.3)
