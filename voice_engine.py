@@ -1160,6 +1160,20 @@ def parse_voice_command(text: str) -> Optional[str]:
             _p1_plan = _process_p1(raw=text, context={"recent_topics": []}, last_action=None)
             with open("ultron_log.txt", "a") as _f:
                 _f.write(f"[phase1] plan = {_p1_plan.to_dict()}\n")
+
+            # Phase 2a: if the plan is a research action, execute it.
+            if _os.environ.get("ULTRON_PHASE2A_ENABLED", "0") == "1":
+                if _p1_plan.steps and _p1_plan.steps[0].get("action") == "research":
+                    try:
+                        from phase2_executor import execute as _p2_execute
+                        _p2_result = _p2_execute(_p1_plan)
+                        with open("ultron_log.txt", "a") as _f:
+                            _f.write(f"[phase2a] result = {_p2_result}\n")
+                        # Research consumed the utterance — short-circuit the fast-path.
+                        return None
+                    except Exception as _pe:
+                        with open("ultron_log.txt", "a") as _f:
+                            _f.write(f"[phase2a][execute_error] {_pe!r}\n")
         except Exception as _e:
             try:
                 with open("ultron_log.txt", "a") as _f:
