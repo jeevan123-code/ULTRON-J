@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from compound_intent_parser import parse, detect_primary
-from intent_types import IntentKind, ModifierKind
+from intent_types import IntentKind
 
 
 def _load_corpus():
@@ -59,3 +59,17 @@ def test_parse_returns_parsed_utterance_for_simple_affirm():
     assert result.raw == "yes"
     assert result.primary.kind == IntentKind.AFFIRM
     assert result.modifiers == []
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("yes!", IntentKind.AFFIRM),
+    ("yes?", IntentKind.AFFIRM),
+    ("yes;", IntentKind.AFFIRM),
+    ("yes:", IntentKind.AFFIRM),
+    ("no!", IntentKind.DENY),
+    ("no?", IntentKind.DENY),
+    ("nope!", IntentKind.DENY),
+    ("wait!", IntentKind.DEFER),
+])
+def test_detect_primary_handles_extra_punctuation(raw, expected):
+    assert detect_primary(raw) == expected

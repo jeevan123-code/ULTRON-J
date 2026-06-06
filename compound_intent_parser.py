@@ -8,7 +8,7 @@ Examples:
     "nah, do the other one instead" -> primary=DENY, modifiers=[SWITCH_TO previous_option]
 """
 import re
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from intent_types import Intent, Modifier, ParsedUtterance, IntentKind, ModifierKind
 
@@ -35,8 +35,9 @@ def _phrase_match(text: str, phrases: List[str]) -> bool:
     for p in phrases:
         if lc == p:
             return True
-        if lc.startswith(p + " ") or lc.startswith(p + ",") or lc.startswith(p + "."):
-            return True
+        for suffix in (" ", ",", ".", "!", "?", ";", ":"):
+            if lc.startswith(p + suffix):
+                return True
     return False
 
 
