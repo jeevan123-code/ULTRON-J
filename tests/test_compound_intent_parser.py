@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from compound_intent_parser import parse, detect_primary
-from intent_types import IntentKind
+from intent_types import IntentKind, ModifierKind
 
 
 def _load_corpus():
@@ -73,3 +73,50 @@ def test_parse_returns_parsed_utterance_for_simple_affirm():
 ])
 def test_detect_primary_handles_extra_punctuation(raw, expected):
     assert detect_primary(raw) == expected
+
+
+def test_modifier_add():
+    result = parse("yes and also add voice activation")
+    assert result.primary.kind == IntentKind.AFFIRM
+    assert len(result.modifiers) == 1
+    m = result.modifiers[0]
+    assert m.kind == ModifierKind.ADD
+    assert "voice activation" in m.value.lower()
+
+
+def test_modifier_priority_speed():
+    result = parse("go ahead but make it faster")
+    assert result.primary.kind == IntentKind.AFFIRM
+    assert any(m.kind == ModifierKind.PRIORITY and m.value == "speed" for m in result.modifiers)
+
+
+def test_modifier_exclude():
+    result = parse("sure, but skip the email part")
+    assert result.primary.kind == IntentKind.AFFIRM
+    assert any(m.kind == ModifierKind.EXCLUDE and "email" in str(m.value).lower() for m in result.modifiers)
+
+
+def test_modifier_exclude_step():
+    result = parse("do everything except step 3")
+    assert result.primary.kind == IntentKind.AFFIRM
+    assert any(m.kind == ModifierKind.EXCLUDE and "step 3" in str(m.value).lower() for m in result.modifiers)
+
+
+def test_modifier_switch_to():
+    result = parse("nah, do the other one instead")
+    assert result.primary.kind == IntentKind.DENY
+    assert any(m.kind == ModifierKind.SWITCH_TO for m in result.modifiers)
+
+
+def test_modifier_pre_check():
+    result = parse("yes and check if the wifi is on first")
+    assert result.primary.kind == IntentKind.AFFIRM
+    assert any(m.kind == ModifierKind.PRE_CHECK and "wifi" in str(m.value).lower() for m in result.modifiers)
+
+
+def test_two_modifiers_in_one_utterance():
+    result = parse("yes and also add voice activation and check if the wifi is on first")
+    assert result.primary.kind == IntentKind.AFFIRM
+    kinds = {m.kind for m in result.modifiers}
+    assert ModifierKind.ADD in kinds
+    assert ModifierKind.PRE_CHECK in kinds
