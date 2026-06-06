@@ -9,6 +9,7 @@ Sits BEFORE every action. Takes a raw utterance + parsed primary intent + modifi
 LLM-backed (uses llm_engine.ask), with deterministic fallbacks when LLM fails.
 """
 import json
+import re
 from typing import Any, Dict, Optional
 
 from intent_types import Intent, IntentKind, ParsedUtterance
@@ -70,3 +71,53 @@ def classify_intent(raw: str) -> Intent:
         return Intent(kind=kind, payload=payload, confidence=0.85)
     except Exception:
         return Intent(kind=IntentKind.CHAT, payload={"raw": raw}, confidence=0.3)
+
+
+_REFERENCE_PATTERNS = [
+    r"that thing(?: we discussed)?",
+    r"the (\w+) (?:thing|project|stuff)",
+    r"that guy",
+    r"that one",
+    r"the other one",
+    r"the previous one",
+]
+
+
+def _has_referent(text: str) -> Optional[str]:
+    """Return the matched reference phrase if found, else None."""
+    lc = text.lower()
+    for pat in _REFERENCE_PATTERNS:
+        m = re.search(pat, lc)
+        if m:
+            return m.group(0)
+    return None
+
+
+_RESOLVE_PROMPT = """RESOLVE_REFERENCE: {phrase}
+
+Recent conversation context:
+{context_json}
+
+The user said something containing the reference "{phrase}". Based on the context,
+what concrete item is being referred to? Respond ONLY with JSON:
+{{"resolved": "<concrete item>", "confidence": <0.0..1.0>}}
+"""
+
+
+def resolve_references(raw: str, context: Dict[str, Any]) -> Dict[str, str]:
+    """Resolve ambiguous references like 'that thing' against recent context.
+
+    Returns {phrase: resolved_item} for each reference found, or {} if none.
+    """
+    phrase = _has_referent(raw)
+    if not phrase:
+        return {}
+    try:
+        resp = _llm_ask(_RESOLVE_PROMPT.format(phrase=phrase, context_json=json.dumps(context)))
+        data = json.loads(resp)
+        resolved = data.get("resolved")
+        if resolved and data.get("confidence", 0) >= 0.5:
+            return {phrase: resolved}
+        return {}
+    except Exception:
+        return {}

@@ -76,3 +76,28 @@ def test_classify_intent_falls_back_on_llm_error():
         intent = ci.classify_intent("anything goes here")
     assert intent.kind == IntentKind.CHAT
     assert intent.confidence < 0.5
+
+
+def test_resolve_references_resolves_that_thing():
+    import conversation_intelligence as ci
+    register_response(
+        "RESOLVE_REFERENCE: that thing we discussed",
+        json.dumps({"resolved": "wheat-3d-explorer", "confidence": 0.85}),
+    )
+    context = {"recent_topics": ["wheat-3d-explorer", "ultron upgrade"]}
+    with patch.object(ci, "_llm_ask", side_effect=fake_ask):
+        refs = ci.resolve_references("look up that thing we discussed", context)
+    assert refs.get("that thing we discussed") == "wheat-3d-explorer"
+
+
+def test_resolve_references_no_referent_returns_empty():
+    import conversation_intelligence as ci
+    refs = ci.resolve_references("research quantum computing", {})
+    assert refs == {}
+
+
+def test_resolve_references_llm_failure_returns_empty():
+    import conversation_intelligence as ci
+    with patch.object(ci, "_llm_ask", side_effect=RuntimeError("down")):
+        refs = ci.resolve_references("look up that thing", {"recent_topics": ["x"]})
+    assert refs == {}
