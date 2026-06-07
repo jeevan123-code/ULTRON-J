@@ -1646,12 +1646,15 @@ if __name__ == "__main__":
     _host = os.environ.get("ULTRON_HOST", "127.0.0.1")
     _port = int(os.environ.get("ULTRON_PORT", "5000"))
     if _host == "0.0.0.0" and not cfg.ULTRON_API_KEYS:
+        # No API keys means LAN exposure would be unsafe. Instead of
+        # exiting (which forces the user to manually override ULTRON_HOST),
+        # fall back to loopback so local development "just works".
         print(
-            "[!] REFUSING to bind 0.0.0.0 without ULTRON_API_KEYS set — "
-            "every endpoint would be open to your LAN.\n"
-            "    Either set ULTRON_API_KEYS or unset ULTRON_HOST."
+            "[!] ULTRON_HOST=0.0.0.0 requires ULTRON_API_KEYS for LAN safety.\n"
+            "    Falling back to 127.0.0.1 (loopback only). "
+            "Set ULTRON_API_KEYS in .env to expose on LAN."
         )
-        sys.exit(2)
+        _host = "127.0.0.1"
     print(f"[+] Binding {_host}:{_port}  (keys configured: {bool(cfg.ULTRON_API_KEYS)})")
 
     # Phase 3a/3b — start the passive screen watcher when Phase 3B is enabled.
