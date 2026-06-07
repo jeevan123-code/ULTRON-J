@@ -61,11 +61,20 @@ def test_identify_speaker_picks_highest_similarity_when_multiple_pass():
 
 
 def test_identify_speaker_respects_custom_threshold():
+    """Build a query that's slightly off-direction (not just scaled) so cosine
+    distinguishes it. Cosine is scale-invariant, so we perturb the direction."""
     vp = _unit_vec(7)
     reg.register(Person(name="Ravi", relation=Relation.FAMILY,
                         voiceprint=vp, enrolled_at=100.0))
-    near = list(np.array(vp) * 0.99)
-    assert sd.identify_speaker(near, threshold=0.95).matched is True
+    # Add small perpendicular noise to drop similarity slightly below 1.0.
+    arr = np.array(vp)
+    noise = np.array(_unit_vec(8))            # different direction
+    near = list(arr + 0.15 * noise)           # mostly arr, slight tilt
+    near_arr = np.array(near)
+    actual_sim = float(np.dot(arr, near_arr) / (np.linalg.norm(arr) * np.linalg.norm(near_arr)))
+    # sanity: similarity sits in (~0.95, ~1.0) — passes loose, fails strict
+    assert 0.9 < actual_sim < 1.0
+    assert sd.identify_speaker(near, threshold=0.5).matched is True
     assert sd.identify_speaker(near, threshold=0.999999).matched is False
 
 

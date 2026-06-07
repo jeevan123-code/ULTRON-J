@@ -30,21 +30,17 @@ def _to_array(embedding: Union[Sequence[float], np.ndarray]) -> Optional[np.ndar
 
 
 def _cosine(a: np.ndarray, b: np.ndarray) -> float:
-    """Similarity score between two 1-D embeddings.
+    """True cosine similarity of two 1-D vectors; 0.0 if either has zero norm.
 
-    Voice embeddings produced by `voice_identity.get_embedding` are expected
-    to be unit-normalised, so we report the raw dot product. For unit vectors
-    this equals cosine similarity, but for non-unit inputs the score scales
-    with the query magnitude — preserving sensitivity to amplitude drift
-    between enrolment and runtime.
-
-    Returns 0.0 if either side has zero norm.
+    Scale-invariant: cos(v, k*v) = 1.0 for any k > 0. Voice embeddings from
+    ECAPA-TDNN are not strictly unit-normalised, so we divide by norms
+    explicitly to match the contract `voice_identity.cosine_similarity` provides.
     """
     na = float(np.linalg.norm(a))
     nb = float(np.linalg.norm(b))
     if na == 0.0 or nb == 0.0:
         return 0.0
-    return float(np.dot(a, b))
+    return float(np.dot(a, b) / (na * nb))
 
 
 def identify_speaker(
