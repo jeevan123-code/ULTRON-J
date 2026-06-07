@@ -1653,4 +1653,19 @@ if __name__ == "__main__":
         )
         sys.exit(2)
     print(f"[+] Binding {_host}:{_port}  (keys configured: {bool(cfg.ULTRON_API_KEYS)})")
+
+    # Phase 3a/3b — start the passive screen watcher when Phase 3B is enabled.
+    # The watcher polls screen_engine every 10s, detects persistent errors,
+    # and (with ULTRON_PHASE3B_ENABLED=1) hands off StuckEvents to
+    # proactive_offer for the polite "Sir, mind if I help?" voice prompt.
+    try:
+        if os.environ.get("ULTRON_PHASE3B_ENABLED", "0") == "1":
+            import screen_watcher
+            if screen_watcher.start(poll_seconds=10):
+                print("[+] Phase 3a/3b screen watcher started (poll=10s)")
+            else:
+                print("[+] Phase 3a/3b screen watcher was already running")
+    except Exception as _phase3_e:
+        print(f"[!] Phase 3a/3b startup skipped: {_phase3_e!r}")
+
     app.run(debug=False, host=_host, port=_port, threaded=True, use_reloader=False)
