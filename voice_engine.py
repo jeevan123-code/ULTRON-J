@@ -1162,6 +1162,26 @@ def parse_voice_command(text: str) -> Optional[str]:
             _cl.record(text)
         except Exception:
             pass
+
+    # Phase 3b: route consent responses to a pending proactive offer.
+    import os as _os_p3b
+    if _os_p3b.environ.get("ULTRON_PHASE3B_ENABLED", "0") == "1":
+        try:
+            import proactive_offer as _po
+            if _po.peek_pending_offer() is not None:
+                from consent_manager import parse_consent as _parse_c
+                from consent_types import ConsentMode as _Cm
+                _mode = _parse_c(text)
+                if _mode != _Cm.NONE:
+                    _po.confirm_offer(_mode)
+                    return None
+        except Exception as _ce:
+            try:
+                with open("ultron_log.txt", "a") as _f:
+                    _f.write(f"[phase3b][consent_error] {_ce!r}\n")
+            except Exception:
+                pass
+
     if _os.environ.get("ULTRON_PHASE1_ENABLED", "0") == "1":
         try:
             from phase1_pipeline import process_user_utterance as _process_p1
