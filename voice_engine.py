@@ -1154,6 +1154,14 @@ _VOICE_CMDS = {
 
 def parse_voice_command(text: str) -> Optional[str]:
     import os as _os
+    # Phase 2b: passively record EVERY transcript for autonomous research.
+    import os as _os_p2b
+    if _os_p2b.environ.get("ULTRON_PHASE2B_ENABLED", "0") == "1":
+        try:
+            import conversation_listener as _cl
+            _cl.record(text)
+        except Exception:
+            pass
     if _os.environ.get("ULTRON_PHASE1_ENABLED", "0") == "1":
         try:
             from phase1_pipeline import process_user_utterance as _process_p1
