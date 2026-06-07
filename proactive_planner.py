@@ -501,3 +501,47 @@ def run_now() -> Dict:
 
 if __name__ == "__main__":
     print(json.dumps(run_now(), indent=2, default=str))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2b — quietness gate for autonomous research delivery
+# ─────────────────────────────────────────────────────────────────────────────
+
+import time as _p2b_time
+
+_DEFAULT_QUIET_SECONDS = 60
+
+
+def _seconds_since_last_interaction():
+    """Return seconds since Jeevan's last voice/screen interaction, or None if unknown.
+
+    Looks at voice_log + activity_tracker timestamps via existing helpers when
+    available. Falls back to None (caller treats None as 'do not deliver yet').
+    """
+    candidates = []
+    try:
+        from voice_engine import get_voice_log
+        log = get_voice_log(n=1)
+        if log:
+            last = log[-1]
+            ts = last.get("ts") or last.get("timestamp")
+            if ts:
+                import datetime
+                if isinstance(ts, str):
+                    parsed = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    candidates.append(_p2b_time.time() - parsed.timestamp())
+                elif isinstance(ts, (int, float)):
+                    candidates.append(_p2b_time.time() - ts)
+    except Exception:
+        pass
+    if not candidates:
+        return None
+    return min(candidates)
+
+
+def should_deliver_research_now(quiet_seconds: int = _DEFAULT_QUIET_SECONDS) -> bool:
+    """True if it's been at least `quiet_seconds` since the last user interaction."""
+    elapsed = _seconds_since_last_interaction()
+    if elapsed is None:
+        return False
+    return elapsed >= quiet_seconds
