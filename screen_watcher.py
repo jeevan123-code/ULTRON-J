@@ -123,6 +123,16 @@ def _tick() -> None:
     event = struggle_detector.ingest(snap)
     if event is not None:
         _log_event(event)
+        if os.environ.get("ULTRON_PHASE3B_ENABLED", "0") == "1":
+            try:
+                from proactive_offer import handle_stuck_event as _p3b_handle
+                _p3b_handle(event)
+            except Exception as e:
+                try:
+                    with open(_LOG_PATH, "a") as f:
+                        f.write(f"[phase3b][offer_error] {e!r}\n")
+                except Exception:
+                    pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
