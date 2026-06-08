@@ -21,7 +21,10 @@ def _reset(tmp_path, monkeypatch):
     so._reset_for_test()
 
 
-def _unit(seed: int, length: int = 8) -> list:
+def _unit(seed: int, length: int = 32) -> list:
+    """32-dim unit vector — high enough dimension that two random seeds
+    give cosine similarity well below the 0.75 threshold, avoiding flaky
+    'unknown matches' in this end-to-end test."""
     rng = np.random.default_rng(seed)
     v = rng.normal(size=length)
     return list(v / np.linalg.norm(v))
