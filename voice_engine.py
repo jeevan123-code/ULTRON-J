@@ -456,6 +456,21 @@ def tts(text: str, mood: str = "FOCUSED", provider: str = "auto") -> Tuple[bytes
 
     Returns: (audio_bytes, provider_name)
     """
+    # Phase 5d: mood-aware + privacy-aware text rewriting.
+    # Re-binds `text` before prepare_for_tts. Default-OFF; failure -> pass-through.
+    import os as _os_p5d
+    if _os_p5d.environ.get("ULTRON_PHASE5D_ENABLED", "0") == "1":
+        try:
+            from mood_tracker import current_mood as _p5d_current_mood
+            from privacy_circle import current_mode as _p5d_current_mode
+            from struggle_counter import recent_count as _p5d_struggles
+            from tone_modulator import modulate as _p5d_modulate
+            _p5d_mood_state = _p5d_current_mood(recent_struggles=_p5d_struggles(within_seconds=3600))
+            _p5d_priv = _p5d_current_mode()
+            text = _p5d_modulate(text, mood=_p5d_mood_state, privacy_mode=_p5d_priv)
+        except Exception:
+            pass  # any failure -> fall back to raw text
+
     clean = prepare_for_tts(text) or "Done."
 
     cached = _get_cached(clean, mood, provider)
