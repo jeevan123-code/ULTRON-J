@@ -133,6 +133,16 @@ def _tick() -> None:
                         f.write(f"[phase3b][offer_error] {e!r}\n")
                 except Exception:
                     pass
+        if os.environ.get("ULTRON_PHASE5D_ENABLED", "0") == "1":
+            try:
+                from struggle_counter import record_struggle as _p5d_record
+                _p5d_record(ts=event.last_seen_ts)
+            except Exception as e:
+                try:
+                    with open(_LOG_PATH, "a") as f:
+                        f.write(f"[phase5d][counter_error] {e!r}\n")
+                except Exception:
+                    pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
