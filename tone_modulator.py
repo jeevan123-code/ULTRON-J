@@ -21,7 +21,7 @@ _SECRET_PATTERNS = (
     re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"),
     re.compile(r"\bBearer\s+[A-Za-z0-9._\-]{8,}\b", re.IGNORECASE),
     re.compile(r"(?i)\b(?:password|passwd|secret)\s*[:=]\s*\S+"),
-    re.compile(r"\b[A-Z][A-Z0-9_]{2,}_(?:KEY|TOKEN|SECRET)\s*[:=]\s*\S+"),
+    re.compile(r"(?i)\b[a-z_][a-z0-9_]*_(?:key|token|secret)\s*[:=]\s*\S+"),
     re.compile(r"/home/jeevan/[^\s)\]'\"]+"),
 )
 
