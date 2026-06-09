@@ -23,6 +23,17 @@ def process_user_utterance(
         last_action: The most recently proposed action awaiting confirmation, if any.
     """
     context = context or {}
+
+    # Phase 5f: intercept teach utterances + resolve known shortcuts.
+    # Flag-gated; failure silently falls back to the original context.
+    import os as _os_p5f
+    if _os_p5f.environ.get("ULTRON_PHASE5F_ENABLED", "0") == "1":
+        try:
+            from phase5f_shortcut_hook import apply as _p5f_apply
+            context = _p5f_apply(raw, context)
+        except Exception:
+            pass
+
     parsed: ParsedUtterance = parse(raw)
     enriched: ParsedUtterance = ci.enrich(parsed, context)
     plan: ExecutionPlan = rl.plan(enriched, last_action=last_action)
