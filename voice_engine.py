@@ -1169,6 +1169,31 @@ _VOICE_CMDS = {
 
 def parse_voice_command(text: str) -> Optional[str]:
     import os as _os
+    # Phase 4: multi-device scenario triggers — short-circuit on match.
+    import os as _os_p4
+    if _os_p4.environ.get("ULTRON_PHASE4_ENABLED", "0") == "1":
+        try:
+            import multi_device_coordinator as _mdc
+            _matched = _mdc.match_trigger(text)
+            if _matched is not None:
+                try:
+                    _result = _mdc.run(_matched)
+                    with open("ultron_log.txt", "a") as _f:
+                        _f.write(f"[phase4] scenario={_matched.name} result={_result}\n")
+                except Exception as _re:
+                    try:
+                        with open("ultron_log.txt", "a") as _f:
+                            _f.write(f"[phase4][run_error] scenario={_matched.name} err={_re!r}\n")
+                    except Exception:
+                        pass
+                return None
+        except Exception as _se:
+            try:
+                with open("ultron_log.txt", "a") as _f:
+                    _f.write(f"[phase4][hook_error] {_se!r}\n")
+            except Exception:
+                pass
+
     # Phase 2b: passively record EVERY transcript for autonomous research.
     import os as _os_p2b
     if _os_p2b.environ.get("ULTRON_PHASE2B_ENABLED", "0") == "1":
