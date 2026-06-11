@@ -70,6 +70,19 @@ def _dispatch_briefing(channels: List[str]) -> Dict[str, Any]:
     return briefing_delivery.deliver(text, channels)
 
 
+def _dispatch_look() -> Dict[str, Any]:
+    """Phase 9: grab a webcam frame and distil it via vision_perception."""
+    import vision_capture
+    import vision_perception
+    frame = vision_capture.get_latest_frame()
+    if frame is None:
+        return {"ok": False, "reason": "no_frame"}
+    obs = vision_perception.observe(frame)
+    if obs is None:
+        return {"ok": False, "reason": "no_observation"}
+    return {"ok": True, **obs.to_dict()}
+
+
 # ---- helpers ----
 
 def _interpolate(args: Dict[str, Any], prev: Dict[str, Any]) -> Dict[str, Any]:
@@ -134,6 +147,16 @@ def _run_one(step: Dict[str, Any], prev_result: Dict[str, Any]) -> Dict[str, Any
             channels = args.get("channels", ["telegram"])
             result = _dispatch_briefing(channels)
             return {"ok": bool(result), "action": action, "result": result}
+
+        if action == "look":
+            result = _dispatch_look()
+            ok = bool(result.get("ok"))
+            if not ok:
+                return {"ok": False, "action": action,
+                        "error": result.get("reason", "look_failed")}
+            # Surface the observation directly as `result` so
+            # {{prev.faces}} / {{prev.person_present}} resolve in next step
+            return {"ok": True, "action": action, "result": result}
 
         return {"ok": False, "action": action,
                 "error": f"unknown action {action!r}"}
