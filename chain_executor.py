@@ -166,6 +166,29 @@ def _run_one(step: Dict[str, Any], prev_result: Dict[str, Any]) -> Dict[str, Any
         return {"ok": False, "action": action, "error": repr(e)}
 
 
+def _should_skip(step: Dict[str, Any], prev_ran: bool, prev_ok: bool) -> bool:
+    """Phase 11 conditional gating.
+
+    `if_prev_ok: True`   — run only when the prior executed step succeeded.
+                           For the very first step (no prev yet) this is
+                           vacuously satisfied, so the step runs.
+    `if_prev_failed: True` — run only when the prior executed step failed.
+                             For the first step (no prev) this is NOT
+                             satisfied, so the step is skipped.
+
+    Skipped steps appear in the results list with `{"skipped": True}` so
+    the chain is fully auditable. Skipped steps do not reset `prev_result`
+    nor flip `prev_ok` — they're neutral for downstream conditions.
+    """
+    if step.get("if_prev_ok"):
+        if prev_ran and not prev_ok:
+            return True
+    if step.get("if_prev_failed"):
+        if (not prev_ran) or prev_ok:
+            return True
+    return False
+
+
 def execute_chain(plan: ExecutionPlan) -> List[Dict[str, Any]]:
     """Run every step of `plan.steps` in order; return per-step results.
 
@@ -173,20 +196,39 @@ def execute_chain(plan: ExecutionPlan) -> List[Dict[str, Any]]:
     `continue_on_failure: True`. Each step's `prev_result` is the
     `result` dict of the previous successful step (used for `{{prev.X}}`
     interpolation).
+
+    Phase 11: steps may carry `if_prev_ok` / `if_prev_failed` flags. When
+    the condition is not met the step is recorded as `{"skipped": True}`
+    and the chain proceeds.
     """
     results: List[Dict[str, Any]] = []
     prev_result: Dict[str, Any] = {}
+    prev_ran = False
+    prev_ok = False
 
     for step in plan.steps or []:
+        if _should_skip(step, prev_ran, prev_ok):
+            results.append({
+                "ok": False,
+                "skipped": True,
+                "action": step.get("action"),
+                "reason": "condition_not_met",
+            })
+            # Don't touch prev_result / prev_ran / prev_ok — neutral.
+            continue
+
         outcome = _run_one(step, prev_result)
         results.append(outcome)
+        prev_ran = True
 
         if outcome.get("ok"):
             r = outcome.get("result")
             prev_result = r if isinstance(r, dict) else {}
+            prev_ok = True
             continue
 
         # failed
+        prev_ok = False
         if step.get("continue_on_failure"):
             prev_result = {}
             continue
