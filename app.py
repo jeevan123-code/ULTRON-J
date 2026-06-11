@@ -427,6 +427,21 @@ def index():
     return render_template("index.html")
 
 
+# Phase 6 — Integration health endpoint. Gated on ULTRON_PHASE6_ENABLED;
+# returns 404 when the flag is off so the route is invisible. Auth gating
+# is automatic via install_auth.
+@app.route("/api/integrations/health", methods=["GET"])
+def phase6_integration_health():
+    import os as _os_p6
+    if _os_p6.environ.get("ULTRON_PHASE6_ENABLED", "0") != "1":
+        return jsonify({"error": "phase6 disabled"}), 404
+    try:
+        import integration_health
+        return jsonify(integration_health.all()), 200
+    except Exception as e:
+        return jsonify({"error": repr(e)}), 500
+
+
 # Lightweight liveness probe. sleep_guard.py's Watchdog pings this every
 # check_interval and kill+restart after 3 consecutive misses, so it must
 # stay cheap (no I/O, no third-party calls) and never raise. The richer
