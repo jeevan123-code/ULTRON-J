@@ -1169,6 +1169,36 @@ _VOICE_CMDS = {
 
 def parse_voice_command(text: str) -> Optional[str]:
     import os as _os
+    # Phase 6: scheduled briefing + worldfeed voice commands.
+    import os as _os_p6
+    if _os_p6.environ.get("ULTRON_PHASE6_ENABLED", "0") == "1":
+        try:
+            _tl_p6 = (text or "").lower().strip()
+            if "brief me" in _tl_p6:
+                import briefing_builder as _bb
+                import briefing_delivery as _bd
+                import time as _t6
+                _txt = _bb.compose(now=_t6.time(), include_worldfeed=True)
+                _bd.deliver(_txt, ["voice"])
+                return None
+            if "new in the world" in _tl_p6 or "world news" in _tl_p6 or "world events" in _tl_p6:
+                import worldfeed_store as _wfs
+                import briefing_delivery as _bd
+                import time as _t6
+                _top = _wfs.recent(now=_t6.time(), within_seconds=24 * 3600, top_n=5)
+                if _top:
+                    _lines = ["Top world events:"] + [f"- {e.title}" for e in _top if getattr(e, "title", "")]
+                    _bd.deliver("\n".join(_lines), ["voice"])
+                else:
+                    _bd.deliver("No world events matched your interests recently.", ["voice"])
+                return None
+        except Exception as _p6e:
+            try:
+                with open("ultron_log.txt", "a") as _f:
+                    _f.write(f"[phase6][hook_error] {_p6e!r}\n")
+            except Exception:
+                pass
+
     # Phase 4: multi-device scenario triggers — short-circuit on match.
     import os as _os_p4
     if _os_p4.environ.get("ULTRON_PHASE4_ENABLED", "0") == "1":
