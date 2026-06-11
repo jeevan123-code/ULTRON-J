@@ -128,6 +128,8 @@ PyYAML==6.0.3
 referencing==0.37.0
 requests==2.34.2
 requests-oauthlib==2.0.0
+feedparser==6.0.12
+croniter==6.2.2
 rich==15.0.0
 rpds-py==2026.5.1
 setuptools==82.0.1
