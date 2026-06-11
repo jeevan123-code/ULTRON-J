@@ -1252,6 +1252,27 @@ def parse_voice_command(text: str) -> Optional[str]:
             except Exception:
                 pass
 
+    # Phase 10: plan_builder + chain_executor — turn utterance into a
+    # multi-step chain. Sits AFTER all specific phase hooks (so Phase
+    # 4/6/3b own their utterances) but BEFORE the Phase 1 pipeline (so
+    # Phase 1 still gets utterances Phase 10's pattern table misses).
+    import os as _os_p10
+    if _os_p10.environ.get("ULTRON_PHASE10_ENABLED", "0") == "1":
+        if text and text.strip():
+            try:
+                import plan_builder as _pb
+                import chain_executor as _ce_p10
+                _p10_plan = _pb.build_from_utterance(text)
+                if _p10_plan.steps:
+                    _ce_p10.execute_chain(_p10_plan)
+                    return None  # short-circuit
+            except Exception as _p10e:
+                try:
+                    with open("ultron_log.txt", "a") as _f:
+                        _f.write(f"[phase10][hook_error] {_p10e!r}\n")
+                except Exception:
+                    pass
+
     if _os.environ.get("ULTRON_PHASE1_ENABLED", "0") == "1":
         try:
             from phase1_pipeline import process_user_utterance as _process_p1
