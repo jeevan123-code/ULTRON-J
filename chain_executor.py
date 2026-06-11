@@ -189,7 +189,8 @@ def _should_skip(step: Dict[str, Any], prev_ran: bool, prev_ok: bool) -> bool:
     return False
 
 
-def execute_chain(plan: ExecutionPlan) -> List[Dict[str, Any]]:
+def execute_chain(plan: ExecutionPlan,
+                  strict_validation: bool = False) -> List[Dict[str, Any]]:
     """Run every step of `plan.steps` in order; return per-step results.
 
     Stops on the first failed step unless that step set
@@ -200,7 +201,31 @@ def execute_chain(plan: ExecutionPlan) -> List[Dict[str, Any]]:
     Phase 11: steps may carry `if_prev_ok` / `if_prev_failed` flags. When
     the condition is not met the step is recorded as `{"skipped": True}`
     and the chain proceeds.
+
+    Phase 13: `strict_validation=True` runs `plan_validator.validate(plan)`
+    before any step executes. If any issue has severity `error`, no step
+    runs and a single result is returned with
+    `{ok: False, skipped: True, reason: "validation_failed",
+      validation_issues: [...]}`. Warnings do NOT block execution.
     """
+    if strict_validation:
+        try:
+            import plan_validator
+            issues = plan_validator.validate(plan)
+            errors = [i for i in issues
+                      if i.severity == plan_validator.SEVERITY_ERROR]
+            if errors:
+                return [{
+                    "ok": False,
+                    "skipped": True,
+                    "reason": "validation_failed",
+                    "validation_issues": [i.to_dict() for i in errors],
+                }]
+        except Exception as e:
+            _safe_log(f"strict validation crashed: {e!r}")
+            # Fall through and run the chain — validation must never make
+            # the system *less* reliable than running unchecked.
+
     results: List[Dict[str, Any]] = []
     prev_result: Dict[str, Any] = {}
     prev_ran = False
