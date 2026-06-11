@@ -204,6 +204,29 @@ def _network_monitor_loop():
 # PHASE 1: OBSERVE — scan environment (enhanced)
 # =============================================================================
 
+def _phase7_unified_tick(obs: dict) -> None:
+    """Phase 7 hook — invoke mind_tick to unify Phase 3c/4/6 surfaces.
+
+    Stamps the result into `obs["phase7_summary"]` so downstream
+    make_decision can react to it (e.g., bump priority if a briefing
+    just fired). On exception, records the error in `obs["phase7_error"]`
+    instead of propagating — the consciousness loop must not crash.
+    """
+    import os as _os_p7
+    if _os_p7.environ.get("ULTRON_PHASE7_ENABLED", "0") != "1":
+        return
+    try:
+        import mind_tick
+        obs["phase7_summary"] = mind_tick.tick()
+    except Exception as e:
+        obs["phase7_error"] = repr(e)
+        try:
+            with open("ultron_log.txt", "a") as _f:
+                _f.write(f"[phase7][cycle_hook] {e!r}\n")
+        except Exception:
+            pass
+
+
 def observe_environment() -> dict:
     """Gather current state of the environment. Enhanced version."""
     now = datetime.datetime.now()
@@ -693,6 +716,10 @@ def _continuous_loop():
 
             # PHASE 1: OBSERVE
             obs = observe_environment()
+
+            # PHASE 7: unify Phase 3c / 4 / 6 surfaces into one tick.
+            # Flag-gated; safe no-op when ULTRON_PHASE7_ENABLED is off.
+            _phase7_unified_tick(obs)
 
             # PHASE 2: DECIDE
             decision = make_decision(obs)
