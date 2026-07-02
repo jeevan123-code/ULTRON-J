@@ -1,5 +1,11 @@
 # PERFECTION SCORECARD — Ultron-J
 
+> ⚠️ **HISTORICAL — SUPERSEDED.** The table below describes the original
+> `hardening` branch milestone (9 dimensions, 481 tests) and predates the
+> current Phase 1–13 renumbering. It is kept for provenance. For the current
+> state see **"Current state (post-Phase 13)"** at the bottom of this file and
+> the per-phase `PHASE*_README.md` files.
+
 The definition of "top-level / perfect" the hardening branch is driving
 toward. Updated at the end of each phase. Source of truth: `hello.txt`
 Phase 9.
@@ -44,3 +50,29 @@ returned 500. Patched `claude_loop.do_manual_login` to detect
 pointing the caller at the CLI command instead.
 
 The `hardening` branch is ready to merge into `master`.
+
+---
+
+## Current state (post-Phase 13) — 2026-07-03
+
+Snapshot after the full audit + repair pass on `phase13-strict-validation`.
+
+- **Tests: 1155 passing** (was 1136 at the phase-13 doc commit; +11 hardening
+  regression, +4 phase5g, +4 phase5b wiring). Zero regressions.
+- **13 phases wired** (1–13); flag-gated, default OFF. Previously-orphaned
+  phases now wired: **5g** (implicit shortcut learner → phase5g_implicit_hook,
+  fed by phase1_pipeline, ticked by mind_tick) and **5b** (stranger detection →
+  voice_routes._maybe_voice_id + voice_engine.parse_voice_command). Wiring 5b
+  also fixed the **5d privacy no-op** (privacy_circle now shifts
+  private→stranger_present once a voice is recorded).
+- **RAG verified live**: chromadb + sentence-transformers backend active;
+  5/5 zero-keyword-overlap semantic recall probes correct.
+- **Security/hardening batch** shipped with regression tests: safety_check
+  code-param scan, calculate exponentiation DoS cap, self_modify pre-write
+  compile check, intent_router shell-injection close, autonomous_loop disk
+  W_OK check, sounddevice OSError catch. See `tests/test_hardening_fixes.py`.
+- **Deep Research** feature (multi-backend cited answers) committed.
+- `wiring_audit.py` root-path bug fixed (was scanning the parent dir).
+- Remaining planned work: the "beyond-JARVIS" tiers (self-authored goal
+  daemon, continuous vision + duplex voice, agent swarm, capability policy
+  engine). See the roadmap.
