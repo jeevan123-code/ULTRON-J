@@ -1252,6 +1252,20 @@ def parse_voice_command(text: str) -> Optional[str]:
             except Exception:
                 pass
 
+    # Phase 5b: if a stranger enrollment is awaiting a reply, route this
+    # utterance to it ("that's Ravi, my brother" / "skip it"). Consumes the
+    # utterance so it isn't also parsed as a command. Flag-gated, default OFF.
+    import os as _os_p5b
+    if _os_p5b.environ.get("ULTRON_PHASE5B_ENABLED", "0") == "1":
+        try:
+            import stranger_offer as _so
+            if _so.peek_pending() is not None:
+                _r = _so.confirm_stranger(text)
+                if _r.get("enrolled") or _r.get("reason") == "skipped":
+                    return None
+        except Exception:
+            pass
+
     # Phase 10: plan_builder + chain_executor — turn utterance into a
     # multi-step chain. Sits AFTER all specific phase hooks (so Phase
     # 4/6/3b own their utterances) but BEFORE the Phase 1 pipeline (so

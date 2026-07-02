@@ -71,6 +71,34 @@ from llm_engine import stream_llm
 from task_orchestrator import orchestrate
 
 
+def _maybe_voice_id(audio_bytes: bytes) -> None:
+    """Phase 5b: run the speaker-ID pipeline on this clip so room_awareness /
+    privacy_circle reflect who is actually present (this is what makes the
+    Phase 5d privacy-aware TTS non-inert). process_audio_clip needs a path, so
+    the bytes are written to a temp WAV and removed afterward. Flag-gated,
+    default OFF; every failure is swallowed so it can never break transcription.
+    """
+    import os
+    if os.environ.get("ULTRON_PHASE5B_ENABLED", "0") != "1" or not audio_bytes:
+        return
+    tmp_path = None
+    try:
+        import tempfile
+        from voice_id_pipeline import process_audio_clip
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            f.write(audio_bytes)
+            tmp_path = f.name
+        process_audio_clip(tmp_path)
+    except Exception:
+        pass
+    finally:
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+
 voice_bp = Blueprint("voice", __name__)
 
 
@@ -154,6 +182,7 @@ def api_voice_transcribe():
         return jsonify({"error": "Audio too large (max 10MB)"}), 413
 
     result = stt(audio_bytes)
+    _maybe_voice_id(audio_bytes)
     return jsonify(result)
 
 
@@ -201,6 +230,7 @@ def api_voice_chat():
 
     # ── Step 1: Transcribe ────────────────────────────────────────────────────
     stt_result  = stt(audio_bytes)
+    _maybe_voice_id(audio_bytes)
     user_text   = stt_result.get("text", "").strip()
     confidence  = float(stt_result.get("confidence", 0))
 
@@ -493,6 +523,7 @@ def api_voice_stream_chat():
     def generate():
         # ── Step 1: Transcribe ────────────────────────────────────────────────
         stt_result = stt(audio_bytes)
+        _maybe_voice_id(audio_bytes)
         user_text  = stt_result.get("text", "").strip()
         confidence = float(stt_result.get("confidence", 0))
 
