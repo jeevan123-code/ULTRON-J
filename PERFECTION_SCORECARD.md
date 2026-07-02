@@ -73,6 +73,11 @@ Snapshot after the full audit + repair pass on `phase13-strict-validation`.
   W_OK check, sounddevice OSError catch. See `tests/test_hardening_fixes.py`.
 - **Deep Research** feature (multi-backend cited answers) committed.
 - `wiring_audit.py` root-path bug fixed (was scanning the parent dir).
-- Remaining planned work: the "beyond-JARVIS" tiers (self-authored goal
-  daemon, continuous vision + duplex voice, agent swarm, capability policy
-  engine). See the roadmap.
+- **Phase 14 (self-authored goal daemon) SHIPPED** — `goal_author` proposes its
+  own goals from observations (repeated_failure + knowledge_gap detectors)
+  behind a GREEN/AMBER/RED safety gate; default posture parks everything for
+  approval. Flags `ULTRON_PHASE14_ENABLED` / `ULTRON_PHASE14_AUTO_GREEN`.
+  27 tests. See `PHASE14_README.md`. This is the Tier-1 JARVIS→Ultron jump.
+- Remaining planned work: Tier 2 (continuous vision + duplex voice), Tier 3
+  (agent swarm), Tier 4 (full capability policy engine), plus wiring the
+  Phase 14 approve/reject API to a route/voice surface. See the roadmap.

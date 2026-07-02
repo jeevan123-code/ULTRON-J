@@ -227,6 +227,73 @@ def _phase7_unified_tick(obs: dict) -> None:
             pass
 
 
+def _phase14_enrich_observation(obs: dict) -> None:
+    """Populate the keys goal_author's detectors read: failure_counts,
+    recent_topics, known_topics. Every source is optional and wrapped — the
+    consciousness loop must never crash on a missing/degraded source."""
+    # failure_counts: recently FAILED goals, grouped by normalised title,
+    # EXCLUDING self-authored goals so a failed investigation can't spawn a
+    # fresh investigation of itself (recursion guard).
+    try:
+        from collections import Counter
+        from decision_engine import load_goals, GoalStatus
+        c: Counter = Counter()
+        for g in load_goals():
+            if g.get("status") != GoalStatus.FAILED:
+                continue
+            if g.get("source") == "self_authored" or "self_authored" in (g.get("tags") or []):
+                continue
+            key = (g.get("title") or "").strip().lower()
+            if key:
+                c[key] += 1
+        obs["failure_counts"] = dict(c)
+    except Exception:
+        obs.setdefault("failure_counts", {})
+
+    # recent_topics: conversation buffer + world-feed headlines.
+    topics = []
+    try:
+        import conversation_listener
+        topics += [u.get("text", "") for u in conversation_listener.snapshot()]
+    except Exception:
+        pass
+    try:
+        import worldfeed_store
+        for ev in (worldfeed_store.recent(within_seconds=6 * 3600, top_n=20) or []):
+            topics.append(getattr(ev, "title", ""))
+    except Exception:
+        pass
+    obs["recent_topics"] = [t for t in topics if t]
+
+    # known_topics: best-effort from stored concepts so we don't flag things
+    # Ultron already knows. Empty on any failure (dedup + park-by-default keep
+    # that safe).
+    try:
+        import concepts
+        obs["known_topics"] = list(concepts._load_concepts().keys())
+    except Exception:
+        obs.setdefault("known_topics", [])
+
+
+def _phase14_author_goals(obs: dict) -> None:
+    """Phase 14 — let Ultron propose its own goals from the observation.
+    Flag-gated by ULTRON_PHASE14_ENABLED; safe no-op when off."""
+    import os as _os_p14
+    if _os_p14.environ.get("ULTRON_PHASE14_ENABLED", "0") != "1":
+        return
+    try:
+        import goal_author
+        _phase14_enrich_observation(obs)
+        obs["phase14_summary"] = goal_author.author(obs)
+    except Exception as e:
+        obs["phase14_error"] = repr(e)
+        try:
+            with open("ultron_log.txt", "a") as _f:
+                _f.write(f"[phase14][cycle_hook] {e!r}\n")
+        except Exception:
+            pass
+
+
 def observe_environment() -> dict:
     """Gather current state of the environment. Enhanced version."""
     now = datetime.datetime.now()
@@ -728,6 +795,10 @@ def _continuous_loop():
             # PHASE 7: unify Phase 3c / 4 / 6 surfaces into one tick.
             # Flag-gated; safe no-op when ULTRON_PHASE7_ENABLED is off.
             _phase7_unified_tick(obs)
+
+            # PHASE 14: let Ultron author its own goals from the observation.
+            # Flag-gated; safe no-op when ULTRON_PHASE14_ENABLED is off.
+            _phase14_author_goals(obs)
 
             # PHASE 2: DECIDE
             decision = make_decision(obs)

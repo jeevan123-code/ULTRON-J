@@ -57,3 +57,4 @@ shortcuts/
 ultron_screenshots/
 logs/
 *.json.bak
+goal_author_state.json
