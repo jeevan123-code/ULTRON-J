@@ -13,7 +13,10 @@ Distinguishes:
 import ast, os, glob, json, re, sys
 sys.stdout.reconfigure(encoding="utf-8")
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# This script lives in the project root, so ROOT is the file's own directory.
+# (Was os.path.dirname(os.path.dirname(...)) — two levels up — which pointed at
+# the parent dir with zero .py files, making the whole audit scan nothing.)
+ROOT = os.path.dirname(os.path.abspath(__file__))
 PY_FILES = sorted(glob.glob(os.path.join(ROOT, "*.py")))
 PY_NAMES = {os.path.splitext(os.path.basename(p))[0] for p in PY_FILES}
 EXCLUDE = {"test", "test_groq", "test_play", "test_stream", "test_youtube",
