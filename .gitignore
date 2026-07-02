@@ -58,3 +58,5 @@ ultron_screenshots/
 logs/
 *.json.bak
 goal_author_state.json
+beliefs.json
+belief_consolidation_state.json

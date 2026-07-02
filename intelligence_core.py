@@ -544,6 +544,18 @@ def _think_and_stream_inner(
         except Exception:
             pass
 
+        # Phase 16: durable beliefs — Ultron's deepened model of the user.
+        # Flag-gated; only high-confidence beliefs are injected.
+        try:
+            import os as _os_p16
+            if _os_p16.environ.get("ULTRON_PHASE16_ENABLED", "0") == "1":
+                from belief_store import get_beliefs_block
+                _bl = get_beliefs_block()
+                if _bl:
+                    block = (_bl + "\n\n" + block) if block else _bl
+        except Exception:
+            pass
+
         ctx["recall"] = block
 
     def _build_world_state():
