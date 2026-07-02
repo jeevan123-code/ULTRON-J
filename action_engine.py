@@ -1247,6 +1247,29 @@ def execute_goal_step(goal_id: str, task: dict) -> dict:
                       refusal["error"], False)
         return refusal
 
+    # Phase 17 — capability policy gate. Generalises the Phase 7.5 code guard to
+    # ALL actions: RED is refused; AMBER requires task["human_confirmed"]=True.
+    # Flag-gated by ULTRON_PHASE17_ENABLED; off = unchanged behaviour.
+    import os as _os_p17
+    if _os_p17.environ.get("ULTRON_PHASE17_ENABLED", "0") == "1":
+        try:
+            import capability_policy
+            _pol = capability_policy.enforce(
+                action_type, params, approved=bool(task.get("human_confirmed")))
+            if not _pol["allowed"]:
+                refusal = {
+                    "success": False, "result": "",
+                    "error": (f"capability policy ({_pol['tier']}) blocked "
+                              f"'{action_type}': {_pol['reason']}"
+                              + ("" if _pol["tier"] == "red"
+                                 else " — needs human_confirmed=True.")),
+                }
+                log_execution(goal_id, task.get("id", "?"), action_type,
+                              refusal["error"], False)
+                return refusal
+        except Exception:
+            pass  # policy failure must not crash the loop; fall through
+
     update_goal(goal_id, status=GoalStatus.EXECUTING)
 
     result = execute_action(action_type, params)
