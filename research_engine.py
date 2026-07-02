@@ -39,7 +39,7 @@ from urllib.parse import urlparse
 
 try:
     from local_engine import (
-        search_searxng, search_duckduckgo, search_wikipedia,
+        search_searxng, search_duckduckgo, search_wikipedia, search_tavily,
     )
     _SEARCH_AVAILABLE = True
 except ImportError:
@@ -47,6 +47,28 @@ except ImportError:
     def search_searxng(q, max_results=5): return []
     def search_duckduckgo(q, max_results=5): return []
     def search_wikipedia(q): return ""
+    def search_tavily(q, max_results=5): return []
+
+# Configurable backend order (set DEEP_SEARCH_ORDER to e.g.
+# "searxng,duckduckgo,tavily" once SearXNG is self-hosted, to drop the Tavily
+# dependency). Unknown names are ignored.
+try:
+    from config import DEEP_SEARCH_ORDER as _DEEP_SEARCH_ORDER
+except ImportError:
+    _DEEP_SEARCH_ORDER = "tavily,searxng,duckduckgo"
+_BACKENDS = {
+    "tavily":     search_tavily,
+    "searxng":    search_searxng,
+    "duckduckgo": search_duckduckgo,
+    "ddg":        search_duckduckgo,
+}
+def _backend_chain():
+    chain = []
+    for name in _DEEP_SEARCH_ORDER.split(","):
+        fn = _BACKENDS.get(name.strip().lower())
+        if fn and fn not in chain:
+            chain.append(fn)
+    return chain or [search_tavily, search_searxng, search_duckduckgo]
 
 try:
     from autonomous_browser import browse as _ab_browse
@@ -64,6 +86,45 @@ try:
     from llm_engine import call_llm_batch
 except ImportError:
     def call_llm_batch(p, **kw): return ""
+
+# Deep-research cascade — the per-page extraction step runs on a cheap, fast
+# model (Groq 8B) so reading 4-16 scraped pages stays inexpensive; the final
+# synthesis stays on the smart model. If Groq isn't configured, callers fall
+# back to the normal model_selector / call_llm_batch path (smart model).
+try:
+    from config import GROQ_EXTRACT_MODEL, GROQ_KEYS as _GROQ_KEYS
+except ImportError:
+    GROQ_EXTRACT_MODEL = None
+    _GROQ_KEYS = []
+
+
+import threading as _threading
+# The deep engine extracts from several pages concurrently. On a free LLM tier,
+# firing those calls all at once trips the per-minute rate limit (429) and the
+# extracts come back empty. Serialize them with a small gap so they queue
+# instead of bursting — a few seconds slower, but reliable.
+_extract_lock      = _threading.Lock()
+_extract_last_call = [0.0]
+_EXTRACT_MIN_GAP   = 0.4  # seconds between cheap-model extraction calls
+
+
+def _extract_llm(prompt: str, system: str) -> str:
+    """Run a cheap-model extraction call (Groq 8B) for the cascade, throttled to
+    avoid the free-tier burst rate limit. Returns '' if unavailable so the
+    caller can fall back to the smart model."""
+    if not (_GROQ_KEYS and GROQ_EXTRACT_MODEL):
+        return ""
+    with _extract_lock:
+        gap = time.time() - _extract_last_call[0]
+        if gap < _EXTRACT_MIN_GAP:
+            time.sleep(_EXTRACT_MIN_GAP - gap)
+        try:
+            out = call_llm_batch(prompt, system=system,
+                                 provider="groq", model=GROQ_EXTRACT_MODEL) or ""
+        except Exception:
+            out = ""
+        _extract_last_call[0] = time.time()
+        return out
 
 try:
     import vector_store
@@ -145,28 +206,31 @@ def _parse_json_loose(raw: str) -> Optional[Dict]:
 # =============================================================================
 
 def search_one(query: str, n_results: int = 5) -> List[Dict]:
-    """Run one sub-query, merge SearXNG + DDG, dedupe by URL."""
+    """Run one sub-query through a resilient backend chain, dedupe by URL.
+
+    Order = most-reliable first: Tavily (if a key is set — built for
+    concurrency, returns extracted content) → SearXNG (keyless, if you've
+    self-hosted one) → DuckDuckGo (keyless, throttled fallback). Any single
+    working backend yields sources, so there's no hard dependency on Tavily —
+    drop the key and it falls through to SearXNG/DDG automatically.
+    """
     combined: Dict[str, Dict] = {}  # keyed by URL
 
-    for hit in search_searxng(query, max_results=n_results) or []:
-        url = (hit.get("url") or "").strip()
-        if url:
-            combined[url] = {
-                "url":     url,
-                "title":   hit.get("title", ""),
-                "snippet": hit.get("snippet", ""),
-                "origin":  "searxng",
-            }
-
-    if len(combined) < n_results:
-        for hit in search_duckduckgo(query, max_results=n_results) or []:
+    for backend in _backend_chain():
+        if len(combined) >= n_results:
+            break
+        try:
+            hits = backend(query, max_results=n_results) or []
+        except Exception:
+            hits = []
+        for hit in hits:
             url = (hit.get("url") or "").strip()
             if url and url not in combined:
                 combined[url] = {
                     "url":     url,
                     "title":   hit.get("title", ""),
                     "snippet": hit.get("snippet", ""),
-                    "origin":  "ddg",
+                    "origin":  hit.get("source", "?"),
                 }
 
     return list(combined.values())
@@ -272,11 +336,16 @@ def extract_from_page(sub_query: str, page_text: str, title: str) -> Dict:
         f'PAGE CONTENT:\n{page_text[:4500]}\n\n'
         f'Extract the passages answering the sub-query.'
     )
-    if ms:
-        parsed = ms.call_json("extractor", prompt, system=_EXTRACT_SYSTEM)
-    else:
-        raw = call_llm_batch(prompt, system=_EXTRACT_SYSTEM)
+    # Cascade: cheap 8B extractor first; fall back to model_selector / smart model.
+    parsed = None
+    raw = _extract_llm(prompt, _EXTRACT_SYSTEM)
+    if raw:
         parsed = _parse_json_loose(raw)
+    if not isinstance(parsed, dict):
+        if ms:
+            parsed = ms.call_json("extractor", prompt, system=_EXTRACT_SYSTEM)
+        else:
+            parsed = _parse_json_loose(call_llm_batch(prompt, system=_EXTRACT_SYSTEM))
 
     if not isinstance(parsed, dict):
         return {"relevant": False, "extract": "", "confidence": "low"}
@@ -318,11 +387,16 @@ def cross_reference(extracts: List[Dict]) -> List[Dict]:
     if not sources_text:
         return []
     prompt = f"Check the following extracts for contradictions:\n\n{sources_text}"
-    if ms:
-        parsed = ms.call_json("reasoner", prompt, system=_CROSSREF_SYSTEM)
-    else:
-        raw = call_llm_batch(prompt, system=_CROSSREF_SYSTEM)
+    # Cascade: cheap 8B first; fall back to model_selector / smart model.
+    parsed = None
+    raw = _extract_llm(prompt, _CROSSREF_SYSTEM)
+    if raw:
         parsed = _parse_json_loose(raw)
+    if not isinstance(parsed, dict):
+        if ms:
+            parsed = ms.call_json("reasoner", prompt, system=_CROSSREF_SYSTEM)
+        else:
+            parsed = _parse_json_loose(call_llm_batch(prompt, system=_CROSSREF_SYSTEM))
 
     if not isinstance(parsed, dict):
         return []
@@ -371,9 +445,24 @@ def synthesise(question: str, extracts: List[Dict], contradictions: List[Dict]) 
         f"{contra_block}\n\n"
         f"Write the answer now."
     )
+    # Synthesis is the final answer — it must not come back empty. Try the
+    # model_selector route, then fall back to a direct smart-model call, with
+    # one retry, so a transient free-tier rate-limit (429) doesn't wipe the
+    # whole research result.
     if ms:
-        return ms.call("synthesise", prompt, system=_SYNTH_SYSTEM).strip()
-    return call_llm_batch(prompt, system=_SYNTH_SYSTEM).strip()
+        out = (ms.call("synthesise", prompt, system=_SYNTH_SYSTEM) or "").strip()
+        if out:
+            return out
+    for _attempt in range(2):
+        out = (call_llm_batch(prompt, system=_SYNTH_SYSTEM) or "").strip()
+        if out:
+            return out
+        time.sleep(2.0)
+    return (
+        "I gathered and read the sources below, but the language model was rate-"
+        "limited while writing the final summary. Please try again in a moment — "
+        "the sources are listed so you can read them directly meanwhile."
+    )
 
 
 # =============================================================================
@@ -443,7 +532,16 @@ def research(
                 text = fut.result()
             except Exception:
                 text = ""
-            if text and len(text) > 200:
+            # Fall back to the search engine's pre-extracted snippet when direct
+            # scraping yields little/nothing. Modern pages (Reddit, Facebook,
+            # JS-heavy sites) often block scrapers, but Tavily/SearXNG already
+            # return clean extracted content — so a "failed scrape" still has
+            # usable grounded text instead of dropping the source entirely.
+            if not text or len(text) < 200:
+                snippet = (hit.get("snippet") or "").strip()
+                if len(snippet) > len(text or ""):
+                    text = snippet
+            if text and len(text) > 80:
                 sources.append({
                     "source_id": f"S{len(sources) + 1}",
                     "url":       hit["url"],

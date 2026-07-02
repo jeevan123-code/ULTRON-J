@@ -178,6 +178,11 @@ GMAIL_APP_PASSWORD  = os.environ.get("GMAIL_APP_PASSWORD", "").strip() or None
 # SEARXNG
 # =============================================================================
 SEARXNG_URL         = os.environ.get("SEARXNG_URL", "http://localhost:8080")
+# Order the deep-research engine tries search backends. Comma-separated.
+# Default puts Tavily first (most reliable when a key is set). Once you've run
+# setup_searxng.sh, set DEEP_SEARCH_ORDER="searxng,duckduckgo,tavily" to make
+# your keyless SearXNG primary and keep Tavily only as a backup (saves quota).
+DEEP_SEARCH_ORDER   = os.environ.get("DEEP_SEARCH_ORDER", "tavily,searxng,duckduckgo")
 
 # =============================================================================
 # PERSONALITY ENGINE — emotion states
@@ -355,6 +360,10 @@ OPENROUTER_API_KEY  = OPENROUTER_KEYS[0]  if OPENROUTER_KEYS  else None
 # ── Provider URLs + models ────────────────────────────────────────────────────
 GROQ_URL    = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL  = "llama-3.3-70b-versatile"
+# Cheap/fast model for the deep-research cascade's per-page extraction step
+# (8B reads each scraped page → small grounded extract; the 70B model above
+# does the final synthesis). Keeps deep research cheap on the free tier.
+GROQ_EXTRACT_MODEL = "llama-3.1-8b-instant"
 
 GEMINI_URL   = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 GEMINI_MODEL  = "gemini-2.5-flash-lite"

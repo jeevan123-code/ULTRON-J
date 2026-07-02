@@ -24,6 +24,10 @@ from config import (
     TIER_CONFIG, SEARXNG_URL, JEEVAN_LOCATION, MAX_RETRY_ATTEMPTS,
     JEEVAN_NAME, AGENT_NAME,
 )
+try:
+    from config import TAVILY_API_KEY
+except ImportError:
+    TAVILY_API_KEY = None
 
 # ── Optional local search deps ────────────────────────────────────────────────
 try:
@@ -360,24 +364,76 @@ def _score_search_results(results: list, query: str) -> list:
 # DUCKDUCKGO SEARCH (BACKUP)
 # =============================================================================
 
+# DuckDuckGo blocks bursts of parallel requests from one IP. The deep-research
+# engine searches sub-queries concurrently, so without a guard every thread
+# hits DDG at once and they all get rate-limited. Serialize DDG calls with a
+# lock + a minimum gap so concurrent callers queue instead of hammering.
+_ddg_lock      = threading.Lock()
+_ddg_last_call = [0.0]
+_DDG_MIN_GAP   = 1.2  # seconds between DDG requests
+
+
 def search_duckduckgo(query: str, max_results: int = 5) -> list:
-    """Search DuckDuckGo as backup. Returns list of result dicts."""
+    """Search DuckDuckGo as backup. Serialized + throttled to avoid the
+    parallel-request rate limit. Returns list of result dicts."""
     if not DDGS_AVAILABLE:
         return []
+    with _ddg_lock:
+        gap = time.time() - _ddg_last_call[0]
+        if gap < _DDG_MIN_GAP:
+            time.sleep(_DDG_MIN_GAP - gap)
+        for attempt in range(2):
+            try:
+                with DDGS() as ddgs:
+                    raw = list(ddgs.text(query, max_results=max_results))
+                _ddg_last_call[0] = time.time()
+                return [
+                    {
+                        "title":   r.get("title", ""),
+                        "url":     r.get("href", r.get("link", "")),
+                        "snippet": r.get("body", r.get("snippet", ""))[:500],
+                        "source":  "duckduckgo",
+                    }
+                    for r in raw
+                ]
+            except Exception:
+                _ddg_last_call[0] = time.time()
+                if attempt == 0:
+                    time.sleep(2.0)  # back off once, then give up to the next backend
+    return []
+
+
+def search_tavily(query: str, max_results: int = 5) -> list:
+    """Search via the Tavily API (needs TAVILY_API_KEY). Tavily is built for
+    concurrent use and returns pre-extracted content, so it's the most reliable
+    backend when a key is present. Returns list of result dicts (same shape)."""
+    if not TAVILY_API_KEY:
+        return []
     try:
-        with DDGS() as ddgs:
-            raw = list(ddgs.text(query, max_results=max_results))
+        resp = requests.post(
+            "https://api.tavily.com/search",
+            json={
+                "api_key":       TAVILY_API_KEY,
+                "query":         query,
+                "search_depth":  "basic",
+                "max_results":   max_results,
+            },
+            timeout=12,
+        )
+        if resp.status_code == 200:
+            results = resp.json().get("results", [])[:max_results]
             return [
                 {
                     "title":   r.get("title", ""),
-                    "url":     r.get("href", r.get("link", "")),
-                    "snippet": r.get("body", r.get("snippet", ""))[:500],
-                    "source":  "duckduckgo",
+                    "url":     r.get("url", ""),
+                    "snippet": (r.get("content", "") or "")[:500],
+                    "source":  "tavily",
                 }
-                for r in raw
+                for r in results if r.get("url")
             ]
     except Exception:
-        return []
+        pass
+    return []
 
 # =============================================================================
 # WIKIPEDIA

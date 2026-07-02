@@ -397,13 +397,18 @@ def _call_openrouter_one_model(api_key: str, model: str, messages: list, tempera
 # BATCH (non-streaming)
 # =============================================================================
 
-def call_llm_batch(prompt: str, system: str = "", provider: str = None) -> str:
+def call_llm_batch(prompt: str, system: str = "", provider: str = None,
+                   model: str = None) -> str:
     sys_msg  = system or _get_personality_system_prompt()
     messages = [
         {"role": "system", "content": sys_msg},
         {"role": "user",   "content": prompt},
     ]
     provider = provider or determine_best_provider(prompt)
+    # `model` lets a caller pin a specific Groq model (e.g. the cheap 8B
+    # extractor in the deep-research cascade). When None, the default
+    # GROQ_MODEL (70B) is used, so existing callers are unaffected.
+    _groq_model = model or GROQ_MODEL
 
     if GROQ_KEYS and (provider == "groq" or provider not in ("gemini", "openrouter")):
         key = get_next_key("groq", GROQ_KEYS)
@@ -411,7 +416,7 @@ def call_llm_batch(prompt: str, system: str = "", provider: str = None) -> str:
             resp = requests.post(
                 GROQ_URL,
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json={"model": GROQ_MODEL, "messages": messages, "max_tokens": 2000, "stream": False},
+                json={"model": _groq_model, "messages": messages, "max_tokens": 2000, "stream": False},
                 timeout=60,
             )
             resp.raise_for_status()
@@ -438,7 +443,7 @@ def call_llm_batch(prompt: str, system: str = "", provider: str = None) -> str:
             resp = requests.post(
                 GROQ_URL,
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json={"model": GROQ_MODEL, "messages": messages, "max_tokens": 2000, "stream": False},
+                json={"model": _groq_model, "messages": messages, "max_tokens": 2000, "stream": False},
                 timeout=60,
             )
             resp.raise_for_status()

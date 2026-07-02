@@ -133,6 +133,65 @@ def _action_sse(msg: str, extra: dict = None, voice: bool = False, mood: str = "
             pass
     yield 'data: {"done": true}\n\n'
 
+
+def _deep_research_sse(question: str, session_id: str, voice: bool = False):
+    """
+    Stream a grounded, cited Deep Research answer.
+
+    Pipeline (research_engine): decompose → search → scrape pages → extract
+    per page (cheap 8B cascade) → cross-reference → synthesise (smart 70B),
+    answer locked to the scraped extracts with [n] citations. Every claim is
+    tied to a source; if nothing supports the question the engine says so
+    rather than inventing an answer.
+    """
+    import json as _j, base64 as _b64
+    # Status first — the pipeline can take 10-30s, so tell the UI it's working.
+    yield f"data: {_j.dumps({'type': 'status', 'token': '🔬 Deep research — searching and reading sources...'})}\n\n"
+
+    answer  = ""
+    sources = []
+    try:
+        from research_engine import research
+        result  = research(question, depth="deep")
+        answer  = (result.get("answer") or "").strip()
+        sources = result.get("sources", []) or []
+        if not answer:
+            answer = "I couldn't find sources that directly answer this question."
+    except Exception as e:
+        import traceback as _tb
+        _log_failure("research_engine", "research", str(e), {"question": question[:120]}, _tb.format_exc())
+        answer = f"Deep research is unavailable right now: {e}"
+
+    # Append a verifiable source list (the synthesiser is told NOT to add one).
+    answer_with_sources = answer
+    if sources:
+        lines = []
+        for i, s in enumerate(sources, 1):
+            title = (s.get("title") or s.get("domain") or s.get("url") or f"Source {i}").strip()
+            url   = s.get("url", "")
+            lines.append(f"{i}. [{title}]({url})" if url else f"{i}. {title}")
+        answer_with_sources = answer + "\n\n**Sources:**\n" + "\n".join(lines)
+
+    # Persist to chat history.
+    try:
+        sqlite_save_message(session_id, "user", question)
+        sqlite_save_message(session_id, "assistant", answer_with_sources)
+    except Exception:
+        pass
+
+    yield f"data: {_j.dumps({'_full': answer_with_sources, 'deep_research': True, 'source_count': len(sources)})}\n\n"
+
+    # Optional TTS — speak only the prose answer, not the citation list.
+    if voice and VOICE_AVAILABLE and answer:
+        try:
+            audio_bytes, _ = _tts_fn(answer[:300], mood=get_mood())
+            if audio_bytes:
+                yield f"data: {_j.dumps({'type': 'sentence', 'audio_b64': _b64.b64encode(audio_bytes).decode()})}\n\n"
+        except Exception:
+            pass
+
+    yield 'data: {"done": true}\n\n'
+
 # ── Task Orchestrator (used by /ask, /clarify/check via blueprints, etc.) ─────
 from task_orchestrator import orchestrate
 from project_conversation import (
@@ -612,6 +671,10 @@ def ask():
     # Text-only callers see byte-identical behaviour because voice_mode defaults
     # to False when the flag is absent.
     voice_mode = bool(data.get("voice"))
+    # Deep Research toggle. When ON, the request goes through the full
+    # multi-source scrape + cascade + cited-synthesis pipeline. When OFF
+    # (default), behaviour is exactly as before.
+    deep_mode  = bool(data.get("deep_research"))
 
     # Persist the user's dropdown selection so get_current_provider() (and
     # therefore /heartbeat → the "Provider" pill) reflects what's actually
@@ -643,6 +706,16 @@ def ask():
         set_mode(new_mode)
         return _quick_sse(f"Switched to {new_mode.upper()} mode.")
 
+
+    # ── Deep Research intercept ───────────────────────────────────────────────
+    # When the toggle is ON, run the full grounded research pipeline and stream
+    # a cited answer. This bypasses the normal intent/LLM routing on purpose.
+    if deep_mode:
+        return Response(
+            _deep_research_sse(question, session_id, voice_mode),
+            mimetype="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     # ── NEW: Orchestrator intercept (computer control, project builder) ───────────
     try:
