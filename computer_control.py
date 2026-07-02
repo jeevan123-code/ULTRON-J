@@ -159,7 +159,19 @@ def _show_capture_flash():
         "r.mainloop()"
     )
     try:
-        subprocess.Popen([sys.executable, "-c", flash_script])
+        # The flash is purely cosmetic. Detach it fully: redirect its std
+        # streams to DEVNULL so it can't hold the parent's inherited stdout/
+        # stderr pipe open (which blocks any reader — a shell pipe or a Flask
+        # response stream — if the tkinter mainloop fails to self-destruct on
+        # some window managers), and start_new_session so it never keeps the
+        # parent's process session / fds alive.
+        subprocess.Popen(
+            [sys.executable, "-c", flash_script],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
     except Exception:
         pass
 

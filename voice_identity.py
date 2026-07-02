@@ -90,13 +90,14 @@ except ImportError:
 try:
     import sounddevice as sd
     SOUNDDEVICE_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError):
+    # OSError = missing PortAudio C library (sounddevice raises OSError).
     SOUNDDEVICE_AVAILABLE = False
 
 try:
     import pyaudio
     PYAUDIO_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError):
     PYAUDIO_AVAILABLE = False
 
 

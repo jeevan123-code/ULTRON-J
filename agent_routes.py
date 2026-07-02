@@ -632,7 +632,10 @@ def agent_voice_briefing():
                      headers={"X-Briefing-Text": text[:300], "X-Mood": mood,
                               "Access-Control-Expose-Headers": "X-Briefing-Text,X-Mood"})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        # A missing optional dependency (edge-tts) or unavailable audio
+        # device is a degraded-mode 503, not a 500 crash.
+        from optional_feature import http_status_for
+        return jsonify({"error": str(e)}), http_status_for(e)
 
 # =============================================================================
 # COMPUTER CONTROL ROUTES — /agent/computer/*

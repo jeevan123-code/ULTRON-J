@@ -908,10 +908,16 @@ def execute_intent(intent: dict) -> dict:
                     [_sys.executable, path],
                     capture_output=True, text=True, timeout=60
                 )
-            elif ext in (".bat", ".sh"):
+            elif ext == ".sh":
+                # No shell=True: a filename with shell metacharacters could
+                # otherwise inject. Run via the interpreter with the path as a
+                # single argv element.
                 proc = subprocess.run(
-                    path, capture_output=True, text=True,
-                    timeout=60, shell=True
+                    ["bash", path], capture_output=True, text=True, timeout=60
+                )
+            elif ext == ".bat":
+                proc = subprocess.run(
+                    ["cmd", "/c", path], capture_output=True, text=True, timeout=60
                 )
             elif ext == ".ps1":
                 proc = subprocess.run(

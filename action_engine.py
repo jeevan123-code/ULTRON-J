@@ -513,13 +513,28 @@ def run_code_sandbox(code: str, timeout: int = None) -> dict:
         * /calculate-style expressions sent through `safe_calculate`
         * Trivial probes the agent runs against its own knowledge
 
-      What it MUST NOT be used for, without the Phase 7.3 confirm gate:
+      What it MUST NOT be used for:
         * LLM-generated code emitted by react_engine / brain_orchestrator
-          / proactive_planner -- any of those producing executable code
-          must funnel through confirm_gate.require_confirm before
-          reaching this function.
+          / proactive_planner / the autonomous goal loop.
         * Anything from a network / clipboard source the user didn't
           explicitly approve in the same interaction.
+
+      How that "MUST NOT" is actually enforced (defense in depth — there
+      is NO single confirm_gate call inside this function or inside
+      execute_action; the gating lives at each entry point that knows
+      whether the caller is a human or the autonomous brain):
+        1. Autonomous goal loop: execute_goal_step (this module) refuses
+           run_python / run_code unless the task carries an explicit
+           {"human_confirmed": True} marker (Phase 7.5 autonomy guard).
+        2. task_orchestrator: run_code is in _LLM_HIGH_RISK_ACTIONS, so an
+           LLM-planned run_code is staged in _PENDING_CONFIRM and requires
+           the user to say "yes" before it is dispatched.
+        3. react_engine: run_python / run_code are not in its tool
+           whitelist, so its ReAct loop can never reach them.
+        4. HTTP /run_code: gated by auth (loopback-only without API keys).
+        5. decision_engine.safety_check (called at the top of
+           execute_action) scans params["code"] for DANGEROUS_PATTERNS
+           before this function is ever reached.
 
       `_check_code_safety` (line 489) is a substring blocklist that
       catches the most obvious dangerous patterns ('import os',
@@ -730,6 +745,16 @@ def safe_calculate(expression: str) -> dict:
     for blocked in ["import", "exec", "eval", "open", "__", "os", "sys"]:
         if blocked in cleaned:
             return {"success": False, "error": "Expression contains blocked keyword"}
+
+    # Cap exponentiation to avoid a CPU/memory DoS. `9^9^9` becomes
+    # `9**9**9` (right-associative → 9**387420489), which can exhaust memory
+    # before eval ever returns. Reject chained exponentiation and any explicit
+    # exponent larger than 1000; ordinary expressions like 2**64 still work.
+    if cleaned.count("**") > 1:
+        return {"success": False, "error": "Chained exponentiation is not allowed"}
+    for exp in re.findall(r"\*\*\s*(\d+)", cleaned):
+        if int(exp) > 1000:
+            return {"success": False, "error": "Exponent too large (max 1000)"}
 
     try:
         result = eval(cleaned, {"__builtins__": {}, "math": math, "abs": abs, "round": round})

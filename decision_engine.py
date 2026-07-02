@@ -115,7 +115,14 @@ def safety_check(action: dict) -> tuple:
     if action_type not in ALLOWED_COMMANDS:
         return False, f"Action '{action_type}' not in allowed commands list."
 
-    cmd = str(params.get("command", "")) + str(params.get("content", ""))
+    # Scan command + content + code. run_python/run_code carry their payload
+    # in params["code"] (action_engine.execute_action), so omitting it made the
+    # dangerous-pattern layer a no-op for the normal code-execution path.
+    cmd = (
+        str(params.get("command", ""))
+        + str(params.get("content", ""))
+        + str(params.get("code", ""))
+    )
     for pattern in DANGEROUS_PATTERNS:
         if pattern.lower() in cmd.lower():
             return False, f"Dangerous pattern detected: '{pattern}'"

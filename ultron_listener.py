@@ -183,7 +183,9 @@ try:
     import numpy as np
     PYAUDIO_AVAILABLE = True
     SOUNDDEVICE_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError):
+    # OSError covers a missing PortAudio C library (sounddevice raises
+    # OSError, not ImportError, in that case).
     PYAUDIO_AVAILABLE = False
     SOUNDDEVICE_AVAILABLE = False
 

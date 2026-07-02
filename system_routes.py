@@ -105,7 +105,6 @@ def heartbeat():
         "loop_running":    is_loop_running(),
         "alerts":          alerts,
         "suggestions":     suggestions + agent_sug,
-        "loop_running":    is_loop_running(),
     })
 
 

@@ -251,9 +251,17 @@ def observe_environment() -> dict:
     # (read-only loop devices), so the old `any > 92` check fired every
     # cycle on a system with any snap installed and short-circuited the
     # entire goal-execution path into an alert spam.
+    # A path denylist can never enumerate every read-only pseudo-mount
+    # (AppImage, flatpak, loop devices, container bind-mounts), and a single
+    # unknown 100%-full read-only mount flips disk_critical and short-circuits
+    # the whole goal loop into alert-spam. Instead, treat a mount as a real
+    # disk only if it is not an obvious pseudo-mount AND is actually writable —
+    # read-only loop/squashfs mounts (always 100% full by design) are excluded.
     _PSEUDO_MOUNT_PREFIXES = ("/snap/", "/var/lib/docker/", "/proc/", "/sys/", "/dev/")
     def _is_real_disk(mountpoint: str) -> bool:
-        return not any(mountpoint.startswith(p) for p in _PSEUDO_MOUNT_PREFIXES)
+        if any(mountpoint.startswith(p) for p in _PSEUDO_MOUNT_PREFIXES):
+            return False
+        return os.access(mountpoint, os.W_OK)
     obs["disk_critical"] = any(
         d.get("percent", 0) > 92
         for mp, d in disk.items()

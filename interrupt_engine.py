@@ -40,7 +40,12 @@ except ImportError:
 try:
     import sounddevice as sd
     SOUNDDEVICE_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError):
+    # sounddevice raises OSError ("PortAudio library not found"), not
+    # ImportError, when the PortAudio C library is absent. Catching only
+    # ImportError let that OSError propagate out of this module's import,
+    # so any importer (e.g. the /analyze_document route, which needs no
+    # audio at all) hard-failed with 500 instead of degrading gracefully.
     SOUNDDEVICE_AVAILABLE = False
 
 

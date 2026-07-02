@@ -235,7 +235,6 @@ def _smart_patch(original: str, new_code: str, request: str) -> str:
     if func_match:
         func_name = func_match.group(1)
         # Find existing function in original
-        pattern = rf"^def {re.escape(func_name)}\(.*?(?=^def |\Z)", 
         orig_match = re.search(rf"^def {re.escape(func_name)}\(", original, re.MULTILINE)
         if orig_match:
             start = orig_match.start()
@@ -343,6 +342,30 @@ class SelfModifier:
                 patched = _smart_patch(original, new_code, request)
             else:
                 patched = new_code
+
+            # Reject patches that would introduce a SyntaxError into a .py
+            # file BEFORE writing. Without this, a broken patch to app.py (or
+            # any imported module) makes Ultron fail to import on next reload
+            # and it cannot self-restore because it cannot start. The original
+            # file is left untouched and the backup remains available.
+            if filename.endswith(".py"):
+                try:
+                    compile(patched, filepath, "exec")
+                except SyntaxError as e:
+                    _log({
+                        "action": "patch_rejected",
+                        "filename": filename,
+                        "error": f"SyntaxError at line {e.lineno}: {e.msg}",
+                        "backup": backup_path,
+                    })
+                    return {
+                        "success": False,
+                        "error": (
+                            f"patch rejected: would introduce SyntaxError "
+                            f"at line {e.lineno}: {e.msg}"
+                        ),
+                        "backup": backup_path,
+                    }
 
             # Write patched file
             with open(filepath, "w", encoding="utf-8") as f:

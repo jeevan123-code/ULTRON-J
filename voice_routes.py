@@ -404,7 +404,10 @@ def api_voice_briefing():
             },
         )
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        # Missing edge-tts / unavailable audio device → degraded-mode 503,
+        # not a 500 crash (see optional_feature + tests/test_route_smoke).
+        from optional_feature import http_status_for
+        return jsonify({"error": str(e)}), http_status_for(e)
 
 
 @voice_bp.route("/api/voice/log", methods=["GET"])
