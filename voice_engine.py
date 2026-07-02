@@ -1266,6 +1266,21 @@ def parse_voice_command(text: str) -> Optional[str]:
         except Exception:
             pass
 
+    # Phase 14/15: approve or reject a self-authored goal proposal by voice
+    # ("approve that" / "reject the proposal"). Only fires when a proposal is
+    # actually pending. Flag-gated by ULTRON_PHASE14_ENABLED.
+    import os as _os_p14
+    if _os_p14.environ.get("ULTRON_PHASE14_ENABLED", "0") == "1":
+        try:
+            import goal_author as _ga
+            _dec = _ga.handle_voice_decision(text)
+            if _dec is not None:
+                if _dec["decision"] == "approved":
+                    return f"Approved. I've created the goal: {_dec.get('title')}."
+                return f"Okay, I've dismissed that proposal: {_dec.get('title')}."
+        except Exception:
+            pass
+
     # Phase 10: plan_builder + chain_executor — turn utterance into a
     # multi-step chain. Sits AFTER all specific phase hooks (so Phase
     # 4/6/3b own their utterances) but BEFORE the Phase 1 pipeline (so

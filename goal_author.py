@@ -358,3 +358,45 @@ def reject(dedup_key: str) -> bool:
         state["pending"] = new_pending
         _save_state(state)
         return True
+
+
+# ── Voice decision NLU (pure) + handler ──────────────────────────────────────
+_APPROVE_RE = re.compile(r"\b(approve|accept|confirm|go ahead|do it)\b", re.I)
+_REJECT_RE = re.compile(r"\b(reject|dismiss|discard|decline|ignore|forget it)\b", re.I)
+_PROPOSAL_CUE_RE = re.compile(r"\b(propos\w*|suggestion|that|it|goal|idea)\b", re.I)
+_BARE_APPROVE = {"approve", "accept", "confirm", "yes", "do it", "go ahead"}
+_BARE_REJECT = {"reject", "dismiss", "discard", "decline", "no", "ignore it"}
+
+
+def match_proposal_command(text: str) -> Optional[str]:
+    """Return 'approve' / 'reject' if the utterance is a proposal decision,
+    else None. Conservative: needs a decision verb plus a referent cue (or an
+    exact bare command) so it doesn't hijack normal conversation."""
+    if not text:
+        return None
+    t = " ".join(text.strip().lower().split())
+    has_cue = bool(_PROPOSAL_CUE_RE.search(t))
+    if _APPROVE_RE.search(t) and (has_cue or t in _BARE_APPROVE):
+        return "approve"
+    if _REJECT_RE.search(t) and (has_cue or t in _BARE_REJECT):
+        return "reject"
+    return None
+
+
+def handle_voice_decision(text: str) -> Optional[Dict[str, Any]]:
+    """Approve/reject the MOST RECENT pending proposal by voice. Returns a
+    result dict when it handled the utterance, else None (so the caller falls
+    through to normal command parsing)."""
+    cmd = match_proposal_command(text)
+    if cmd is None:
+        return None
+    pending = list_pending()
+    if not pending:
+        return None
+    latest = pending[-1]
+    key = latest.get("dedup_key")
+    if cmd == "approve":
+        goal = approve(key)
+        return {"decision": "approved", "title": latest.get("title"), "goal": goal}
+    reject(key)
+    return {"decision": "rejected", "title": latest.get("title")}

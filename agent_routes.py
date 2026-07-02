@@ -196,6 +196,43 @@ def resume_goal(goal_id):
     return jsonify({"ok": True, "msg": "Goal resumed"})
 
 
+# ── Phase 14: self-authored goal proposals awaiting approval ──────────────────
+@agent_bp.route("/proposals", methods=["GET"])
+def list_proposals():
+    """Proposals Ultron authored for itself that are parked for approval."""
+    try:
+        import goal_author
+        pending = goal_author.list_pending()
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e), "proposals": []}), 200
+    return jsonify({"ok": True, "proposals": pending, "total": len(pending)})
+
+
+@agent_bp.route("/proposals/<path:dedup_key>/approve", methods=["POST"])
+def approve_proposal(dedup_key):
+    """Approve a parked proposal -> create the real goal."""
+    try:
+        import goal_author
+        goal = goal_author.approve(dedup_key)
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 200
+    if goal is None:
+        return jsonify({"ok": False, "msg": "No such proposal"}), 404
+    return jsonify({"ok": True, "goal": goal})
+
+
+@agent_bp.route("/proposals/<path:dedup_key>/reject", methods=["POST"])
+def reject_proposal(dedup_key):
+    """Drop a parked proposal without creating a goal."""
+    try:
+        import goal_author
+        removed = goal_author.reject(dedup_key)
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 200
+    return jsonify({"ok": bool(removed),
+                    "msg": "Rejected" if removed else "No such proposal"})
+
+
 @agent_bp.route("/goals/from_text", methods=["POST"])
 def goal_from_text():
     data = request.json or {}
