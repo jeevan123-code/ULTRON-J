@@ -34,6 +34,17 @@ def process_user_utterance(
         except Exception:
             pass
 
+    # Phase 5g: feed the utterance to the implicit shortcut learner so it can
+    # infer slang->canonical mappings from co-occurrence over time. Observation
+    # only — proposals are registered later by phase5g_implicit_hook.tick() in
+    # the mind loop. Flag-gated; failure is silent.
+    if _os_p5f.environ.get("ULTRON_PHASE5G_ENABLED", "0") == "1":
+        try:
+            from phase5g_implicit_hook import observe as _p5g_observe
+            _p5g_observe(raw)
+        except Exception:
+            pass
+
     parsed: ParsedUtterance = parse(raw)
     enriched: ParsedUtterance = ci.enrich(parsed, context)
     plan: ExecutionPlan = rl.plan(enriched, last_action=last_action)

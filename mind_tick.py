@@ -130,6 +130,23 @@ def _stage_improvement(now: float, summary: Dict[str, Any]) -> None:
         summary["improvement_error"] = repr(e)
 
 
+def _stage_shortcuts(now: float, summary: Dict[str, Any]) -> None:
+    """Phase 5g: register any newly-confident implicit shortcuts inferred from
+    observed utterances. Gated by ULTRON_PHASE5G_ENABLED so it stays off unless
+    the implicit learner is explicitly enabled."""
+    import os
+    if os.environ.get("ULTRON_PHASE5G_ENABLED", "0") != "1":
+        summary["shortcuts_learned"] = 0
+        return
+    try:
+        import phase5g_implicit_hook
+        written = phase5g_implicit_hook.tick()
+        summary["shortcuts_learned"] = len(written)
+    except Exception as e:
+        _safe_log(f"shortcut stage failed: {e!r}")
+        summary["shortcut_error"] = repr(e)
+
+
 def tick(now: float = None) -> Dict[str, Any]:
     """Run one unified mind tick across every Phase 3c/4/6 surface."""
     n = _now() if now is None else float(now)
@@ -138,8 +155,10 @@ def tick(now: float = None) -> Dict[str, Any]:
         "briefings_dispatched": 0,
         "world_alerts": 0,
         "improvement_offers": 0,
+        "shortcuts_learned": 0,
     }
     _stage_briefings(n, summary)
     _stage_world_alerts(n, summary)
     _stage_improvement(n, summary)
+    _stage_shortcuts(n, summary)
     return summary
