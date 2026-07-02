@@ -47,3 +47,13 @@ task_graphs/
 .env
 *.env
 .venv/
+
+# Secrets — encrypted vault + its derivation key. NEVER commit these.
+.vault_key
+vault/
+
+# Runtime state dirs / auto-backups (untracked by pattern luck before)
+shortcuts/
+ultron_screenshots/
+logs/
+*.json.bak
