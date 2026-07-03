@@ -266,6 +266,43 @@ def _auto_green_enabled() -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 # Orchestrator
 # ─────────────────────────────────────────────────────────────────────────────
+def _process_proposals(proposals: List[GoalProposal], state: Dict[str, Any],
+                       summary: Dict[str, int]) -> None:
+    """Run proposals through dedup -> safety gate -> create/park. Mutates
+    `state` and `summary`. Shared by author() and submit_proposals()."""
+    for p in proposals:
+        if _is_on_cooldown(state, p.dedup_key):
+            summary["deduped"] += 1
+            continue
+        tier = classify_safety(p)
+        if tier == SafetyTier.RED:
+            summary["dropped_red"] += 1
+            state.setdefault("seen", {})[p.dedup_key] = _now()
+            continue
+
+        # Any proposal we act on (create or park) is marked seen now.
+        state.setdefault("seen", {})[p.dedup_key] = _now()
+
+        if tier == SafetyTier.GREEN and _auto_green_enabled():
+            if _remaining_today(state) <= 0:
+                _park(state, p, tier)
+                summary["parked"] += 1
+                _notify(f"🤖 Ultron (capped) proposes: {p.title}")
+                continue
+            try:
+                _create_goal(p)
+                _bump_created(state)
+                summary["created"] += 1
+            except Exception:
+                _park(state, p, tier)
+                summary["parked"] += 1
+        else:
+            _park(state, p, tier)
+            summary["parked"] += 1
+            _notify(f"🤖 Ultron proposes ({tier.value}): {p.title} — "
+                    f"{p.rationale} Approve?")
+
+
 def author(observation: Dict[str, Any]) -> Dict[str, Any]:
     """Turn observations into self-authored goals / parked proposals.
 
@@ -278,41 +315,20 @@ def author(observation: Dict[str, Any]) -> Dict[str, Any]:
         state = _load_state()
         proposals = propose(observation or {})
         summary["proposed"] = len(proposals)
+        _process_proposals(proposals, state, summary)
+        _save_state(state)
+    return summary
 
-        for p in proposals:
-            if _is_on_cooldown(state, p.dedup_key):
-                summary["deduped"] += 1
-                continue
-            tier = classify_safety(p)
-            if tier == SafetyTier.RED:
-                summary["dropped_red"] += 1
-                # Record RED as seen too, so it isn't re-evaluated every cycle.
-                state.setdefault("seen", {})[p.dedup_key] = _now()
-                continue
 
-            # Any proposal we act on (create or park) is marked seen now.
-            state.setdefault("seen", {})[p.dedup_key] = _now()
-
-            if tier == SafetyTier.GREEN and _auto_green_enabled():
-                if _remaining_today(state) <= 0:
-                    # Cap hit — park instead of dropping so nothing is lost.
-                    _park(state, p, tier)
-                    summary["parked"] += 1
-                    _notify(f"🤖 Ultron (capped) proposes: {p.title}")
-                    continue
-                try:
-                    _create_goal(p)
-                    _bump_created(state)
-                    summary["created"] += 1
-                except Exception:
-                    _park(state, p, tier)
-                    summary["parked"] += 1
-            else:
-                _park(state, p, tier)
-                summary["parked"] += 1
-                _notify(f"🤖 Ultron proposes ({tier.value}): {p.title} — "
-                        f"{p.rationale} Approve?")
-
+def submit_proposals(proposals: List[GoalProposal]) -> Dict[str, Any]:
+    """Route externally-built proposals (e.g. from predictive_intervention)
+    through the same dedup / safety / cap / park pipeline as author()."""
+    summary = {"proposed": 0, "dropped_red": 0, "deduped": 0,
+               "created": 0, "parked": 0}
+    with _lock:
+        state = _load_state()
+        summary["proposed"] = len(proposals or [])
+        _process_proposals(list(proposals or []), state, summary)
         _save_state(state)
     return summary
 
