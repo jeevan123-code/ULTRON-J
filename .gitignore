@@ -60,3 +60,4 @@ logs/
 goal_author_state.json
 beliefs.json
 belief_consolidation_state.json
+proactive_orchestrator_state.json
