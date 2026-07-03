@@ -61,3 +61,5 @@ goal_author_state.json
 beliefs.json
 belief_consolidation_state.json
 proactive_orchestrator_state.json
+self_modify_proposals.json
+self_modify_ledger.json
