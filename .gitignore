@@ -63,3 +63,25 @@ belief_consolidation_state.json
 proactive_orchestrator_state.json
 self_modify_proposals.json
 self_modify_ledger.json
+
+# Runtime state that newer phases started writing. These were untracked only by
+# luck — one `git add .` away from being committed, which is exactly what the
+# "never git add -A" rule exists to prevent.
+app_control_log.json
+approval_settings.json
+distiller_state.json
+research_queue.json
+self_modify_log.json
+_test_workspace/
+
+# Runtime state that WAS tracked (an ignore rule does not untrack an already
+# tracked file — these needed an explicit `git rm --cached`). They carry local
+# activity data and made `git status` permanently dirty.
+computer_action_log.json
+notes.json
+predictive_metrics.json
+proactive_state.json
+proactive_suggestions.json
+
+# Archive scratch files
+_archive/.tmp_*
