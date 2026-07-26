@@ -92,16 +92,21 @@ print("="*80)
 print("ULTRON WIRING AUDIT")
 print("="*80)
 
-# Section A — modules never imported by any other local module
+# Section A — modules never imported by any other local module.
+# Delegated to orphan_guard so the human report and the test-suite gate
+# (tests/test_no_new_orphans.py) can never disagree. orphan_guard also counts
+# string-loaded modules (`_safe_import("evolution_loop")`), which the Import-node
+# walk above cannot see and which this section used to report as false orphans.
+import orphan_guard
+
 print("\n## A — Modules with NO local importers (potential orphans)\n")
-orphans = []
-for mod in sorted(PY_NAMES):
-    if mod in EXCLUDE: continue
-    imps = importers_of.get(mod, set())
-    if not imps:
-        orphans.append(mod)
-        print(f"  {mod}")
-print(f"\n  total orphans: {len(orphans)}")
+orphans = orphan_guard.find_orphans(ROOT)
+for mod in orphans:
+    note = orphan_guard.ALLOWED_ORPHANS.get(mod)
+    print(f"  {mod}" + (f"   [allowed: {note}]" if note else "   <-- UNWIRED"))
+unexpected = orphan_guard.unexpected_orphans(ROOT)
+print(f"\n  total orphans: {len(orphans)}  "
+      f"({len(unexpected)} unexpected: {unexpected or 'none'})")
 
 # Section B — modules imported by exactly ONE other module
 print("\n## B — Weak coupling (imported by exactly 1 file)\n")
@@ -159,7 +164,12 @@ out = {
     "unreferenced_defs_by_module": {m: by_mod[m] for m in by_mod if m not in EXCLUDE},
     "heavy_connectors": heavy[:15],
 }
-out_path = os.path.join(ROOT, "_test_workspace", "results", "session_2026_05_16_late", "wiring_audit.json")
+# Output location is derived, never a baked-in session name (the old path was
+# hardcoded to "session_2026_05_16_late", so every later run overwrote a folder
+# named after an unrelated May session). Override with ULTRON_AUDIT_OUT.
+out_dir = os.environ.get("ULTRON_AUDIT_OUT") or os.path.join(
+    ROOT, "_test_workspace", "results")
+out_path = os.path.join(out_dir, "wiring_audit.json")
 os.makedirs(os.path.dirname(out_path), exist_ok=True)
 with open(out_path, "w") as f:
     json.dump(out, f, indent=2, default=str)
