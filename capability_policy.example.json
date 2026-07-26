@@ -1,0 +1,28 @@
+{
+  "_README": [
+    "Copy to capability_policy.json to override the built-in tier table in",
+    "capability_policy.py. Keys are action_type names as passed to",
+    "action_engine.execute_action; values are 'green', 'amber' or 'red'.",
+    "",
+    "  green — read-only / additive. Runs freely.",
+    "  amber — mutates data, apps or external services. Needs approval",
+    "          (task['human_confirmed'] = True).",
+    "  red   — destructive / code-exec / self-modify / send / spend.",
+    "          Never allowed autonomously, approved or not.",
+    "",
+    "Overrides only RAISE or LOWER the starting tier. The live escalation",
+    "layers still run on top: confirm_gate can push a tier to AMBER and",
+    "decision_engine.safety_check can push it to RED, and the strictest",
+    "verdict wins. An unknown action the safety whitelist does not",
+    "recognise resolves to RED, and if an escalation layer cannot answer at",
+    "all the action is denied — the gate fails closed, never open.",
+    "",
+    "So lowering something to 'green' here is a request, not a guarantee.",
+    "This file is optional; with it absent the built-in table is used.",
+    "Unparseable values are skipped rather than crashing the engine."
+  ],
+
+  "open_url": "amber",
+  "screenshot": "green",
+  "send_email": "red"
+}
