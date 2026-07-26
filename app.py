@@ -291,6 +291,16 @@ except ImportError as e:
 except Exception as e:
     print(f"[app] Ultimate routes init error: {e}")
 
+# ── Phase 18: continuous vision loop (Tier-2 embodiment) ──────────────────────
+# Off unless ULTRON_PHASE18_ENABLED=1. Needs a camera + cv2; the hook degrades
+# to "did not start" when either is missing, so this can never block boot.
+try:
+    import phase18_vision_hook
+    if phase18_vision_hook.start():
+        print("[app] Phase 18 vision loop started")
+except Exception as e:
+    print(f"[app] Phase 18 vision loop init error: {e}")
+
 # ── BEYOND JARVIS: app_additions integration ──────────────────────────────────
 try:
     from app_additions import register_beyond_jarvis_routes, start_beyond_jarvis

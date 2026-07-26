@@ -179,6 +179,57 @@ def _stage_predictive(now: float, summary: Dict[str, Any]) -> None:
         summary["predictive_error"] = repr(e)
 
 
+def _orchestration_context() -> Dict[str, Any]:
+    """Build the situational context the Phase 20 rules are evaluated against.
+
+    Deliberately cheap and dependency-free: this runs every tick. Optional
+    signals are added only if their source is available.
+    """
+    from datetime import datetime
+    dt = datetime.now()
+    hour = dt.hour
+    if 5 <= hour < 12:
+        part = "morning"
+    elif 12 <= hour < 17:
+        part = "afternoon"
+    elif 17 <= hour < 22:
+        part = "evening"
+    else:
+        part = "night"
+    context: Dict[str, Any] = {
+        "hour": hour,
+        "minute": dt.minute,
+        "weekday": dt.weekday(),
+        "is_weekend": dt.weekday() >= 5,
+        "time_of_day": part,
+    }
+    try:  # optional — absent on a headless box, must never break the tick
+        from system_monitor import get_system_health_score
+        context["system_health"] = get_system_health_score()
+    except Exception:
+        pass
+    return context
+
+
+def _stage_orchestration(now: float, summary: Dict[str, Any]) -> None:
+    """Phase 20: evaluate proactive device scenarios against the current
+    context. Gated by ULTRON_PHASE20_ENABLED; actions are PARKED for approval
+    unless ULTRON_PHASE20_AUTO is also set. Rules are user-supplied via
+    proactive_orchestrator.register_rule(), so with none registered this is a
+    no-op that reports zero."""
+    import os
+    if os.environ.get("ULTRON_PHASE20_ENABLED", "0") != "1":
+        summary["device_scenarios"] = 0
+        return
+    try:
+        import proactive_orchestrator
+        r = proactive_orchestrator.orchestrate(_orchestration_context(), now=now)
+        summary["device_scenarios"] = r.get("fired", 0)
+    except Exception as e:
+        _safe_log(f"orchestration stage failed: {e!r}")
+        summary["orchestration_error"] = repr(e)
+
+
 def tick(now: float = None) -> Dict[str, Any]:
     """Run one unified mind tick across every Phase 3c/4/6 surface."""
     n = _now() if now is None else float(now)
@@ -190,6 +241,7 @@ def tick(now: float = None) -> Dict[str, Any]:
         "shortcuts_learned": 0,
         "beliefs_consolidated": 0,
         "predictive_interventions": 0,
+        "device_scenarios": 0,
     }
     _stage_briefings(n, summary)
     _stage_world_alerts(n, summary)
@@ -197,4 +249,5 @@ def tick(now: float = None) -> Dict[str, Any]:
     _stage_shortcuts(n, summary)
     _stage_beliefs(n, summary)
     _stage_predictive(n, summary)
+    _stage_orchestration(n, summary)
     return summary

@@ -128,6 +128,50 @@ def voice_status():
     return jsonify(status)
 
 
+# ── Phase 19: full-duplex conversation state ─────────────────────────────────
+# The duplex controller decides (barge-in, follow-up without a wake word); the
+# client drives it and performs the returned actions. Purely additive — the
+# existing half-duplex path is untouched, so adopting this is a client choice.
+@voice_bp.route("/api/voice/duplex/state", methods=["GET"])
+def voice_duplex_state():
+    """Current duplex state for a session. Read-only."""
+    session_id = request.args.get("session_id", "voice_default")
+    try:
+        import phase19_duplex_hook
+        return jsonify(phase19_duplex_hook.snapshot(session_id))
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 200
+
+
+@voice_bp.route("/api/voice/duplex/event", methods=["POST"])
+def voice_duplex_event():
+    """Feed one conversation event in; get the actions the client should run."""
+    data = request.json or {}
+    event = (data.get("event") or "").strip()
+    if not event:
+        return jsonify({"ok": False, "error": "event is required"}), 400
+    try:
+        import phase19_duplex_hook
+        result = phase19_duplex_hook.handle(
+            data.get("session_id", "voice_default"), event,
+            text=data.get("text", ""))
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 200
+    return jsonify(result), (200 if result.get("ok") else 400)
+
+
+@voice_bp.route("/api/voice/duplex/reset", methods=["POST"])
+def voice_duplex_reset():
+    """Drop a session's conversation state."""
+    data = request.json or {}
+    try:
+        import phase19_duplex_hook
+        phase19_duplex_hook.reset(data.get("session_id", "voice_default"))
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 200
+    return jsonify({"ok": True})
+
+
 @voice_bp.route("/api/voice/speak", methods=["POST"])
 def api_voice_speak():
     """

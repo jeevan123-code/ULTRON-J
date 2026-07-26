@@ -233,6 +233,114 @@ def reject_proposal(dedup_key):
                     "msg": "Rejected" if removed else "No such proposal"})
 
 
+# ── Phase 23: approval-gated self-modification ────────────────────────────────
+# The queue Ultron writes to when it wants to change its own code. Built and
+# tested in Phase 23 but never given a human surface, which made an
+# "approval-gated" feature unreachable by the approver.
+#
+# SAFETY INVARIANT: nothing here applies a patch except an explicit POST to
+# .../approve. Listing, reading and the ledger are read-only, and staging a
+# proposal never applies it. Ungated by flag for the same reason the Phase 15
+# proposal routes are — a review surface you have to enable is a review surface
+# nobody uses; the gate is the human, not the env var.
+@agent_bp.route("/self_modify/proposals", methods=["GET"])
+def list_self_modify_proposals():
+    """Self-modifications staged for human review. Read-only."""
+    try:
+        import self_modify_proposals
+        pending = self_modify_proposals.list_pending()
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e), "proposals": []}), 200
+    return jsonify({"ok": True, "proposals": pending, "total": len(pending)})
+
+
+@agent_bp.route("/self_modify/proposals", methods=["POST"])
+def stage_self_modify_proposal():
+    """Stage a patch for review. Validates target + syntax; does NOT apply."""
+    data = request.json or {}
+    filename = (data.get("filename") or "").strip()
+    new_code = data.get("new_code") or ""
+    if not filename or not new_code:
+        return jsonify({"ok": False, "msg": "filename and new_code are required"}), 400
+    try:
+        import self_modify_proposals
+        result = self_modify_proposals.propose(
+            filename, new_code,
+            request=data.get("request", ""), rationale=data.get("rationale", ""))
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 200
+    if not result.get("ok"):
+        return jsonify({"ok": False, "msg": result.get("error", "rejected")}), 200
+    return jsonify(result)
+
+
+@agent_bp.route("/self_modify/proposals/<proposal_id>", methods=["GET"])
+def get_self_modify_proposal(proposal_id):
+    """Full detail of one proposal, including the patch body. Read-only."""
+    try:
+        import self_modify_proposals
+        entry = self_modify_proposals.get(proposal_id)
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 200
+    if entry is None:
+        return jsonify({"ok": False, "msg": "No such proposal"}), 404
+    return jsonify({"ok": True, "proposal": entry})
+
+
+@agent_bp.route("/self_modify/proposals/<proposal_id>/approve", methods=["POST"])
+def approve_self_modify_proposal(proposal_id):
+    """THE ONLY PATH THAT WRITES CODE. Requires a deliberate human POST."""
+    try:
+        import self_modify_proposals
+        result = self_modify_proposals.approve(proposal_id)
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 200
+    if not result.get("ok"):
+        err = result.get("error", "approve failed")
+        code = 404 if "no such proposal" in err.lower() else 200
+        return jsonify({"ok": False, "msg": err}), code
+    return jsonify(result)
+
+
+@agent_bp.route("/self_modify/proposals/<proposal_id>/reject", methods=["POST"])
+def reject_self_modify_proposal(proposal_id):
+    """Drop a staged patch without applying it."""
+    try:
+        import self_modify_proposals
+        removed = self_modify_proposals.reject(proposal_id)
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 200
+    if not removed:
+        return jsonify({"ok": False, "msg": "No such pending proposal"}), 404
+    return jsonify({"ok": True, "msg": "Rejected"})
+
+
+@agent_bp.route("/self_modify/proposals/<proposal_id>/rollback", methods=["POST"])
+def rollback_self_modify_proposal(proposal_id):
+    """Undo an applied patch from its backup."""
+    try:
+        import self_modify_proposals
+        result = self_modify_proposals.rollback(proposal_id)
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 200
+    if not result.get("ok"):
+        err = result.get("error", "rollback failed")
+        code = 404 if "no applied proposal" in err.lower() else 200
+        return jsonify({"ok": False, "msg": err}), code
+    return jsonify(result)
+
+
+@agent_bp.route("/self_modify/ledger", methods=["GET"])
+def self_modify_ledger():
+    """Append-only history of every propose/apply/reject/rollback. Read-only."""
+    try:
+        import self_modify_proposals
+        entries = self_modify_proposals.get_ledger()
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e), "ledger": []}), 200
+    return jsonify({"ok": True, "ledger": entries, "total": len(entries)})
+
+
 @agent_bp.route("/goals/from_text", methods=["POST"])
 def goal_from_text():
     data = request.json or {}

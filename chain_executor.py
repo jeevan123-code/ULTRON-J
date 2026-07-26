@@ -260,3 +260,45 @@ def execute_chain(plan: ExecutionPlan,
         break
 
     return results
+
+
+# ── Phase 21: multi-agent fan-out ────────────────────────────────────────────
+def execute_parallel(agents, max_workers: int = 4,
+                     per_agent_timeout: float = 60.0) -> Dict[str, Any]:
+    """Run several INDEPENDENT plans as sub-agents and merge their results.
+
+    `execute_chain` runs one plan sequentially; this is the seam where the
+    Phase 21 swarm coordinator hangs off it. `agents` is a list of
+    `swarm_coordinator.SubAgent(name, role, plan)`.
+
+    ULTRON_PHASE21_ENABLED controls PARALLELISM, not existence: with the flag
+    off every plan still runs, just one at a time and in order. A fan-out that
+    silently did nothing when disabled would recreate the orphan it fixes.
+
+    Failure isolation holds on both paths — one agent raising, failing or
+    timing out never stops the others.
+    """
+    import os
+    import swarm_coordinator
+
+    if not agents:
+        return swarm_coordinator.summarize({})
+
+    if os.environ.get("ULTRON_PHASE21_ENABLED", "0") == "1":
+        return swarm_coordinator.run_swarm(
+            agents, max_workers=max_workers,
+            per_agent_timeout=per_agent_timeout)
+
+    # Sequential fallback — same merge logic, so callers see one shape.
+    out: Dict[str, Dict[str, Any]] = {}
+    for agent in agents:
+        entry: Dict[str, Any] = {"role": agent.role}
+        try:
+            results = execute_chain(agent.plan)
+            entry["results"] = results
+            entry["ok"] = swarm_coordinator._results_ok(results)
+        except Exception as e:
+            entry["ok"] = False
+            entry["error"] = repr(e)
+        out[agent.name] = entry
+    return swarm_coordinator.summarize(out)
