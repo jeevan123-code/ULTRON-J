@@ -1267,8 +1267,22 @@ def execute_goal_step(goal_id: str, task: dict) -> dict:
                 log_execution(goal_id, task.get("id", "?"), action_type,
                               refusal["error"], False)
                 return refusal
-        except Exception:
-            pass  # policy failure must not crash the loop; fall through
+        except Exception as _e_p17:
+            # FAIL CLOSED. A gate that cannot run must refuse, not wave the
+            # action through — falling through would silently restore
+            # pre-Phase-17 (ungated) behaviour on the autonomous path, which
+            # is exactly the situation the gate exists to prevent.
+            refusal = {
+                "success": False, "result": "",
+                "error": (f"capability policy unavailable — refusing "
+                          f"'{action_type}': {_e_p17!r}"),
+            }
+            try:
+                log_execution(goal_id, task.get("id", "?"), action_type,
+                              refusal["error"], False)
+            except Exception:
+                pass  # a logging fault must not mask the refusal
+            return refusal
 
     update_goal(goal_id, status=GoalStatus.EXECUTING)
 

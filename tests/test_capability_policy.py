@@ -70,3 +70,61 @@ def test_disk_override_changes_tier(monkeypatch, tmp_path):
     pf.write_text(json.dumps({"open_url": "green"}))
     monkeypatch.setattr(cp, "_POLICY_FILE", str(pf))
     assert evaluate("open_url", {"url": "http://x"}).tier == Tier.GREEN
+
+
+# ── FAIL-CLOSED: a broken escalation layer must never widen authority ───────
+# A safety control whose failure mode is "allow" is not a safety control. If a
+# layer cannot render a verdict we assume the worst verdict it could have given.
+def test_safety_check_raising_fails_closed_to_red(monkeypatch):
+    import decision_engine
+
+    def _boom(*a, **k):
+        raise RuntimeError("simulated safety_check failure")
+
+    monkeypatch.setattr(decision_engine, "safety_check", _boom)
+    d = evaluate("some_unknown_tool")
+    assert d.tier == Tier.RED, "unknown action must not degrade RED->AMBER"
+    assert "unavailable" in d.reason
+
+
+def test_safety_check_raising_denies_even_when_approved(monkeypatch):
+    import decision_engine
+
+    monkeypatch.setattr(
+        decision_engine, "safety_check",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
+    assert enforce("some_unknown_tool", {}, approved=True)["allowed"] is False
+
+
+def test_safety_check_import_failure_fails_closed(monkeypatch):
+    # Simulate decision_engine being entirely unimportable.
+    import builtins
+    real_import = builtins.__import__
+
+    def _blocked(name, *a, **k):
+        if name == "decision_engine":
+            raise ImportError("simulated missing module")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", _blocked)
+    assert evaluate("file_read").tier == Tier.RED
+
+
+def test_confirm_gate_raising_escalates_to_amber_minimum(monkeypatch):
+    # confirm_gate can only ever raise the floor to AMBER; if it breaks we
+    # cannot rule out "destructive", so a GREEN action must not stay GREEN.
+    import confirm_gate
+
+    monkeypatch.setattr(
+        confirm_gate, "is_destructive",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
+    d = evaluate("file_read")
+    assert d.tier != Tier.GREEN
+    assert "unavailable" in d.reason
+
+
+def test_healthy_path_is_unchanged():
+    # Regression guard: the fail-closed logic must not alter normal operation.
+    assert evaluate("file_read").tier == Tier.GREEN
+    assert evaluate("file_write", {"path": "/tmp/x", "content": "y"}).tier == Tier.AMBER
+    assert evaluate("delete_file", {"path": "/tmp/x"}).tier == Tier.RED

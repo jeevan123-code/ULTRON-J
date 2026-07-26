@@ -13,6 +13,14 @@ capability_policy.json — no hardcoding), then ESCALATES using the existing
 `confirm_gate` and `decision_engine.safety_check` signals, and returns the
 STRICTEST tier. `enforce()` turns a tier into an allow/deny with an approval
 gate for AMBER.
+
+FAIL-CLOSED CONTRACT: if an escalation layer cannot render a verdict (raises,
+or is unimportable) the action is treated as if that layer had returned its
+WORST verdict — confirm_gate unavailable → AMBER floor, safety_check
+unavailable → RED. An error must never widen authority; a control whose
+failure mode is "allow" is not a control. The call site in
+`action_engine.execute_goal_step` upholds the same contract: a policy fault
+refuses the action rather than falling through to execution.
 """
 import json
 import os
@@ -129,8 +137,11 @@ def evaluate(action_type: str, params: Optional[Dict[str, Any]] = None) -> Polic
         if destructive:
             tier = _strictest(tier, Tier.AMBER)
             reason = f"destructive: {why}"
-    except Exception:
-        pass
+    except Exception as e:
+        # FAIL CLOSED. A classifier that cannot answer has not cleared the
+        # action, so assume the worst verdict it could have returned.
+        tier = _strictest(tier, Tier.AMBER)
+        reason = f"confirm_gate unavailable ({e!r}) — assuming destructive"
 
     # Escalate to RED if the safety layer rejects it outright (dangerous
     # pattern in command/content/code, restricted path, etc.).
@@ -140,8 +151,11 @@ def evaluate(action_type: str, params: Optional[Dict[str, Any]] = None) -> Polic
         if not ok:
             tier = Tier.RED
             reason = f"safety_check blocked: {why}"
-    except Exception:
-        pass
+    except Exception as e:
+        # FAIL CLOSED. Without a safety verdict we deny; an error must never
+        # widen authority. This is what makes deny-by-default hold under fault.
+        tier = Tier.RED
+        reason = f"safety_check unavailable ({e!r}) — denying"
 
     return PolicyDecision(tier=tier, reason=reason)
 
