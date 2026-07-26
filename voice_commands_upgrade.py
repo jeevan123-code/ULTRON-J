@@ -195,6 +195,46 @@ UPGRADED_VOICE_CMDS = {
 }
 
 
+def _open_path(target) -> bool:
+    """Open a file or folder in the OS file manager. NEVER through a shell.
+
+    The old form was `Popen(f'explorer "{path}"', shell=True)`, which builds a
+    command line out of a value derived from speech — the same class of bug the
+    hardening batch removed from intent_router. List-form argv keeps the path a
+    single argument no matter what characters it contains.
+    """
+    target = str(target)
+    try:
+        if platform.system() == "Windows":
+            os.startfile(target)          # no shell, no quoting to get wrong
+        elif platform.system() == "Darwin":
+            subprocess.Popen(["open", target])
+        else:
+            subprocess.Popen(["xdg-open", target])
+        return True
+    except Exception:
+        return False
+
+
+def _launch_app(name: str) -> bool:
+    """Launch an application by name using list-form argv only.
+
+    A name captured from speech must never be concatenated into a shell command
+    line; on Windows `Popen(app, shell=True)` would happily run `calc & del ...`.
+    """
+    try:
+        subprocess.Popen([name])
+        return True
+    except Exception:
+        if platform.system() == "Windows":
+            try:
+                os.startfile(name)
+                return True
+            except Exception:
+                return False
+        return False
+
+
 def parse_upgraded_voice_command(text: str) -> Optional[str]:
     """Parse voice command — returns command string or None."""
     tl = text.lower().strip()
@@ -293,7 +333,8 @@ def execute_upgraded_voice_command(command: str, session_id: str = "default") ->
         }
         path = paths.get(folder_name.lower(), Path.home() / folder_name.title())
         try:
-            subprocess.Popen(f'explorer "{path}"', shell=True)
+            if not _open_path(path):
+                return f"Could not open {folder_name}."
             return f"Opening {folder_name}."
         except Exception:
             return f"Could not open {folder_name}."
@@ -318,10 +359,8 @@ def execute_upgraded_voice_command(command: str, session_id: str = "default") ->
     if command.startswith("OPEN_APP:"):
         app = command.split(":", 1)[1]
         try:
-            if platform.system() == "Windows":
-                subprocess.Popen(app, shell=True)
-            else:
-                subprocess.Popen([app])
+            if not _launch_app(app):
+                return f"Could not open {app}."
             return f"Opening {app}."
         except Exception as e:
             return f"Could not open {app}: {e}"
@@ -353,7 +392,7 @@ def execute_upgraded_voice_command(command: str, session_id: str = "default") ->
 
     if command == "OPEN_PROJECT_FOLDER":
         try:
-            subprocess.Popen(f'explorer "{_WORK_DIR}"', shell=True)
+            _open_path(_WORK_DIR)
             return "Opening your projects folder."
         except Exception:
             return "Could not open projects folder."
