@@ -154,3 +154,9 @@ websocket-client==1.9.0
 websockets==16.0
 Werkzeug==3.1.8
 yarl==1.24.2
+
+# Browser rendering for research: pages that build their content with
+# JavaScript return an empty shell to a plain fetch. research_engine retries
+# those through a real browser. Optional — every path degrades without it.
+# After install:  python -m playwright install chromium
+playwright

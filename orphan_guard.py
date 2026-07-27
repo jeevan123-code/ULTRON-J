@@ -35,14 +35,9 @@ ALLOWED_ORPHANS: Dict[str, str] = {
     "setup_integrations": "one-shot setup script",
     # Stray root-level test file, kept out of tests/ — pre-existing.
     "test_t17": "stray root-level test file (pre-existing debt)",
-    # ── GRANDFATHERED pre-existing orphans ────────────────────────────────
-    # Genuinely unreachable, but they predate this guard and wiring them is a
-    # separate decision (wire or retire). Listed so the ratchet only catches
-    # NEW orphans. Shrink this dict; never grow it.
-    "auto_research_loop": "PRE-EXISTING orphan — wire or retire (tracked debt)",
-    "scenarios_builtin": "PRE-EXISTING orphan — wire or retire (tracked debt)",
-    "world_event_poller": "PRE-EXISTING orphan — wire or retire (tracked debt)",
-    "world_event_sources": "PRE-EXISTING orphan — wire or retire (tracked debt)",
+    # The four grandfathered orphans are gone — all were wired via
+    # startup_wiring.py rather than retired, because each was the missing half
+    # of a feature that already had consumers.
 }
 
 # Non-production noise at the repo root (ad-hoc scratch/test files).

@@ -291,6 +291,17 @@ except ImportError as e:
 except Exception as e:
     print(f"[app] Ultimate routes init error: {e}")
 
+# ── Startup wiring for previously-unconnected features ───────────────────────
+# Scenario registry (Phase 4) is filled unconditionally; the world-event poller
+# and auto-research loop poll the network and stay behind their own flags.
+# Without this, worldfeed_store had no writer at all and every consumer of it
+# was reading an empty table.
+try:
+    import startup_wiring
+    print(f"[app] startup wiring: {startup_wiring.wire_all()}")
+except Exception as e:
+    print(f"[app] startup wiring error: {e}")
+
 # ── Phase 18: continuous vision loop (Tier-2 embodiment) ──────────────────────
 # Off unless ULTRON_PHASE18_ENABLED=1. Needs a camera + cv2; the hook degrades
 # to "did not start" when either is missing, so this can never block boot.
