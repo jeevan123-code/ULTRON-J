@@ -260,19 +260,32 @@ def test_curated_phrase_dispatch(phrase, expected_type):
 
 # ─── Snapshot writer ──────────────────────────────────────────────────────────
 
-def _write_snapshot():
-    path = ROOT / "BASELINE_CAPABILITIES.txt"
-    pass_n = sum(1 for _, s, _ in RESULTS if s == "PASS")
-    fail_n = sum(1 for _, s, _ in RESULTS if s == "FAIL")
-    skip_n = sum(1 for _, s, _ in RESULTS if s == "SKIP")
+def _snapshot_lines(results):
+    """Render the capability table.
+
+    PASSing rows deliberately carry NO detail. They used to record whatever the
+    check happened to output — pytest tmpdir ids, live weather readings — which
+    made this tracked file differ on every run, so `git status` was never clean
+    and real changes to it went unnoticed. The table's contract is which
+    capabilities work; detail is kept where it is diagnostic, on FAIL and SKIP.
+    """
+    pass_n = sum(1 for _, s, _ in results if s == "PASS")
+    fail_n = sum(1 for _, s, _ in results if s == "FAIL")
+    skip_n = sum(1 for _, s, _ in results if s == "SKIP")
     lines = [
         "=== ULTRON-J CAPABILITY TABLE ===",
-        f"PASS={pass_n}  FAIL={fail_n}  SKIP={skip_n}  TOTAL={len(RESULTS)}",
+        f"PASS={pass_n}  FAIL={fail_n}  SKIP={skip_n}  TOTAL={len(results)}",
         "",
     ]
-    for name, status, detail in RESULTS:
-        lines.append(f"{status:4}  {name:50s}  {detail}")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    for name, status, detail in results:
+        shown = "" if status == "PASS" else (detail or "")
+        lines.append(f"{status:4}  {name:50s}  {shown}".rstrip())
+    return lines
+
+
+def _write_snapshot():
+    path = ROOT / "BASELINE_CAPABILITIES.txt"
+    path.write_text("\n".join(_snapshot_lines(RESULTS)) + "\n", encoding="utf-8")
 
 
 def teardown_module(_):
