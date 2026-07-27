@@ -13,6 +13,7 @@ ULTIMATE UPGRADES:
 """
 
 import json
+import re
 import time
 import datetime
 import hashlib
@@ -438,6 +439,50 @@ def search_tavily(query: str, max_results: int = 5) -> list:
 # =============================================================================
 # WIKIPEDIA
 # =============================================================================
+
+_WIKI_API = "https://en.wikipedia.org/w/api.php"
+
+
+def search_wikipedia_hits(query: str, max_results: int = 5) -> list:
+    """Wikipedia search as a normal backend, in the shared hit shape.
+
+    Added because as of 2026-07-26 every other keyless backend refuses us:
+    DuckDuckGo (html and lite) answers HTTP 202 with zero results, Brave Search
+    and Bing serve CAPTCHAs, Google blocks outright, and the public SearXNG
+    instances all declined. The MediaWiki API answers in ~1s and does not block.
+
+    Narrower than a web search, but it is the one keyless source that works —
+    and it is high-authority, which is what the ranking pass wants anyway.
+    """
+    try:
+        resp = requests.get(
+            _WIKI_API,
+            params={"action": "query", "list": "search", "srsearch": query,
+                    "format": "json", "srlimit": max(1, int(max_results))},
+            headers={"User-Agent": "Ultron-J/1.0 (research assistant)"},
+            timeout=12,
+        )
+        if getattr(resp, "status_code", 0) != 200:
+            return []
+        hits = (resp.json() or {}).get("query", {}).get("search", []) or []
+    except Exception:
+        return []
+
+    out = []
+    for h in hits[:max_results]:
+        title = h.get("title") or ""
+        if not title:
+            continue
+        # The API marks matches with <span class="searchmatch">…</span>.
+        snippet = re.sub(r"<[^>]+>", "", h.get("snippet", "") or "")
+        out.append({
+            "title":   title,
+            "url":     "https://en.wikipedia.org/wiki/" + title.replace(" ", "_"),
+            "snippet": snippet[:500],
+            "source":  "wikipedia",
+        })
+    return out
+
 
 def search_wikipedia(query: str) -> str:
     """Get a Wikipedia summary for the query."""

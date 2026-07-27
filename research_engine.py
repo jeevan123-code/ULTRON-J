@@ -40,6 +40,7 @@ from urllib.parse import urlparse
 try:
     from local_engine import (
         search_searxng, search_duckduckgo, search_wikipedia, search_tavily,
+        search_wikipedia_hits,
     )
     _SEARCH_AVAILABLE = True
 except ImportError:
@@ -48,6 +49,7 @@ except ImportError:
     def search_duckduckgo(q, max_results=5): return []
     def search_wikipedia(q): return ""
     def search_tavily(q, max_results=5): return []
+    def search_wikipedia_hits(q, max_results=5): return []
 
 # Configurable backend order (set DEEP_SEARCH_ORDER to e.g.
 # "searxng,duckduckgo,tavily" once SearXNG is self-hosted, to drop the Tavily
@@ -55,12 +57,17 @@ except ImportError:
 try:
     from config import DEEP_SEARCH_ORDER as _DEEP_SEARCH_ORDER
 except ImportError:
-    _DEEP_SEARCH_ORDER = "tavily,searxng,duckduckgo"
+    # Wikipedia is last but always present: as of 2026-07-26 it is the only
+    # keyless backend that still answers (the rest return 202 or a CAPTCHA), so
+    # it is what stands between a failed search and a silent memory-answer.
+    _DEEP_SEARCH_ORDER = "tavily,searxng,duckduckgo,wikipedia"
 _BACKENDS = {
     "tavily":     search_tavily,
     "searxng":    search_searxng,
     "duckduckgo": search_duckduckgo,
     "ddg":        search_duckduckgo,
+    "wikipedia":  search_wikipedia_hits,
+    "wiki":       search_wikipedia_hits,
 }
 def _backend_chain():
     chain = []
@@ -68,7 +75,11 @@ def _backend_chain():
         fn = _BACKENDS.get(name.strip().lower())
         if fn and fn not in chain:
             chain.append(fn)
-    return chain or [search_tavily, search_searxng, search_duckduckgo]
+    # Wikipedia is appended unconditionally as the last resort — a custom
+    # DEEP_SEARCH_ORDER must not be able to leave zero working backends.
+    if search_wikipedia_hits not in chain:
+        chain.append(search_wikipedia_hits)
+    return chain
 
 try:
     from autonomous_browser import browse as _ab_browse
@@ -138,16 +149,74 @@ except ImportError:
 # =============================================================================
 
 DEPTH_CONFIG = {
+    # cross_ref is the fact-checker: it reads every extract side by side and
+    # flags where sources actually disagree. It was written, tested, and then
+    # only enabled on "deep" — which is not the depth normal questions use, so
+    # in practice nothing was ever cross-checked. On for standard now; quick
+    # stays off because quick is the "just answer fast" setting.
     "quick":    {"n_subqueries": 1, "pages_per_q": 2, "max_chars_per_page": 2500, "cross_ref": False},
-    "standard": {"n_subqueries": 3, "pages_per_q": 3, "max_chars_per_page": 3500, "cross_ref": False},
+    "standard": {"n_subqueries": 3, "pages_per_q": 3, "max_chars_per_page": 3500, "cross_ref": True},
     "deep":     {"n_subqueries": 4, "pages_per_q": 4, "max_chars_per_page": 5000, "cross_ref": True},
 }
 
-# Domains we down-weight (low quality / aggregator-only)
+# Domains dropped outright (content farms / aggregator-only)
 _LOW_QUALITY_DOMAINS = {
     "pinterest.com", "quora.com", "answers.yahoo.com",
     "reference.com", "wikihow.com",
 }
+
+# ── source authority ─────────────────────────────────────────────────────────
+# Ranking used to be "whatever the search engine returned, minus duplicates",
+# which is how a Facebook post outranked Wikipedia on a factual question. These
+# tiers reorder within that result set; they never invent or remove sources
+# except for the hard-drop list above.
+AUTHORITY_HIGH    = 3   # reference works, official bodies, wire services
+AUTHORITY_NEUTRAL = 2   # anything unrecognised — the default
+AUTHORITY_SOCIAL  = 1   # user-generated: demoted, NOT banned (reddit is
+                        # genuinely the best source for some questions)
+
+_HIGH_DOMAINS = {
+    "wikipedia.org", "britannica.com", "nature.com", "science.org",
+    "sciencedirect.com", "arxiv.org", "pubmed.ncbi.nlm.nih.gov", "who.int",
+    "nasa.gov", "noaa.gov", "reuters.com", "apnews.com", "bbc.com",
+    "bbc.co.uk", "npr.org", "pbs.org", "nytimes.com", "theguardian.com",
+    "ft.com", "economist.com", "nih.gov", "cdc.gov", "esa.int",
+}
+_HIGH_SUFFIXES = (".gov", ".edu", ".ac.uk", ".gov.uk", ".int", ".mil")
+
+_SOCIAL_DOMAINS = {
+    "facebook.com", "instagram.com", "tiktok.com", "x.com", "twitter.com",
+    "reddit.com", "medium.com", "blogspot.com", "wordpress.com", "tumblr.com",
+    "threads.net", "linkedin.com", "substack.com", "quora.com",
+    # Video platforms: a scraped watch page is player UI, not content.
+    "youtube.com", "youtu.be", "vimeo.com", "dailymotion.com", "twitch.tv",
+}
+
+# A page has to actually say something before it earns a citation. The live
+# failure this fixes: a JS-rendered Facebook post returned 116 characters and
+# still became source [1].
+MIN_PAGE_CHARS = 400
+
+
+def _authority(url: str) -> int:
+    """Score a URL's source tier. Subdomain- and case-insensitive."""
+    dom = _domain(url)
+    if not dom:
+        return AUTHORITY_NEUTRAL
+    for known in _HIGH_DOMAINS:
+        if dom == known or dom.endswith("." + known):
+            return AUTHORITY_HIGH
+    if dom.endswith(_HIGH_SUFFIXES):
+        return AUTHORITY_HIGH
+    for known in _SOCIAL_DOMAINS:
+        if dom == known or dom.endswith("." + known):
+            return AUTHORITY_SOCIAL
+    return AUTHORITY_NEUTRAL
+
+
+def _is_citable(text) -> bool:
+    """Did this page give us enough substance to cite it?"""
+    return bool(text) and len(str(text).strip()) >= MIN_PAGE_CHARS
 
 
 # =============================================================================
@@ -237,7 +306,12 @@ def search_one(query: str, n_results: int = 5) -> List[Dict]:
 
 
 def diversify_sources(all_hits: List[Dict], max_total: int = 10) -> List[Dict]:
-    """Drop duplicate domains, demote low-quality ones. Returns up to max_total."""
+    """Drop duplicate domains, order by source authority. Returns up to max_total.
+
+    The sort is stable, so within a tier the search engine's own ranking is
+    preserved — this reorders tiers, it does not re-rank results.
+    """
+    all_hits = sorted(all_hits, key=lambda h: -_authority(h.get("url", "")))
     seen_domains: Dict[str, int] = {}
     out: List[Dict] = []
     # First pass: one per domain
@@ -268,9 +342,16 @@ def diversify_sources(all_hits: List[Dict], max_total: int = 10) -> List[Dict]:
 
 
 def _domain(url: str) -> str:
+    """Hostname, lowercased, with a leading 'www.' removed.
+
+    Was `host.lstrip("www.")`, which strips leading CHARACTERS in {w, .} rather
+    than the prefix: wikipedia.org -> "ikipedia.org", who.int -> "ho.int",
+    washingtonpost.com -> "ashingtonpost.com". The visible casualty was the junk
+    blocklist — "wikihow.com" became "ikihow.com" and never matched.
+    """
     try:
         host = urlparse(url).hostname or ""
-        return host.lower().lstrip("www.") if host else ""
+        return host.lower().removeprefix("www.") if host else ""
     except Exception:
         return ""
 
@@ -292,6 +373,34 @@ def fetch_and_clean(url: str, max_chars: int) -> str:
         return text[:max_chars]
     except Exception as e:
         return ""
+
+
+def fetch_rendered(url: str, max_chars: int) -> str:
+    """Re-fetch a page through a real browser so JavaScript actually runs.
+
+    A plain HTTP fetch of a JS-rendered page returns the empty shell — that is
+    exactly how a Facebook post yielded 116 characters and still got cited.
+    Slower (seconds, not milliseconds), so this is a rescue attempt for pages
+    the fast path failed on, never the default. Returns "" on any failure.
+    """
+    try:
+        r = _ab_browse(url, js=True)
+        if not isinstance(r, dict) or not r.get("success", True):
+            return ""
+        text = r.get("text") or r.get("content") or r.get("body") or ""
+        return _clean_page_text(str(text))[:max_chars]
+    except Exception:
+        return ""
+
+
+def _prefer_citable(sources: List[Dict]) -> List[Dict]:
+    """Drop sources too thin to cite — unless they are all we have.
+
+    Something beats nothing, but a page that gave us one sentence must never
+    displace a page that gave us the article.
+    """
+    citable = [s for s in sources if _is_citable(s.get("text"))]
+    return citable if citable else sources
 
 
 def _clean_page_text(text: str) -> str:
@@ -330,7 +439,9 @@ Rules:
 
 def extract_from_page(sub_query: str, page_text: str, title: str) -> Dict:
     if not page_text or len(page_text) < 100:
-        return {"relevant": False, "extract": "", "confidence": "low"}
+        # A real verdict: the page had nothing. Not a failure, so not degraded.
+        return {"relevant": False, "extract": "", "confidence": "low",
+                "degraded": False}
     prompt = (
         f'SUB-QUERY: {sub_query}\n\nPAGE TITLE: {title}\n\n'
         f'PAGE CONTENT:\n{page_text[:4500]}\n\n'
@@ -348,12 +459,33 @@ def extract_from_page(sub_query: str, page_text: str, title: str) -> Dict:
             parsed = _parse_json_loose(call_llm_batch(prompt, system=_EXTRACT_SYSTEM))
 
     if not isinstance(parsed, dict):
-        return {"relevant": False, "extract": "", "confidence": "low"}
+        # The extractor did not answer (rate limit, bad JSON, provider down).
+        # That is NOT the same as judging the page irrelevant, and must not be
+        # reported as such — a 429 was silently deleting good sources.
+        return {"relevant": False, "extract": "", "confidence": "low",
+                "degraded": True}
     return {
         "relevant":   bool(parsed.get("relevant", False)),
         "extract":    str(parsed.get("extract", ""))[:2500],
         "confidence": str(parsed.get("confidence", "low")).lower(),
+        "degraded":   False,
     }
+
+
+def _recover_degraded(ex_res: Dict, src: Dict) -> Dict:
+    """Fall back to the page's own text when the extractor could not run.
+
+    Keeps a source in the evidence base at reduced confidence instead of
+    dropping it. A healthy extract, or a genuine "not relevant" verdict from a
+    model that actually ran, is returned untouched.
+    """
+    if not ex_res.get("degraded"):
+        return ex_res
+    raw = (src.get("text") or "").strip()
+    if not raw:
+        return ex_res
+    return {"relevant": True, "extract": raw[:1500],
+            "confidence": "low", "degraded": True}
 
 
 # =============================================================================
@@ -373,7 +505,18 @@ identify any contradictions or disputed claims. Output ONLY JSON:
 }
 
 If there are no contradictions, output {"contradictions": []}.
-Only flag real substantive disagreement on facts, not stylistic differences.
+
+Flag ONLY direct factual disagreement — two sources stating incompatible things
+about the same fact (different dates, numbers, names, outcomes).
+
+Do NOT flag:
+- a fact that appears in one source and is simply absent from another. Silence
+  is not disagreement, and this is the most common false positive.
+- different levels of detail, wording, emphasis or framing.
+- one source covering a subtopic another does not mention.
+
+If you are not pointing at two specific conflicting statements, output nothing.
+Most source sets contain no contradictions; an empty list is the normal answer.
 """
 
 
@@ -532,12 +675,17 @@ def research(
                 text = fut.result()
             except Exception:
                 text = ""
-            # Fall back to the search engine's pre-extracted snippet when direct
-            # scraping yields little/nothing. Modern pages (Reddit, Facebook,
-            # JS-heavy sites) often block scrapers, but Tavily/SearXNG already
-            # return clean extracted content — so a "failed scrape" still has
-            # usable grounded text instead of dropping the source entirely.
-            if not text or len(text) < 200:
+            # A thin result usually means the page rendered its content with
+            # JavaScript and the fast fetch got the empty shell. Retry those
+            # through a real browser before settling for the search snippet.
+            if not _is_citable(text):
+                rendered = fetch_rendered(hit["url"], cfg["max_chars_per_page"])
+                if len(rendered or "") > len(text or ""):
+                    text = rendered
+            # Last resort: the search engine's own pre-extracted snippet. Still
+            # grounded text, better than dropping the source entirely — but
+            # _prefer_citable below stops it displacing a real page.
+            if not _is_citable(text):
                 snippet = (hit.get("snippet") or "").strip()
                 if len(snippet) > len(text or ""):
                     text = snippet
@@ -549,6 +697,12 @@ def research(
                     "domain":    _domain(hit["url"]),
                     "text":      text,
                 })
+
+    # A page that gave us one sentence must not displace one that gave us the
+    # whole article. Re-number afterwards so citation ids stay contiguous.
+    sources = _prefer_citable(sources)
+    for _i, _s in enumerate(sources, 1):
+        _s["source_id"] = f"S{_i}"
 
     if not sources:
         return {
@@ -576,7 +730,9 @@ def research(
             try:
                 ex_res = fut.result()
             except Exception:
-                ex_res = {"relevant": False, "extract": "", "confidence": "low"}
+                ex_res = {"relevant": False, "extract": "", "confidence": "low",
+                          "degraded": True}
+            ex_res = _recover_degraded(ex_res, src)
             extracts.append({**ex_res, **{
                 "source_id": src["source_id"],
                 "url":       src["url"],
@@ -620,30 +776,47 @@ def research(
 
 
 def _renumber_citations(answer: str, extracts: List[Dict]) -> Dict:
-    """Rewrite [S1],[S2]... to [1],[2]... in the answer, in order of appearance,
-    and return the matching sources list."""
-    # Pattern matches [S1], [1], [S2]... — catch both styles the LLM might emit
-    pattern = re.compile(r"\[(S?\d+)\]")
-    found_ids = []
-    for m in pattern.finditer(answer):
-        tag = m.group(1)
-        # Normalise both "S1" and "1" into "S1" form
-        if not tag.startswith("S"):
-            tag = f"S{tag}"
-        if tag not in found_ids:
-            found_ids.append(tag)
+    r"""Rewrite [S1],[S2]... to [1],[2]... in order of appearance, and return the
+    matching sources list.
 
-    # Build remap: S1 → 1, S3 → 2, etc.
+    Handles GROUPED citations ("[1, 2, 3]", "[S2, S3]") as well as single ones.
+    The old pattern was r"\[(S?\d+)\]", which matched "[1]" but not "[1, 2, 3]"
+    — the form the synthesiser emits most often. Every id inside a group was
+    invisible: never remapped, never added to sources. The visible symptom was
+    an answer citing [1, 2, 3] that arrived with one source attached, so [2] and
+    [3] pointed at nothing.
+    """
+    # A citation group: one or more S?N separated by commas, inside brackets.
+    group_re = re.compile(r"\[\s*(S?\d+(?:\s*,\s*S?\d+)*)\s*\]")
+
+    def _ids(group_body: str) -> List[str]:
+        out = []
+        for part in group_body.split(","):
+            tag = part.strip()
+            if not tag:
+                continue
+            if not tag.startswith("S"):
+                tag = f"S{tag}"
+            out.append(tag)
+        return out
+
+    known = {e["source_id"] for e in extracts}
+    found_ids: List[str] = []
+    for m in group_re.finditer(answer):
+        for tag in _ids(m.group(1)):
+            # Only cite sources we actually have — never invent one.
+            if tag in known and tag not in found_ids:
+                found_ids.append(tag)
+
     remap = {sid: str(i + 1) for i, sid in enumerate(found_ids)}
 
-    # Apply remap to answer
     def _sub(m):
-        tag = m.group(1)
-        if not tag.startswith("S"):
-            tag = f"S{tag}"
-        return f"[{remap.get(tag, tag[1:])}]"
+        renumbered = [remap[t] for t in _ids(m.group(1)) if t in remap]
+        if not renumbered:
+            return ""  # a group naming only unknown sources cites nothing
+        return "[" + ", ".join(renumbered) + "]"
 
-    new_answer = pattern.sub(_sub, answer)
+    new_answer = group_re.sub(_sub, answer)
 
     sources = []
     for sid in found_ids:
