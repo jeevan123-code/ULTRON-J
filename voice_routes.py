@@ -698,6 +698,13 @@ def api_voice_stream_chat():
             except Exception as _se:
                 print(f"[voice_stream_chat] search failed: {_se}")
                 search_context = ""
+            # A search was attempted. If it produced nothing, say so out loud
+            # rather than answering from memory as though it had been looked up.
+            try:
+                import search_disclosure
+                search_context = search_disclosure.apply(search_context, searched=True)
+            except Exception:
+                pass
             finally:
                 _search_pool.shutdown(wait=False)
 

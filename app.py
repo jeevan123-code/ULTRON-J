@@ -928,13 +928,19 @@ def ask():
                 for s in tavily["sources"][:4]:
                     snippets.append(f"• {s.get('title', '')}: {s.get('content', '')[:300]}")
                 search_context = "\n".join(snippets)
-            # Web search failed — previously this short-circuited the entire
-            # reply with "I couldn't reach any web sources". That made every
-            # borderline query that *happened* to trigger needs_search (e.g.
-            # casual "today" / "now" mentions) wait 3-6s for a search round
-            # trip and then refuse to answer. Now we just continue without
-            # search context and let the LLM answer from its own knowledge;
-            # if the question truly needed fresh data the LLM can say so.
+            # Web search failed. Refusing the whole reply (the original
+            # behaviour) was too blunt — a casual "today" tripped the search
+            # heuristic and then got refused. But continuing SILENTLY is worse
+            # in a different way: the model answers from memory and the user
+            # cannot tell nothing was retrieved. With every engine currently
+            # returning 202/CAPTCHA, that is the common path, not a rare one.
+            # So: still answer, but hand the model an explicit notice that it
+            # has no sources and must say so.
+            try:
+                import search_disclosure
+                search_context = search_disclosure.apply(search_context, searched=True)
+            except Exception:
+                pass  # disclosure is additive; never block the reply on it
 
         # ── JARVIS voice-mode: wrap the LLM stream in sentence-level TTS ──────
         # Strictly opt-in (request body voice=true). The else-branch below is
