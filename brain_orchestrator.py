@@ -10,7 +10,7 @@ For complex user requests, this module:
   6. Returns both the final answer AND the full reasoning trail.
 
 Task kinds the orchestrator knows how to execute natively:
-  - search        : web search via local_engine.local_smart_search
+  - search        : web search via Tavily, falling back to local_smart_search
   - fetch_url     : fetch a page body via autonomous_browser or requests
   - research      : full research_engine call (multi-source, citation tracking)
   - recall        : query vector_store
@@ -52,6 +52,30 @@ try:
 except ImportError:
     _BROWSER_AVAILABLE = False
     def _ab_browse(url, js=False): return {"success": False, "content": ""}
+
+
+def _search_web(query: str) -> str:
+    """Web search for the `search` task kind — Tavily first, scrapers second.
+
+    /ask, voice_routes and react_engine all try Tavily before falling back to
+    the local scrape chain. This module used to go straight to that chain,
+    whose backends are SearXNG (nothing, not self-hosted) and DuckDuckGo
+    (answered 2 of 6 attempts when measured 2026-07-29) — so an orchestrator
+    search failed most of the time while a working paid key sat unused.
+
+    The app import is deferred because app.py imports this module.
+    """
+    try:
+        from app import search_web_tavily
+        sources = (search_web_tavily(query) or {}).get("sources") or []
+        if sources:
+            return "\n".join(
+                f"• {s.get('title', '')}: {(s.get('content') or '')[:300]}"
+                for s in sources[:4]
+            )
+    except Exception:
+        pass  # any Tavily fault just means we fall through to the scrapers
+    return local_smart_search(query) or ""
 
 
 def fetch_page_content(url: str, max_chars: int = 6000) -> str:
@@ -177,9 +201,9 @@ def execute_task(task: Dict, resolved_params: Dict) -> Any:
 
     if kind == "search":
         query = p.get("query") or p.get("q") or task.get("description", "")
-        if not _SEARCH_AVAILABLE:
+        result = _search_web(query)
+        if not result and not _SEARCH_AVAILABLE:
             return {"error": "search unavailable", "query": query}
-        result = local_smart_search(query)
         return {"query": query, "results": result[:4000]}
 
     if kind == "fetch_url":

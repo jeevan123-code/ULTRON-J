@@ -464,9 +464,40 @@ def _extract_entities_from_message(text: str):
 # TAVILY WEB SEARCH
 # =============================================================================
 
+_TAVILY_ATTEMPTS = 2
+
+
+def _tavily_timeout() -> float:
+    """Seconds to wait for Tavily, overridable with ULTRON_TAVILY_TIMEOUT.
+
+    Measured 2026-07-29: 0.95s median, 1.73s worst of 8 calls. But it does
+    stall, and the old hardcoded 3s turned every stall into a silent fallback
+    onto the DuckDuckGo scraper — which answered 2 of 6 attempts that day.
+    """
+    try:
+        return float(os.environ.get("ULTRON_TAVILY_TIMEOUT", "8"))
+    except (TypeError, ValueError):
+        return 8.0
+
+
+def _trace_search(query, **kw):
+    """Record why a Tavily lookup came back empty. Never raises.
+
+    Every failure below is swallowed into an empty-sources result, so callers
+    cannot tell a timeout from a genuine "no such thing" — and until this was
+    added, neither could the log.
+    """
+    try:
+        import search_trace
+        search_trace.record("tavily", query, **kw)
+    except Exception:
+        pass  # diagnostics must never break a search
+
+
 def search_web_tavily(query, max_results=5, search_depth="advanced",
                       topic="general", days=None, include_domains=None):
     if not TAVILY_API_KEY:
+        _trace_search(query, skipped="no_tavily_key")
         return {"summary": "", "sources": []}
     try:
         import requests as _req
@@ -489,13 +520,26 @@ def search_web_tavily(query, max_results=5, search_depth="advanced",
                     doms.append(d)
             if doms:
                 payload["include_domains"] = doms
-        resp = _req.post("https://api.tavily.com/search", json=payload, timeout=3)
+        # Retry transient faults only. A stall says nothing about the query;
+        # a 401 or a malformed request will fail identically every time.
+        _last = None
+        for _attempt in range(_TAVILY_ATTEMPTS):
+            try:
+                resp = _req.post("https://api.tavily.com/search",
+                                 json=payload, timeout=_tavily_timeout())
+                break
+            except (_req.Timeout, _req.ConnectionError) as _tr:
+                _last = _tr
+        else:
+            raise _last
         resp.raise_for_status()
         data    = resp.json()
         sources = data.get("results", [])
         summary = data.get("answer", "")
+        _trace_search(query, sources=len(sources))
         return {"summary": summary, "sources": sources}
-    except Exception:
+    except Exception as _e:
+        _trace_search(query, error=_e)
         return {"summary": "", "sources": []}
 
 # =============================================================================
@@ -739,12 +783,21 @@ def ask():
         )
 
     # ── NEW: Orchestrator intercept (computer control, project builder) ───────────
-    try:
-        _orch = orchestrate(question, session_id=session_id)
-    except Exception as _oe:
-        import traceback as _oetb
-        _log_failure("task_orchestrator", "orchestrate", str(_oe), {"question": question[:120]}, _oetb.format_exc())
-        _orch = {"success": False, "passthrough": True, "error": str(_oe)}
+    # Skip the orchestrator entirely for info-shaped questions. Its LLM picker
+    # maps them onto `search_web`, and the intercept below then returns that
+    # action's raw scraped output as the answer — the model never sees the
+    # question. voice_routes has guarded against this for a while; app.py had
+    # no equivalent, so the same question behaved differently typed vs spoken.
+    import info_question
+    if info_question.is_info_question(question):
+        _orch = {}
+    else:
+        try:
+            _orch = orchestrate(question, session_id=session_id)
+        except Exception as _oe:
+            import traceback as _oetb
+            _log_failure("task_orchestrator", "orchestrate", str(_oe), {"question": question[:120]}, _oetb.format_exc())
+            _orch = {"success": False, "passthrough": True, "error": str(_oe)}
     if _orch.get("action_taken") and not _orch.get("passthrough"):
         # Prefer detect_intent groups so repeat-last can re-execute correctly
         _orch_intent = detect_intent(question) or {"type": _orch.get("action_taken"), "groups": [question], "raw": question}
@@ -848,7 +901,11 @@ def ask():
         return _quick_sse(greeting_reply(), provider="greeting")
 
     if intent == "calculate":
-        result = safe_calculate(question)
+        # safe_calculate takes a bare expression; chat hands us a sentence.
+        # Without this step "what is 847 times 291" failed to parse, fell
+        # through to the LLM, and came back 246,297 instead of 246,477.
+        import math_phrase
+        result = safe_calculate(math_phrase.extract(question) or question)
         if result.get("success"):
             return _quick_sse(f"= {result['result']}", provider="calculate")
 

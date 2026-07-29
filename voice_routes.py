@@ -612,16 +612,11 @@ def api_voice_stream_chat():
         # user's focused browser tab to run a Google query — instead of
         # actually answering them. Info questions go straight to the
         # LLM+Tavily path below.
-        text_l = user_text.lower().strip()
-        _INFO_LEADS = (
-            "who is", "who's", "who are", "what is", "what's", "what are",
-            "when is", "when's", "when did", "when was", "where is", "where's",
-            "where are", "why is", "why does", "why did", "how is", "how does",
-            "how did", "how do", "how can", "which is", "tell me about",
-            "tell me", "do you know", "can you tell", "explain",
-        )
-        is_info_question = any(text_l.startswith(p + " ") or text_l == p for p in _INFO_LEADS)
-        if is_info_question:
+        # Shared with app.py's /ask so the two routes classify identically —
+        # they drifted once already, and a typed question behaved differently
+        # from the same question spoken.
+        import info_question as _iq
+        if _iq.is_info_question(user_text):
             _orch = {}
         else:
             _orch = orchestrate(user_text, session_id=session_id)

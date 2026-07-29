@@ -61,6 +61,26 @@ _PERSONA_BLOCK = (
     "No 'as an AI' denials. No bullet lists or headers in chat. Direct, confident, done."
 )
 
+# Marker both prompt builders use to recognise a web-search block inside
+# world_state. Kept as a constant so the label and the detection cannot drift.
+SEARCH_RESULTS_HEADER = "=== Web Search Results ==="
+
+# Appended whenever search results are present. Without it, the results arrive
+# under "LIVE REALITY ... never contradict it" — an instruction to TRUST the
+# block with nothing saying how to USE it. Live on 2026-07-29 that produced
+# answers that were the scraped page pasted verbatim, author byline included.
+SEARCH_USE_BLOCK = (
+    "USING THE WEB SEARCH RESULTS ABOVE — that block is raw scraped page text, "
+    "not your answer:\n"
+    "- Answer in your own words. Never paste, quote or reformat the block.\n"
+    "- Take only the specific fact asked for. Ignore navigation text, author "
+    "bylines, cookie notices, repeated headings and figures for unrelated things.\n"
+    "- Where the figure carries a date or a source, name it "
+    "(\"as of 28 July, CoinMarketCap lists...\").\n"
+    "- If the block does not contain the fact, say so plainly. Do not guess, and "
+    "do not dump what it does contain instead."
+)
+
 # Voice-mode block — appended only when /api/voice/stream_chat calls
 # think_and_stream(voice_mode=True). The reply is spoken aloud, so long
 # walls of text or markdown bullets become painful audio dumps. This
@@ -472,7 +492,7 @@ def _think_and_stream_inner(
 
         ws_simple = ""
         if search_context:
-            ws_simple = "=== Web Search Results ===\n" + search_context.strip()
+            ws_simple = SEARCH_RESULTS_HEADER + "\n" + search_context.strip()
         system_prompt = _build_simple_system_prompt(ws_simple, "")
         if voice_mode:
             system_prompt += "\n\n" + _VOICE_MODE_BLOCK
@@ -611,7 +631,7 @@ def _think_and_stream_inner(
         world_state = (world_state + "\n\n" + recall_block) if world_state else recall_block
 
     if search_context:
-        _sc_block = "=== Web Search Results ===\n" + search_context.strip()
+        _sc_block = SEARCH_RESULTS_HEADER + "\n" + search_context.strip()
         world_state = (world_state + "\n\n" + _sc_block) if world_state else _sc_block
 
     # ── Step 3b: Planner intercept ────────────────────────────────────────────
@@ -785,6 +805,8 @@ def _build_simple_system_prompt(world_state: str, jeevan_profile: str) -> str:
             "LIVE REALITY:\n" + world_state.strip() +
             "\nUse this if relevant. Never contradict it."
         )
+    if SEARCH_RESULTS_HEADER in (world_state or ""):
+        parts.append(SEARCH_USE_BLOCK)
     return "\n\n".join(parts)
 
 
@@ -804,6 +826,8 @@ def _build_medium_system_prompt(world_state: str, jeevan_profile: str) -> str:
             "\nINSTRUCTION: If Jeevan's question touches anything above, use that data. "
             "Never contradict it with guesses."
         )
+    if SEARCH_RESULTS_HEADER in (world_state or ""):
+        parts.append(SEARCH_USE_BLOCK)
     return "\n\n".join(parts)
 
 
