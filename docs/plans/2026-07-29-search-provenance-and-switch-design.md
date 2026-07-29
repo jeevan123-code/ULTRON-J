@@ -39,8 +39,21 @@ reinvented:
 | Question vs command | `info_question.is_info_question` | Added `8617e78` |
 | No-sources disclosure to the model | `search_disclosure.apply` | Works |
 
-Measured 2026-07-29: Tavily 6/6 and 8/8 successful, ~0.95s median. DuckDuckGo
-2/6. SearXNG 0/6. Wikipedia works and needs no key.
+Measured 2026-07-29 — Tavily 6/6 and 8/8 successful, ~0.95s median. Keyless
+backends over 24 attempts each (8 query types × 3):
+
+| Backend | Answered | Note |
+|---|---|---|
+| duckduckgo | **3/24 (12%)** | An earlier 6-attempt sample suggested 33%; the larger sample is the honest number. |
+| wikipedia | 13/24 (54%) | Not flaky so much as narrow, and it rate-limits under rapid calls. |
+| searxng | **0/24 (0%)** | Not self-hosted. Dead, not slow. |
+
+Reliability overstates keyless usefulness, because a response is not an
+answer. Wikipedia returned **"Electric current"** for *"current price of
+bitcoin usd"*, and **"Jashodaben Modi"** (his wife) for *"who is Narendra
+Modi"*. Live prices, news, weather and how-to questions returned nothing
+usable at all. Keyless search is sound for encyclopedic facts and unfit for
+anything time-sensitive — the badge must not imply otherwise.
 
 ## Design
 
