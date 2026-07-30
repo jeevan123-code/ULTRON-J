@@ -33,6 +33,11 @@ ALLOWED_ORPHANS: Dict[str, str] = {
     "ultron_listener": "standalone always-on voice listener process",
     "wiring_audit": "human-facing audit script",
     "setup_integrations": "one-shot setup script",
+    # Runs under .venv-chatterbox, not this venv — it imports chatterbox-tts,
+    # whose numpy<2 / torch 2.6 pins would break chromadb + sentence-transformers
+    # here. voice_engine._tts_chatterbox reaches it over localhost HTTP, so it
+    # is unimportable by design rather than disconnected. See CHATTERBOX_README.md.
+    "chatterbox_sidecar": "cloned-voice TTS sidecar, runs in .venv-chatterbox",
     # Stray root-level test file, kept out of tests/ — pre-existing.
     "test_t17": "stray root-level test file (pre-existing debt)",
     # The four grandfathered orphans are gone — all were wired via

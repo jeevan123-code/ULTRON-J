@@ -48,6 +48,13 @@ task_graphs/
 *.env
 .venv/
 
+# Chatterbox sidecar venv — its own numpy<2 / torch 2.6 stack, ~3GB, and
+# deliberately isolated from .venv. Rebuild with:
+#   python3 -m venv .venv-chatterbox && .venv-chatterbox/bin/pip install chatterbox-tts
+.venv-chatterbox/
+# Voice reference clips for cloning — binary, and often not ours to ship.
+voices/
+
 # Secrets — encrypted vault + its derivation key. NEVER commit these.
 .vault_key
 vault/

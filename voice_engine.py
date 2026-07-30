@@ -133,6 +133,23 @@ except ImportError:
     _piper_voice = None
     _PIPER_MODEL_PATH = ""
 
+# Chatterbox — zero-shot cloned voice (e.g. a JARVIS reference clip).
+#
+# Deliberately NOT imported here. chatterbox-tts pins numpy<2, torch==2.6 and
+# transformers==5.2; installing it into this venv would downgrade the numpy 2 /
+# torch 2.12 stack that chromadb + sentence-transformers run on, taking the RAG
+# down with it. It therefore lives in `.venv-chatterbox` behind a small HTTP
+# sidecar and we only ever speak to it over localhost.
+#
+# Env is read at call time, not import time, so the sidecar can be started,
+# stopped or repointed without restarting Ultron.
+_CHATTERBOX_DEFAULT_URL = "http://127.0.0.1:17580"
+_CHATTERBOX_TIMEOUT     = 180  # CPU synthesis on this box is slow, not hung
+# Emotion intensity per mood — Chatterbox's one expressive dial (0 = monotone).
+_CHATTERBOX_EXAGGERATION = {
+    "FOCUSED": 0.4, "ALERT": 0.6, "CALM": 0.3, "URGENT": 0.8, "PLAYFUL": 0.7,
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SETUP
 # ─────────────────────────────────────────────────────────────────────────────
@@ -433,6 +450,28 @@ def _tts_kokoro(text: str, mood: str) -> bytes:
     return buf.getvalue()
 
 
+def _tts_chatterbox(text: str, mood: str) -> bytes:
+    """Cloned-voice TTS via the isolated local sidecar.
+
+    Thin HTTP client by design — the model itself never loads in this process
+    (see the _CHATTERBOX_* block above for why). Any failure raises so the
+    unified chain falls through to edge and Ultron still speaks.
+    """
+    url = os.environ.get("ULTRON_CHATTERBOX_URL", _CHATTERBOX_DEFAULT_URL).rstrip("/")
+    ref = os.environ.get("ULTRON_CHATTERBOX_REF", "")
+    resp = requests.post(
+        f"{url}/generate",
+        json={
+            "text":         text[:VOICE_MAX_TTS_CHARS],
+            "reference":    ref,
+            "exaggeration": _CHATTERBOX_EXAGGERATION.get(mood, 0.5),
+        },
+        timeout=_CHATTERBOX_TIMEOUT,
+    )
+    resp.raise_for_status()
+    return resp.content
+
+
 # =============================================================================
 # TTS — UNIFIED
 # =============================================================================
@@ -479,6 +518,10 @@ def tts(text: str, mood: str = "FOCUSED", provider: str = "auto") -> Tuple[bytes
 
     if provider == "auto":
         chain = []
+        # Cloned voice first when explicitly enabled — it is slower than the
+        # rest, so it is opt-in and only chosen because it is *wanted*.
+        if os.environ.get("ULTRON_TTS_CHATTERBOX") == "1":
+            chain.append("chatterbox")
         # Local providers first (free, no API cost, no network).
         if PIPER_AVAILABLE and os.path.exists(_PIPER_MODEL_PATH):
             chain.append("piper")
@@ -504,6 +547,8 @@ def tts(text: str, mood: str = "FOCUSED", provider: str = "auto") -> Tuple[bytes
                 audio = _tts_piper(clean, mood)
             elif prov == "kokoro":
                 audio = _tts_kokoro(clean, mood)
+            elif prov == "chatterbox":
+                audio = _tts_chatterbox(clean, mood)
             elif prov == "edge":
                 audio = _tts_edge(clean, mood)
             else:
