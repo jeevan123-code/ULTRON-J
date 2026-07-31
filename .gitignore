@@ -92,3 +92,8 @@ proactive_suggestions.json
 
 # Archive scratch files
 _archive/.tmp_*
+
+# SearXNG runtime config — holds a generated secret_key.
+# Committing it would repeat the exact flaw found in the Mark-XLIX audit
+# (a live key in a public repo). searxng/settings.example.yml is the template.
+searxng/settings.yml

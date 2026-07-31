@@ -1,0 +1,27 @@
+# Template for searxng/settings.yml (which is gitignored — it holds a secret).
+#
+# Generate the real file with:
+#   bash setup_searxng.sh          # writes it for you, Docker or source
+# or by hand:
+#   cp searxng/settings.example.yml searxng/settings.yml
+#   python3 -c 'import secrets; print(secrets.token_hex(32))'   # paste below
+#
+# The two settings that matter are limiter and formats. Without EITHER,
+# `?format=json` returns nothing and Ultron falls back to the DuckDuckGo
+# scraper — which measured 3/24 (12%) on 2026-07-30, against SearXNG's 24/24.
+# That is the single most common reason for "SearXNG is running but Ultron
+# still isn't using it".
+use_default_settings: true
+
+server:
+  secret_key: "REPLACE_ME"   # required by SearXNG; generate a fresh one
+  limiter: false             # CRITICAL — allows local programmatic JSON calls
+  image_proxy: false
+  bind_address: "127.0.0.1"  # loopback only, matching Ultron's own posture
+  port: 8080                 # Ultron reads SEARXNG_URL, default http://localhost:8080
+
+search:
+  safe_search: 0
+  formats:
+    - html
+    - json                   # CRITICAL — without this ?format=json errors out
