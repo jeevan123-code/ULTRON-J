@@ -97,3 +97,7 @@ _archive/.tmp_*
 # Committing it would repeat the exact flaw found in the Mark-XLIX audit
 # (a live key in a public repo). searxng/settings.example.yml is the template.
 searxng/settings.yml
+
+# Binary TTS model files — too large for git; installed/downloaded separately
+*.onnx
+*.bin
