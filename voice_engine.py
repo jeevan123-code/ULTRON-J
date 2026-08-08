@@ -22,6 +22,8 @@ import json
 import math
 import os
 import re
+import shutil
+import subprocess
 import tempfile
 import threading
 from datetime import datetime
@@ -132,6 +134,11 @@ except ImportError:
     PIPER_AVAILABLE = False
     _piper_voice = None
     _PIPER_MODEL_PATH = ""
+
+# espeak-ng — absolute last-resort offline fallback. No API key, no model
+# download, works with zero network — but robotic quality. Only ever fires
+# if every provider ahead of it, including edge, has already failed.
+ESPEAK_AVAILABLE = shutil.which("espeak-ng") is not None
 
 # Chatterbox — zero-shot cloned voice (e.g. a JARVIS reference clip).
 #
@@ -305,6 +312,32 @@ def _tts_edge(text: str, mood: str) -> bytes:
         asyncio.set_event_loop(loop)
         loop.run_until_complete(_edge_tts_async(text[:VOICE_MAX_TTS_CHARS], voice, rate_str, tmp_path))
         loop.close()
+        return Path(tmp_path).read_bytes()
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+
+def _tts_espeak(text: str, mood: str) -> bytes:
+    """espeak-ng — offline, zero-setup, absolute last resort.
+
+    Only reached when every provider ahead of it (including edge) has
+    already failed, e.g. no network and no local model installed.
+    """
+    if not ESPEAK_AVAILABLE:
+        raise RuntimeError("espeak-ng not installed")
+    rate = VOICE_SPEAKING_RATES.get(mood, 1.0)
+    wpm = int(175 * rate)  # espeak-ng default baseline is ~175 wpm
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        tmp_path = tmp.name
+    try:
+        subprocess.run(
+            ["espeak-ng", "-v", "en-us", "-s", str(wpm), "-w", tmp_path,
+             text[:VOICE_MAX_TTS_CHARS]],
+            check=True, capture_output=True, timeout=15,
+        )
         return Path(tmp_path).read_bytes()
     finally:
         try:
@@ -533,8 +566,13 @@ def tts(text: str, mood: str = "FOCUSED", provider: str = "auto") -> Tuple[bytes
         if OPENAI_API_KEY:
             chain.append("openai")
         chain.append("edge")
+        # Absolute last resort — only reached if edge itself failed too.
+        if ESPEAK_AVAILABLE:
+            chain.append("espeak")
     else:
         chain = [provider, "edge"]
+        if ESPEAK_AVAILABLE:
+            chain.append("espeak")
 
     last_err = None
     for prov in chain:
@@ -551,6 +589,8 @@ def tts(text: str, mood: str = "FOCUSED", provider: str = "auto") -> Tuple[bytes
                 audio = _tts_chatterbox(clean, mood)
             elif prov == "edge":
                 audio = _tts_edge(clean, mood)
+            elif prov == "espeak":
+                audio = _tts_espeak(clean, mood)
             else:
                 continue
             _set_cached(clean, mood, prov, audio)
