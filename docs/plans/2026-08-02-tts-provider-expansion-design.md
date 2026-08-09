@@ -171,3 +171,24 @@ later if desired.
 - Torch version mismatch between Ultron's `.venv` (2.12.0) and OmniVoice's
   `.venv` (2.13.0+cpu) is why OmniVoice stays sidecar-isolated rather than
   installed into the main venv, even though numpy already matches (2.4.6)
+
+- **2026-08-09 — Task 3 RAM-safety probe verdict: ABORT (exit code 2).**
+  Ran `.venv/bin/python ram_safety_probe.py` from
+  `/home/jeevan/repo-tests/OmniVoice` on the real 7.6GB CPU-only laptop.
+  Output: `[probe] ABORT — swap usage 95% exceeded 70% limit after 0.0s
+  (peak used 5121MB)`. Peak used: **5121MB**. Peak swap: **95%**. The
+  kill-switch tripped on the very first poll (0.0s elapsed, before the
+  OmniVoice child process could even begin loading the model), because
+  swap was already at ~95% (1.9Gi of 2.0Gi) from real concurrent load
+  (multiple active Claude Code sessions + browser) before the probe
+  started — the machine had zero headroom to begin with. This is the
+  same failure shape as the chatterbox precedent
+  (`CHATTERBOX_README.md`): the safety check did its job and self-aborted
+  in under a second instead of letting the machine thrash. Per the task-3
+  brief, this ABORT verdict means **Tasks 4-6 (OmniVoice sidecar
+  integration into Ultron) are gated OFF and will not be dispatched.**
+  No `voice_engine.py` or other Ultron source changes were made. Like
+  chatterbox, OmniVoice is a candidate for a future
+  `ULTRON_OMNIVOICE_URL` pointing at a remote machine, not for local
+  execution on this laptop. Full run details:
+  `.superpowers/sdd/2026-08-02-tts-provider-expansion/task-3-report.md`.
