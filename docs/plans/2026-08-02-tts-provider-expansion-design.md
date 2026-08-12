@@ -192,3 +192,15 @@ later if desired.
   `ULTRON_OMNIVOICE_URL` pointing at a remote machine, not for local
   execution on this laptop. Full run details:
   `.superpowers/sdd/2026-08-02-tts-provider-expansion/task-3-report.md`.
+
+- **2026-08-12 — Final disposition: OmniVoice CANNOT RUN NOW, same verdict
+  class as chatterbox.** Human partner decision: stop here rather than
+  retry immediately — the ABORT reflects ambient system load (other
+  concurrent sessions/tabs), not a measurement of OmniVoice's own
+  footprint, so a future retry under a quieter machine could still yield
+  a different result. Tasks 4-6 (sidecar wiring into `voice_engine.py`)
+  remain permanently out of scope for this plan; if OmniVoice is revisited
+  later, it starts from a fresh probe run (Task 3), not from resuming
+  Task 4. `ram_safety_probe.py` stays in the OmniVoice repo, hardened
+  with exception-safe child cleanup (see task-3-report.md Fix Round 1),
+  ready for that future retry.
