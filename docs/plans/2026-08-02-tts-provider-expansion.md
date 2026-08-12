@@ -700,7 +700,7 @@ pointing at a remote machine in the future, not for this laptop.
 
 ---
 
-## Task 4: OmniVoice sidecar (execute ONLY if Task 3's verdict was PASS)
+## Task 4: OmniVoice sidecar (execute ONLY if Task 3's verdict was PASS) — SKIPPED, see design doc 2026-08-12 entry
 
 **Files:**
 - Create: `omnivoice_sidecar.py` (ULTRON_WEB root, alongside `chatterbox_sidecar.py`)
@@ -1031,7 +1031,7 @@ EOF
 
 ---
 
-## Task 5: `_tts_omnivoice` client + chain wiring (execute ONLY if Task 3's verdict was PASS)
+## Task 5: `_tts_omnivoice` client + chain wiring (execute ONLY if Task 3's verdict was PASS) — SKIPPED, see design doc 2026-08-12 entry
 
 **Files:**
 - Modify: `voice_engine.py` (new config block near the chatterbox config block, new `_tts_omnivoice` function near `_tts_chatterbox`, chain wiring in `tts()`, dispatch loop)
@@ -1276,7 +1276,7 @@ EOF
 
 ---
 
-## Task 6: End-to-end integration test + orphan_guard + final verification (execute ONLY if Task 3's verdict was PASS)
+## Task 6: End-to-end integration test + orphan_guard + final verification (execute ONLY if Task 3's verdict was PASS) — SKIPPED, see design doc 2026-08-12 entry
 
 **Files:**
 - Create: `tests/test_omnivoice_integration.py`

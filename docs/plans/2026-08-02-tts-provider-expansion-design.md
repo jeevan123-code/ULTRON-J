@@ -1,7 +1,7 @@
 # TTS provider expansion (kokoro, espeak fallback, OmniVoice) — design
 
 **Date:** 2026-08-02
-**Status:** approved, awaiting implementation plan
+**Status:** Tasks 1-3 shipped, Tasks 4-6 permanently out of scope (OmniVoice ABORT) — see Risks section for the full history
 **Branch:** `phase13-strict-validation` (design written after `b50e480`)
 
 ## Problem
@@ -204,3 +204,27 @@ later if desired.
   Task 4. `ram_safety_probe.py` stays in the OmniVoice repo, hardened
   with exception-safe child cleanup (see task-3-report.md Fix Round 1),
   ready for that future retry.
+
+- **2026-08-12 — kokoro is now Ultron's actual default voice in the auto
+  chain (not edge), and this is invisible in `git log -p`.** Component 1
+  restored kokoro purely by installing `kokoro-onnx`/`soundfile` and
+  downloading the two model files into the project root — no source
+  change, so there is no diff recording it. Both files are `.gitignore`d
+  (`/kokoro-v1.0.onnx`, `/voices-v1.0.bin`), so `KOKORO_AVAILABLE` and the
+  chain's actual first-choice-after-piper behavior depend entirely on
+  local disk state that a fresh clone will not have. Concretely, on this
+  machine (piper never installed) the `auto` chain now resolves to
+  kokoro, not edge, for every normal TTS call. Two consequences worth
+  recording here since neither shows up in a diff:
+  - **RAM cost:** `warmup_tts()` preloads the kokoro-onnx model on a
+    background thread at Ultron startup, which costs roughly **354MB of
+    RAM at every boot**, whether or not any TTS call ever happens.
+  - **Fresh-clone restore:** a new checkout needs both pieces before
+    kokoro activates: `pip install kokoro-onnx soundfile`, then download
+    `kokoro-v1.0.onnx` and `voices-v1.0.bin` into the project root (see
+    Task 1 in `2026-08-02-tts-provider-expansion.md` for the exact
+    download URLs). Without both model files present, `tts()` now
+    correctly skips kokoro and falls through to edge — see the
+    `os.path.exists` guard added on the kokoro chain-entry during the
+    final whole-branch review fix wave (mirrors the guard piper already
+    had).
