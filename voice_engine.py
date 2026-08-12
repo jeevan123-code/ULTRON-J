@@ -333,12 +333,23 @@ def _tts_espeak(text: str, mood: str) -> bytes:
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         tmp_path = tmp.name
     try:
-        subprocess.run(
-            ["espeak-ng", "-v", "en-us", "-s", str(wpm), "-w", tmp_path,
-             text[:VOICE_MAX_TTS_CHARS]],
-            check=True, capture_output=True, timeout=15,
-        )
-        return Path(tmp_path).read_bytes()
+        try:
+            subprocess.run(
+                # "--" stops espeak-ng from parsing the text as CLI options —
+                # without it, text starting with "-" (e.g. "-5 degrees") is
+                # silently swallowed (exit 0, empty .wav) or, worse, "-f<path>"
+                # makes espeak-ng read and speak an arbitrary local file.
+                ["espeak-ng", "-v", "en-us", "-s", str(wpm), "-w", tmp_path,
+                 "--", text[:VOICE_MAX_TTS_CHARS]],
+                check=True, capture_output=True, timeout=15,
+            )
+        except subprocess.CalledProcessError as e:
+            stderr = (e.stderr or b"").decode("utf-8", "replace")[:200]
+            raise RuntimeError(f"espeak-ng failed: {stderr}") from e
+        audio = Path(tmp_path).read_bytes()
+        if not audio.startswith(b"RIFF"):
+            raise RuntimeError("espeak-ng produced no audio")
+        return audio
     finally:
         try:
             os.unlink(tmp_path)
@@ -511,20 +522,30 @@ def _tts_chatterbox(text: str, mood: str) -> bytes:
 
 def tts(text: str, mood: str = "FOCUSED", provider: str = "auto") -> Tuple[bytes, str]:
     """
-    Convert text to MP3 bytes.
+    Convert text to speech audio bytes. The audio format depends on which
+    provider ends up serving the call — WAV for the local providers
+    (piper, kokoro, espeak), MP3 for the cloud providers (elevenlabs,
+    openai, edge). Callers must not assume a fixed format.
 
     Phase 7.6 — Piper-first chain (matches the original design intent
-    of the surrounding comment). Order:
+    of the surrounding comment), extended by the 2026-08-02 TTS provider
+    expansion. Order:
 
       auto: Piper (local, free, ~1s) -> Kokoro (local) -> ElevenLabs
             (if key) -> OpenAI (if key) -> Edge (cloud, no key needed)
+            -> espeak-ng (local, offline, absolute last resort)
 
     Local-first means zero per-call API cost, no network round-trip,
     no API-key requirement, and offline operation. The cloud providers
-    stay as fallbacks if Piper/Kokoro models aren't installed.
+    stay as fallbacks if Piper/Kokoro models aren't installed. espeak-ng
+    sits after edge, not "always appended" as a no-key fallback — edge is
+    the no-key cloud fallback, and espeak-ng is what's left when even edge
+    (network) is unreachable: it never needs a network or an API key, so
+    it is Ultron's never-silent guarantee.
 
-    Override with `provider=<name>` to force a specific backend; "edge"
-    is always appended as a last-resort no-key fallback.
+    Override with `provider=<name>` to force a specific backend; the
+    chain still falls through to "edge" and then "espeak" (if installed)
+    on failure, so an explicit override never leaves Ultron silent either.
 
     Returns: (audio_bytes, provider_name)
     """
@@ -558,7 +579,7 @@ def tts(text: str, mood: str = "FOCUSED", provider: str = "auto") -> Tuple[bytes
         # Local providers first (free, no API cost, no network).
         if PIPER_AVAILABLE and os.path.exists(_PIPER_MODEL_PATH):
             chain.append("piper")
-        if KOKORO_AVAILABLE:
+        if KOKORO_AVAILABLE and os.path.exists(_KOKORO_ONNX_PATH) and os.path.exists(_KOKORO_VOICES_PATH):
             chain.append("kokoro")
         # Cloud premium voices as fallback if local isn't installed.
         if ELEVENLABS_API_KEY:
@@ -1573,7 +1594,8 @@ def get_voice_status() -> dict:
         "openai"     if OPENAI_API_KEY else
         "piper"      if piper_model_ready else
         "kokoro"     if kokoro_model_ready else
-        "edge"       if EDGE_TTS_AVAILABLE else "none"
+        "edge"       if EDGE_TTS_AVAILABLE else
+        "espeak"     if ESPEAK_AVAILABLE else "none"
     )
     _groq_key = ""
     try:
@@ -1594,6 +1616,7 @@ def get_voice_status() -> dict:
             "piper":       piper_model_ready,
             "kokoro":      kokoro_model_ready,
             "edge_tts":    EDGE_TTS_AVAILABLE,
+            "espeak":      ESPEAK_AVAILABLE,
             "active":      active_tts,
         },
         "stt": {

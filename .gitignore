@@ -99,5 +99,5 @@ _archive/.tmp_*
 searxng/settings.yml
 
 # Binary TTS model files — too large for git; installed/downloaded separately
-*.onnx
-*.bin
+/kokoro-v1.0.onnx
+/voices-v1.0.bin

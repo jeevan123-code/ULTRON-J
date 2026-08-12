@@ -4,6 +4,7 @@ Fires only when every other provider (including edge) has failed, e.g. no
 network. Zero API key, zero model download — just the system espeak-ng
 CLI, if installed. See docs/plans/2026-08-02-tts-provider-expansion-design.md.
 """
+import shutil
 from unittest.mock import MagicMock
 import pytest
 
@@ -131,3 +132,15 @@ def test_tts_espeak_raises_when_binary_missing(monkeypatch):
     monkeypatch.setattr(ve, "ESPEAK_AVAILABLE", False)
     with pytest.raises(RuntimeError, match="espeak-ng not installed"):
         ve._tts_espeak("hi", "FOCUSED")
+
+
+@pytest.mark.skipif(not shutil.which("espeak-ng"), reason="espeak-ng CLI not installed")
+def test_real_espeak_handles_text_starting_with_a_dash(monkeypatch):
+    """Argv-injection regression: espeak-ng's CLI parses any argv element
+    starting with '-' as an option, not text. Text like "-5 degrees
+    outside" must still produce real audio, not a silently swallowed
+    zero-byte WAV (exit 0, no error, empty output — see commit history
+    for the pre-fix bug this guards against)."""
+    monkeypatch.setattr(ve, "ESPEAK_AVAILABLE", True)
+    audio = ve._tts_espeak("-5 degrees outside, sir.", "FOCUSED")
+    assert audio.startswith(b"RIFF")
