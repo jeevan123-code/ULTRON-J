@@ -1,0 +1,1404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LEBENX STUDIO</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --blue:#3b82f6;--blue-dim:rgba(59,130,246,0.12);--blue-glow:rgba(59,130,246,0.35);
+  --bg:#000;--panel:#0b0b0d;--panel-2:#121216;--border:rgba(255,255,255,0.09);
+  --gray:#9ca3af;--dim:rgba(255,255,255,0.45);
+  --green:#22c55e;--amber:#f59e0b;--red:#ef4444;--violet:#a78bfa;
+}
+body{background:var(--bg);color:#fff;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',sans-serif;height:100vh;overflow:hidden;display:flex;flex-direction:column;font-size:14px}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+a{color:var(--blue)}
+
+/* ── Chrome ─────────────────────────────────────────────── */
+#nav{display:flex;align-items:center;justify-content:space-between;padding:0 20px;height:54px;background:rgba(0,0,0,0.85);border-bottom:1px solid var(--border);backdrop-filter:blur(24px);flex-shrink:0;z-index:20}
+#logo{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:600;letter-spacing:0.08em;cursor:pointer}
+#logo .tag{font-size:10px;color:var(--dim);letter-spacing:0.06em;font-weight:400;border-left:1px solid var(--border);padding-left:10px}
+#nav-right{display:flex;align-items:center;gap:10px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:100px;background:rgba(255,255,255,0.05);border:1px solid var(--border);font-size:12px;color:var(--gray);cursor:pointer;white-space:nowrap}
+.chip:hover{color:#fff;border-color:rgba(255,255,255,0.2)}
+.dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.dot.ok{background:var(--green);box-shadow:0 0 6px var(--green)}
+.dot.warn{background:var(--amber);box-shadow:0 0 6px var(--amber)}
+.dot.off{background:#4b5563}
+
+#main{flex:1;display:flex;overflow:hidden;position:relative}
+
+/* ── Sidebar ────────────────────────────────────────────── */
+#side{width:210px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--border);overflow-y:auto;padding:14px 0;display:none}
+#side.on{display:block}
+.side-h{font-size:10px;letter-spacing:0.12em;color:rgba(255,255,255,0.3);text-transform:uppercase;padding:12px 18px 6px}
+.side-i{display:flex;align-items:center;gap:10px;padding:9px 18px;color:var(--gray);cursor:pointer;border-left:2px solid transparent;font-size:13px}
+.side-i:hover{color:#fff;background:rgba(255,255,255,0.03)}
+.side-i.on{color:#fff;border-left-color:var(--blue);background:var(--blue-dim)}
+.side-i .badge{margin-left:auto;font-size:10px;padding:1px 6px;border-radius:100px;background:rgba(255,255,255,0.08);color:var(--dim)}
+
+#content{flex:1;overflow-y:auto;padding:26px 30px 60px}
+#content::-webkit-scrollbar,#side::-webkit-scrollbar,#right::-webkit-scrollbar{width:4px}
+#content::-webkit-scrollbar-thumb,#side::-webkit-scrollbar-thumb,#right::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:2px}
+
+#right{width:290px;flex-shrink:0;background:var(--panel);border-left:1px solid var(--border);overflow-y:auto;padding:18px;display:none}
+#right.on{display:block}
+
+/* ── Primitives ─────────────────────────────────────────── */
+.wrap{max-width:860px;margin:0 auto}
+h1{font-size:26px;font-weight:600;letter-spacing:-0.01em}
+h2{font-size:17px;font-weight:600;margin-bottom:4px}
+h3{font-size:13px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--dim);margin-bottom:10px}
+.sub{color:var(--dim);font-size:13px;line-height:1.6}
+.card{background:var(--panel-2);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:14px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.spread{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.btn{padding:9px 16px;border-radius:9px;border:1px solid var(--border);background:rgba(255,255,255,0.05);color:#fff;cursor:pointer;font-size:13px;font-weight:500;white-space:nowrap}
+.btn:hover:not(:disabled){background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.2)}
+.btn:disabled{opacity:0.4;cursor:not-allowed}
+.btn.pri{background:var(--blue);border-color:var(--blue)}
+.btn.pri:hover:not(:disabled){background:#2f6fe0;box-shadow:0 0 18px var(--blue-glow)}
+.btn.sm{padding:5px 11px;font-size:12px;border-radius:7px}
+.btn.danger{border-color:rgba(239,68,68,0.35);color:#fca5a5}
+input[type=text],input[type=number],textarea,select{width:100%;padding:10px 13px;border-radius:9px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:#fff;outline:none}
+input:focus,textarea:focus,select:focus{border-color:var(--blue);background:rgba(59,130,246,0.06)}
+textarea{resize:vertical;line-height:1.6}
+label{display:block;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--dim);margin-bottom:6px}
+.field{margin-bottom:14px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.pill{padding:7px 14px;border-radius:100px;border:1px solid var(--border);background:rgba(255,255,255,0.04);color:var(--gray);cursor:pointer;font-size:12.5px;white-space:nowrap}
+.pill:hover{color:#fff}
+.pill.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.tag{display:inline-block;padding:2px 8px;border-radius:5px;font-size:10.5px;letter-spacing:0.05em;text-transform:uppercase;font-weight:600}
+.tag.ok{background:rgba(34,197,94,0.15);color:#86efac}
+.tag.warn{background:rgba(245,158,11,0.15);color:#fcd34d}
+.tag.err{background:rgba(239,68,68,0.15);color:#fca5a5}
+.tag.idle{background:rgba(255,255,255,0.07);color:var(--dim)}
+.tag.busy{background:rgba(59,130,246,0.18);color:#93c5fd}
+.empty{text-align:center;padding:50px 20px;color:var(--dim)}
+.note{font-size:12px;color:var(--dim);line-height:1.65;padding:11px 13px;border-radius:9px;background:rgba(255,255,255,0.03);border-left:2px solid var(--border)}
+.note.warn{background:rgba(245,158,11,0.07);border-left-color:var(--amber);color:#fde68a}
+.note.err{background:rgba(239,68,68,0.07);border-left-color:var(--red);color:#fca5a5}
+.note.info{background:rgba(59,130,246,0.07);border-left-color:var(--blue);color:#bfdbfe}
+.spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,0.15);border-top-color:var(--blue);border-radius:50%;animation:sp 0.7s linear infinite;vertical-align:-2px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.hide{display:none !important}
+
+/* ── Home ───────────────────────────────────────────────── */
+#home-hero{max-width:720px;margin:6vh auto 0;text-align:center}
+#home-hero h1{font-size:36px;margin-bottom:8px}
+#home-hero .tagline{color:var(--dim);font-size:15px;margin-bottom:34px}
+#idea{width:100%;padding:18px 20px;font-size:16px;border-radius:14px;min-height:92px;text-align:left}
+.examples{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:14px}
+.ex{padding:7px 13px;border-radius:100px;background:rgba(255,255,255,0.04);border:1px solid var(--border);font-size:12.5px;color:var(--gray);cursor:pointer}
+.ex:hover{color:#fff;border-color:var(--blue)}
+.opt-group{margin-top:22px;text-align:left}
+.opt-group h3{margin-bottom:8px}
+
+/* ── Storyboard ─────────────────────────────────────────── */
+.scene{background:var(--panel-2);border:1px solid var(--border);border-radius:12px;padding:15px;margin-bottom:11px}
+.scene.failed{border-color:rgba(239,68,68,0.35)}
+.scene.done{border-color:rgba(34,197,94,0.25)}
+.scene-h{display:flex;align-items:center;gap:10px;margin-bottom:11px}
+.scene-n{width:26px;height:26px;border-radius:7px;background:var(--blue-dim);border:1px solid rgba(59,130,246,0.3);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0}
+.scene-time{font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums}
+.scene-body{display:grid;grid-template-columns:130px 1fr;gap:14px}
+.scene-thumb{width:130px;height:74px;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--dim);overflow:hidden;text-align:center;padding:4px}
+.scene-thumb img,.scene-thumb video{width:100%;height:100%;object-fit:cover}
+.scene-f{margin-bottom:8px}
+.scene-f .k{font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:rgba(255,255,255,0.32);margin-bottom:3px}
+.scene-f .v{font-size:13px;line-height:1.55;color:#e5e7eb}
+.prompt-box{font-size:11.5px;color:var(--gray);background:rgba(0,0,0,0.35);border:1px solid var(--border);border-radius:7px;padding:8px 10px;line-height:1.55;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;max-height:76px;overflow-y:auto}
+
+/* ── Timeline ───────────────────────────────────────────── */
+#preview{background:#000;border:1px solid var(--border);border-radius:12px;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;margin-bottom:16px;overflow:hidden}
+#preview img,#preview video{max-width:100%;max-height:100%}
+.tl-track{display:flex;align-items:stretch;gap:10px;margin-bottom:7px}
+.tl-label{width:78px;flex-shrink:0;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--dim);display:flex;align-items:center;gap:6px}
+.tl-lane{flex:1;height:46px;background:rgba(255,255,255,0.025);border:1px solid var(--border);border-radius:7px;position:relative;overflow:hidden}
+.tl-clip{position:absolute;top:3px;bottom:3px;border-radius:5px;font-size:10.5px;padding:4px 6px;overflow:hidden;cursor:pointer;white-space:nowrap;text-overflow:ellipsis;border:1px solid rgba(255,255,255,0.14)}
+.tl-clip.video{background:rgba(59,130,246,0.3)}
+.tl-clip.voice{background:rgba(34,197,94,0.28)}
+.tl-clip.music{background:rgba(167,139,250,0.28)}
+.tl-clip.caption{background:rgba(245,158,11,0.24)}
+.tl-clip.sel{outline:2px solid #fff;z-index:5}
+.tl-gap{position:absolute;top:3px;bottom:3px;border-radius:5px;background:repeating-linear-gradient(45deg,rgba(239,68,68,0.12),rgba(239,68,68,0.12) 6px,transparent 6px,transparent 12px);border:1px dashed rgba(239,68,68,0.4)}
+.tl-ruler{height:18px;position:relative;margin-left:88px;margin-bottom:5px;border-bottom:1px solid var(--border)}
+.tl-tick{position:absolute;font-size:9.5px;color:rgba(255,255,255,0.35);top:2px}
+
+/* ── Mission ────────────────────────────────────────────── */
+.stage{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
+.stage:last-child{border-bottom:none}
+.stage-ico{width:24px;text-align:center;font-size:15px;flex-shrink:0}
+.stage-name{flex:1;font-size:13.5px}
+.stage-det{font-size:11.5px;color:var(--dim);margin-top:2px}
+.stage.waiting{opacity:0.42}
+
+/* ── Misc ───────────────────────────────────────────────── */
+.prov{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--border)}
+.prov:last-child{border-bottom:none}
+.prov-n{flex:1;min-width:0}
+.prov-n .t{font-size:13px}
+.prov-n .s{font-size:11px;color:var(--dim);margin-top:2px;line-height:1.5}
+.finding{display:flex;gap:10px;padding:11px 0;border-bottom:1px solid var(--border);font-size:13px;line-height:1.6}
+.finding:last-child{border-bottom:none}
+.finding .ico{flex-shrink:0}
+.finding .rec{font-size:12px;color:var(--dim);margin-top:4px}
+.bar{height:6px;border-radius:3px;background:rgba(255,255,255,0.08);overflow:hidden;margin:8px 0}
+.bar>i{display:block;height:100%;background:var(--blue);border-radius:3px;transition:width 0.4s}
+.asset{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--panel-2)}
+.asset .th{aspect-ratio:16/9;background:rgba(255,255,255,0.03);display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:11px;overflow:hidden}
+.asset .th img,.asset .th video{width:100%;height:100%;object-fit:cover}
+.asset .m{padding:9px 11px;font-size:11.5px;color:var(--dim);line-height:1.5}
+#toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:100;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
+.toast{padding:11px 18px;border-radius:10px;background:rgba(20,20,24,0.97);border:1px solid var(--border);font-size:13px;max-width:520px;line-height:1.5;box-shadow:0 8px 32px rgba(0,0,0,0.6)}
+.toast.err{border-color:rgba(239,68,68,0.45)}
+.toast.ok{border-color:rgba(34,197,94,0.4)}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:90;display:flex;align-items:center;justify-content:center;padding:24px}
+#modal-box{background:var(--panel-2);border:1px solid var(--border);border-radius:14px;padding:22px;max-width:560px;width:100%;max-height:82vh;overflow-y:auto}
+</style>
+</head>
+<body>
+
+<div id="nav">
+  <div id="logo" onclick="Studio.goHome()">🎬 <span>LEBENX STUDIO</span><span class="tag">From one idea to a complete video</span></div>
+  <div id="nav-right">
+    <span class="chip" id="chip-render" onclick="Studio.view('settings')"><span class="dot off"></span><span>render</span></span>
+    <span class="chip" id="chip-prov" onclick="Studio.view('settings')"><span class="dot off"></span><span>providers</span></span>
+    <span class="chip" id="chip-budget" onclick="Studio.view('cost')">budget</span>
+    <span class="chip" onclick="Studio.goHome()">＋ New</span>
+  </div>
+</div>
+
+<div id="main">
+  <div id="side"></div>
+  <div id="content"><div class="empty"><span class="spin"></span></div></div>
+  <div id="right"></div>
+</div>
+
+<div id="toast"></div>
+<div id="modal" class="hide"><div id="modal-box"></div></div>
+
+<script>
+"use strict";
+
+const Studio = {
+  cfg: null, project: null, view_: 'home', poll: null, sel: null,
+
+  // ── HTTP ──────────────────────────────────────────────
+  async api(path, opts = {}) {
+    const res = await fetch('/studio/api' + path, {
+      ...opts,
+      headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+    });
+    let data = {};
+    try { data = await res.json(); } catch (e) { /* empty body */ }
+    if (!res.ok) {
+      const err = new Error(data.error || `request failed (${res.status})`);
+      Object.assign(err, data, { status: res.status });
+      throw err;
+    }
+    return data;
+  },
+  get(p) { return this.api(p); },
+  post(p, body) { return this.api(p, { method: 'POST', body: JSON.stringify(body || {}) }); },
+  patch(p, body) { return this.api(p, { method: 'PATCH', body: JSON.stringify(body || {}) }); },
+  del(p) { return this.api(p, { method: 'DELETE' }); },
+
+  // ── UI helpers ────────────────────────────────────────
+  esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g,
+      c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  },
+  toast(msg, kind = '') {
+    const el = document.createElement('div');
+    el.className = 'toast ' + kind;
+    el.textContent = msg;
+    document.getElementById('toast').appendChild(el);
+    setTimeout(() => el.remove(), kind === 'err' ? 7000 : 3800);
+  },
+  err(e) {
+    console.error(e);
+    let msg = e.message || 'something went wrong';
+    if (e.providers) {
+      const missing = e.providers.filter(p => p.status !== 'connected')
+        .map(p => `${p.label}: ${p.status}`).join(' · ');
+      if (missing) msg += ` — ${missing}`;
+    }
+    if (e.remedy) msg += ` ${e.remedy}`;
+    this.toast(msg, 'err');
+  },
+  time(s) {
+    s = Math.max(0, Number(s) || 0);
+    const m = Math.floor(s / 60), r = Math.floor(s % 60);
+    return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+  },
+  money(v) { return v == null ? '—' : '$' + Number(v).toFixed(2); },
+  el(id) { return document.getElementById(id); },
+  html(target, markup) { this.el(target).innerHTML = markup; },
+
+  // ── Boot ──────────────────────────────────────────────
+  async init() {
+    try {
+      this.cfg = await this.get('/config');
+      this.renderChips();
+    } catch (e) { this.err(e); }
+    await this.goHome();
+  },
+
+  renderChips() {
+    const r = this.cfg.render || {};
+    const rc = this.el('chip-render');
+    rc.querySelector('.dot').className = 'dot ' + (r.available ? 'ok' : 'off');
+    rc.querySelector('span:last-child').textContent =
+      r.available ? 'render ready' : 'render: no ffmpeg';
+
+    const p = this.cfg.providers || {};
+    const conn = ['image', 'video', 'voice']
+      .flatMap(k => (p[k] || []).filter(x => x.connected)).length;
+    const pc = this.el('chip-prov');
+    pc.querySelector('.dot').className = 'dot ' + (conn ? 'ok' : 'warn');
+    pc.querySelector('span:last-child').textContent =
+      conn ? `${conn} provider${conn > 1 ? 's' : ''}` : 'no providers';
+
+    const b = this.cfg.budget || {};
+    this.el('chip-budget').textContent = b.configured
+      ? `${this.money(b.used)} / ${this.money(b.limit)}`
+      : 'no budget set';
+  },
+
+  // ── Home ──────────────────────────────────────────────
+  async goHome() {
+    clearInterval(this.poll); this.poll = null;
+    this.project = null;
+    this.el('side').classList.remove('on');
+    this.el('right').classList.remove('on');
+    this.view_ = 'home';
+
+    let projects = [];
+    try { projects = (await this.get('/projects')).projects || []; } catch (e) { /* first run */ }
+
+    const examples = [
+      'Explain why smartphones are addictive.',
+      'Create a cinematic documentary about space.',
+      'Make a YouTube Short about the future of AI.',
+      'Explain Bitcoin for beginners.',
+    ];
+    const styles = (this.cfg?.styles || []).map(s => s.id);
+
+    this.html('content', `
+      <div id="home-hero">
+        <h1>What do you want to create?</h1>
+        <div class="tagline">One idea in. A complete, editable video production out.</div>
+        <textarea id="idea" placeholder="Create a 5-minute cinematic YouTube video explaining how social media affects human attention."></textarea>
+        <div class="examples">
+          ${examples.map(e => `<span class="ex" onclick="Studio.el('idea').value=this.textContent">${this.esc(e)}</span>`).join('')}
+        </div>
+
+        <div class="opt-group">
+          <h3>Video type</h3>
+          <div class="row" id="opt-type">
+            ${(this.cfg?.video_types || []).map((t, i) =>
+              `<span class="pill ${i === 0 ? 'on' : ''}" data-v="${t}" onclick="Studio.pick('opt-type',this)">${t.replace(/_/g, ' ')}</span>`).join('')}
+          </div>
+        </div>
+
+        <div class="opt-group">
+          <h3>Duration</h3>
+          <div class="row" id="opt-dur">
+            ${(this.cfg?.duration_presets || []).map(d =>
+              `<span class="pill ${d === 300 ? 'on' : ''}" data-v="${d}" onclick="Studio.pick('opt-dur',this)">${d < 60 ? d + 's' : (d / 60) + ' min'}</span>`).join('')}
+            <input type="number" id="dur-custom" placeholder="custom (s)" style="width:130px" min="5" max="3600">
+          </div>
+        </div>
+
+        <div class="opt-group">
+          <h3>Style</h3>
+          <div class="row" id="opt-style">
+            ${styles.map((s, i) => `<span class="pill ${i === 0 ? 'on' : ''}" data-v="${s}" onclick="Studio.pick('opt-style',this)">${s}</span>`).join('')}
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:26px;justify-content:center">
+          <button class="btn pri" onclick="Studio.create()">Create video project →</button>
+        </div>
+      </div>
+
+      ${projects.length ? `
+        <div class="wrap" style="margin-top:52px">
+          <h3>Your projects</h3>
+          ${projects.map(p => `
+            <div class="card" style="cursor:pointer;margin-bottom:9px" onclick="Studio.open('${p.id}')">
+              <div class="spread">
+                <div style="min-width:0">
+                  <div style="font-weight:500">${this.esc(p.title)}</div>
+                  <div class="sub" style="margin-top:3px">${p.video_type.replace(/_/g, ' ')} · ${p.scenes || 0} scenes · ${p.assets || 0} assets</div>
+                </div>
+                <span class="tag ${p.status === 'ready' ? 'ok' : p.status === 'in_progress' ? 'busy' : 'idle'}">${p.status.replace(/_/g, ' ')}</span>
+              </div>
+            </div>`).join('')}
+        </div>` : ''}
+    `);
+  },
+
+  pick(group, el) {
+    this.el(group).querySelectorAll('.pill').forEach(p => p.classList.remove('on'));
+    el.classList.add('on');
+  },
+  picked(group) {
+    const on = this.el(group)?.querySelector('.pill.on');
+    return on ? on.dataset.v : '';
+  },
+
+  async create() {
+    const idea = this.el('idea').value.trim();
+    if (!idea) return this.toast('Describe the video you want first.', 'err');
+
+    const custom = Number(this.el('dur-custom').value);
+    const duration = custom > 0 ? custom : Number(this.picked('opt-dur')) || 300;
+
+    try {
+      const res = await this.post('/projects', {
+        idea, video_type: this.picked('opt-type'),
+        duration_s: duration, visual_style: this.picked('opt-style'),
+      });
+      this.toast('Project created.', 'ok');
+      await this.open(res.project.id);
+    } catch (e) { this.err(e); }
+  },
+
+  // ── Project shell ─────────────────────────────────────
+  async open(id) {
+    try {
+      const data = await this.get('/projects/' + id);
+      this.project = data;
+      this.el('side').classList.add('on');
+      this.el('right').classList.add('on');
+      this.renderSide();
+      this.renderRight();
+      this.view('overview');
+      this.startPolling();
+    } catch (e) { this.err(e); }
+  },
+
+  async refresh() {
+    if (!this.project) return;
+    try {
+      this.project = await this.get('/projects/' + this.project.project.id);
+      this.renderSide();
+      this.renderRight();
+    } catch (e) { /* transient */ }
+  },
+
+  renderSide() {
+    const p = this.project;
+    const sceneCount = p.storyboard?.scenes?.length || 0;
+    const items = [
+      ['overview', 'Overview', ''],
+      ['brief', 'Brief', ''],
+      ['research', 'Research', p.research ? '✓' : ''],
+      ['script', 'Script', p.script ? '✓' : ''],
+      ['storyboard', 'Storyboard', sceneCount || ''],
+      ['assets', 'Assets', ''],
+      ['voice', 'Voice', ''],
+      ['music', 'Music', ''],
+      ['captions', 'Captions', ''],
+      ['timeline', 'Timeline', ''],
+      ['export', 'Export', ''],
+    ];
+    this.html('side', `
+      <div class="side-h">${this.esc(p.project.title).slice(0, 30)}</div>
+      ${items.map(([k, label, badge]) => `
+        <div class="side-i ${this.view_ === k ? 'on' : ''}" onclick="Studio.view('${k}')">
+          <span>${label}</span>${badge ? `<span class="badge">${badge}</span>` : ''}
+        </div>`).join('')}
+      <div class="side-h">Studio</div>
+      <div class="side-i ${this.view_ === 'cost' ? 'on' : ''}" onclick="Studio.view('cost')"><span>Cost Center</span></div>
+      <div class="side-i ${this.view_ === 'settings' ? 'on' : ''}" onclick="Studio.view('settings')"><span>Settings</span></div>
+    `);
+  },
+
+  renderRight() {
+    const m = this.project?.mission;
+    const q = this.project?.quality;
+    this.html('right', `
+      <h3>Mission</h3>
+      ${m ? this.missionHtml(m) : `<div class="sub">No mission running.</div>
+        <button class="btn pri sm" style="margin-top:11px" onclick="Studio.view('overview')">Start a mission</button>`}
+      ${q ? `<h3 style="margin-top:24px">Last quality check</h3>
+        <div class="sub">${q.passed ? '✓ Passed' : `${q.blocking_count} blocking`}${q.warning_count ? ` · ${q.warning_count} warning(s)` : ''}</div>` : ''}
+    `);
+  },
+
+  missionHtml(m) {
+    const icons = { complete: '✓', running: '●', failed: '✕', waiting: '○',
+                    skipped: '–', awaiting_approval: '⏸' };
+    return `
+      <div class="sub" style="margin-bottom:10px">${m.status.replace(/_/g, ' ')} · stops after ${m.stop_after}</div>
+      ${(m.stages || []).map(s => `
+        <div class="stage ${s.status}">
+          <span class="stage-ico">${icons[s.status] || '○'}</span>
+          <div class="stage-name">${this.esc(s.label)}
+            ${s.detail ? `<div class="stage-det">${this.esc(s.detail)}</div>` : ''}</div>
+        </div>`).join('')}
+      ${m.error ? `<div class="note err" style="margin-top:11px">${this.esc(m.error)}</div>` : ''}
+      ${m.awaiting ? `
+        <div class="note info" style="margin-top:11px">${this.esc(m.awaiting.reason)}</div>
+        ${m.awaiting.context?.cost_estimate ? `
+          <div class="note warn" style="margin-top:8px">
+            Estimated: ${this.money(m.awaiting.context.cost_estimate.known_total)}
+            ${m.awaiting.context.cost_estimate.unknown_count ?
+              ` + ${m.awaiting.context.cost_estimate.unknown_count} item(s) of unknown cost` : ''}
+            <br><span style="opacity:0.75">Estimates are not guaranteed prices.</span>
+          </div>` : ''}
+        <div class="row" style="margin-top:11px">
+          <button class="btn pri sm" onclick="Studio.approveMission('${m.id}',true)">Approve</button>
+          <button class="btn sm" onclick="Studio.approveMission('${m.id}',false)">Decline</button>
+        </div>` : ''}
+      ${['running', 'queued'].includes(m.status) ?
+        `<button class="btn sm danger" style="margin-top:11px" onclick="Studio.cancelMission('${m.id}')">Cancel mission</button>` : ''}
+    `;
+  },
+
+  startPolling() {
+    clearInterval(this.poll);
+    this.poll = setInterval(async () => {
+      if (!this.project) return;
+      const id = this.project.project.id;
+      try {
+        const s = await this.get(`/projects/${id}/mission`);
+        if (s.mission) {
+          this.project.mission = s.mission;
+          this.renderRight();
+          if (['running', 'queued'].includes(s.mission.status)
+              && ['storyboard', 'assets', 'timeline'].includes(this.view_)) {
+            this.view(this.view_, true);
+          }
+        }
+      } catch (e) { /* transient */ }
+    }, 4000);
+  },
+
+  async approveMission(id, ok) {
+    try {
+      await this.post(`/missions/${id}/approve`, { approved: ok });
+      this.toast(ok ? 'Approved — mission resuming.' : 'Mission stopped.', 'ok');
+      await this.refresh();
+    } catch (e) { this.err(e); }
+  },
+  async cancelMission(id) {
+    try {
+      const r = await this.post(`/missions/${id}/cancel`);
+      this.toast(r.note || 'Cancellation requested.');
+      await this.refresh();
+    } catch (e) { this.err(e); }
+  },
+
+  // ── View router ───────────────────────────────────────
+  async view(name, quiet) {
+    this.view_ = name;
+    if (!quiet) { this.renderSide(); this.html('content', '<div class="empty"><span class="spin"></span></div>'); }
+    try {
+      await (this['v_' + name] || this.v_overview).call(this);
+    } catch (e) { this.err(e); }
+    this.renderSide();
+  },
+
+  // ── Overview ──────────────────────────────────────────
+  async v_overview() {
+    const p = this.project.project, b = this.project.brief || {};
+    const stages = this.cfg.stages || [];
+    this.html('content', `
+      <div class="wrap">
+        <h1>${this.esc(p.title)}</h1>
+        <div class="sub" style="margin:6px 0 22px">${this.esc(p.idea)}</div>
+
+        <div class="card">
+          <h2>Run a mission</h2>
+          <div class="sub" style="margin-bottom:14px">
+            The agent team works the pipeline in order. Choose where it should stop —
+            you can always continue later.
+          </div>
+          <div class="field">
+            <label>Stop after</label>
+            <div class="row" id="opt-stop">
+              ${stages.map(s => `<span class="pill ${s.id === 'storyboard' ? 'on' : ''}" data-v="${s.id}" onclick="Studio.pick('opt-stop',this)">${this.esc(s.label)}</span>`).join('')}
+            </div>
+          </div>
+          <div class="field">
+            <label>Approval level</label>
+            <div class="row" id="opt-appr">
+              <span class="pill" data-v="full_auto" onclick="Studio.pick('opt-appr',this)">Full auto</span>
+              <span class="pill on" data-v="expensive" onclick="Studio.pick('opt-appr',this)">Approve paid steps</span>
+              <span class="pill" data-v="manual" onclick="Studio.pick('opt-appr',this)">Approve every stage</span>
+            </div>
+          </div>
+          <button class="btn pri" onclick="Studio.startMission()">Start mission</button>
+        </div>
+
+        <div class="grid3">
+          <div class="card"><h3>Duration</h3><div style="font-size:20px">${this.time(b.duration_s)}</div></div>
+          <div class="card"><h3>Aspect</h3><div style="font-size:20px">${this.esc(b.aspect_ratio)}</div></div>
+          <div class="card"><h3>Style</h3><div style="font-size:20px">${this.esc(b.visual_style)}</div></div>
+        </div>
+
+        <div class="card">
+          <h3>Pipeline</h3>
+          <div class="sub">🧠 Researcher → ✍️ Writer → 🎬 Director → 🔍 Critic → 🎨 Visual Agent
+            → 🎙️ Voice → ✂️ Editor → ✅ Quality Control → 📤 Render</div>
+        </div>
+      </div>`);
+  },
+
+  async startMission() {
+    try {
+      await this.post(`/projects/${this.project.project.id}/mission`, {
+        stop_after: this.picked('opt-stop') || 'storyboard',
+        approval_level: this.picked('opt-appr') || 'expensive',
+      });
+      this.toast('Mission started.', 'ok');
+      await this.refresh();
+    } catch (e) { this.err(e); }
+  },
+
+  // ── Brief ─────────────────────────────────────────────
+  async v_brief() {
+    const b = this.project.brief || {};
+    const styles = (this.cfg.styles || []).map(s => s.id);
+    this.html('content', `
+      <div class="wrap">
+        <h1>Video brief</h1>
+        <div class="sub" style="margin:6px 0 20px">The AI suggested these. Change anything.</div>
+        <div class="card">
+          <div class="field"><label>Topic</label><textarea id="b-topic" rows="2">${this.esc(b.topic)}</textarea></div>
+          <div class="grid2">
+            <div class="field"><label>Target audience</label><input type="text" id="b-aud" value="${this.esc(b.audience)}" placeholder="e.g. curious adults, no background"></div>
+            <div class="field"><label>Platform</label><input type="text" id="b-plat" value="${this.esc(b.platform)}"></div>
+            <div class="field"><label>Duration (seconds)</label><input type="number" id="b-dur" value="${b.duration_s}" min="5" max="3600"></div>
+            <div class="field"><label>Language</label><input type="text" id="b-lang" value="${this.esc(b.language)}"></div>
+            <div class="field"><label>Tone</label><input type="text" id="b-tone" value="${this.esc(b.tone)}" placeholder="e.g. calm, urgent, wry"></div>
+            <div class="field"><label>Visual style</label>
+              <select id="b-style">${styles.map(s => `<option ${s === b.visual_style ? 'selected' : ''}>${s}</option>`).join('')}</select>
+            </div>
+          </div>
+          <div class="field"><label>Aspect ratio</label>
+            <div class="row" id="opt-ar">
+              ${['16:9', '9:16', '1:1'].map(a => `<span class="pill ${a === b.aspect_ratio ? 'on' : ''}" data-v="${a}" onclick="Studio.pick('opt-ar',this)">${a}</span>`).join('')}
+            </div>
+          </div>
+          <button class="btn pri" onclick="Studio.saveBrief()">Save brief</button>
+        </div>
+      </div>`);
+  },
+
+  async saveBrief() {
+    try {
+      await this.patch(`/projects/${this.project.project.id}/brief`, {
+        topic: this.el('b-topic').value, audience: this.el('b-aud').value,
+        platform: this.el('b-plat').value, duration_s: Number(this.el('b-dur').value),
+        language: this.el('b-lang').value, tone: this.el('b-tone').value,
+        visual_style: this.el('b-style').value, aspect_ratio: this.picked('opt-ar'),
+      });
+      this.toast('Brief saved.', 'ok');
+      await this.refresh();
+    } catch (e) { this.err(e); }
+  },
+
+  // ── Research ──────────────────────────────────────────
+  async v_research() {
+    const r = this.project.research;
+    const list = (title, items) => !items?.length ? '' :
+      `<div class="card"><h3>${title}</h3>${items.map(i => `<div style="line-height:1.7">• ${this.esc(i)}</div>`).join('')}</div>`;
+
+    this.html('content', `
+      <div class="wrap">
+        <div class="spread"><h1>Research</h1>
+          <div class="row">
+            <button class="btn" onclick="Studio.runResearch()">${r ? 'Re-run' : 'Run research'}</button>
+            ${r ? `<button class="btn sm" onclick="Studio.view('script')">Skip to script</button>` : ''}
+          </div>
+        </div>
+        ${!r ? `<div class="empty">No research yet. The Research Agent will gather facts, angles and misconceptions.</div>` : `
+          <div class="note ${r.evidence_mode === 'search' ? 'info' : 'warn'}" style="margin:16px 0">
+            ${r.evidence_mode === 'search'
+              ? '🔎 Source-backed: a research tool ran and returned retrievable sources.'
+              : '⚠ Model recollection only — no research tool is connected, so nothing here is source-backed. Verify before publishing.'}
+          </div>
+          ${r.hook ? `<div class="card"><h3>Potential hook</h3><div style="font-size:16px;line-height:1.6">${this.esc(r.hook)}</div></div>` : ''}
+          ${list('Key points', r.key_points)}
+          ${list('Important facts', r.facts)}
+          ${list('Interesting statistics', r.statistics)}
+          ${list('Misconceptions', r.misconceptions)}
+          <div class="card"><h3>Sources</h3>
+            ${r.sources?.length ? r.sources.map(s => `
+              <div style="line-height:1.65;margin-bottom:8px">
+                ${s.url ? `<a href="${this.esc(s.url)}" target="_blank" rel="noopener">${this.esc(s.title)}</a>`
+                        : `<span>${this.esc(s.title)}</span> <span class="tag warn">unverified</span>`}
+                ${s.note ? `<div class="sub" style="font-size:11.5px">${this.esc(s.note)}</div>` : ''}
+              </div>`).join('')
+              : '<div class="sub">No sources — nothing was retrieved, so nothing is cited. Citations are never invented.</div>'}
+          </div>
+          ${list('Uncertainties', r.uncertainties)}
+        `}
+      </div>`);
+  },
+
+  async runResearch() {
+    this.toast('Researching…');
+    try {
+      await this.post(`/projects/${this.project.project.id}/research`, {});
+      await this.refresh();
+      this.view('research');
+    } catch (e) { this.err(e); }
+  },
+
+  // ── Script ────────────────────────────────────────────
+  async v_script() {
+    const s = this.project.script;
+    const modes = [['shorter', 'Make shorter'], ['longer', 'Make longer'],
+                   ['humanize', 'Humanize'], ['punchier', 'Punchier'],
+                   ['simpler', 'Simpler'], ['stronger_hook', 'Stronger hook']];
+    this.html('content', `
+      <div class="wrap">
+        <div class="spread"><h1>Script</h1>
+          <button class="btn ${s ? '' : 'pri'}" onclick="Studio.genScript()">${s ? 'Regenerate' : 'Generate script'}</button>
+        </div>
+        ${!s ? '<div class="empty">No script yet. The Writer Agent will draft a timed narration.</div>' : `
+          <div class="row" style="margin:16px 0">
+            ${modes.map(([m, l]) => `<button class="btn sm" onclick="Studio.rewrite('${m}')">${l}</button>`).join('')}
+          </div>
+          <div class="card">
+            <div class="field"><label>Title</label><input type="text" id="s-title" value="${this.esc(s.title)}"></div>
+            <div class="field"><label>Hook</label><textarea id="s-hook" rows="2">${this.esc(s.hook)}</textarea></div>
+          </div>
+          <div class="card">
+            <h3>Full script — ${s.segments.length} segments · ${s.word_count} words</h3>
+            <div id="segs">
+              ${s.segments.map((g, i) => `
+                <div class="field">
+                  <label>${this.time(g.start_s)} – ${this.time(g.end_s)}</label>
+                  <textarea rows="2" data-seg="${i}" data-start="${g.start_s}" data-end="${g.end_s}">${this.esc(g.text)}</textarea>
+                </div>`).join('')}
+            </div>
+          </div>
+          <div class="card">
+            <div class="field"><label>Call to action</label><textarea id="s-cta" rows="2">${this.esc(s.call_to_action)}</textarea></div>
+          </div>
+          <div class="row">
+            <button class="btn pri" onclick="Studio.saveScript()">Save edits</button>
+            <button class="btn" onclick="Studio.view('storyboard')">Continue to storyboard →</button>
+          </div>
+        `}
+      </div>`);
+  },
+
+  async genScript() {
+    this.toast('Writing…');
+    try {
+      await this.post(`/projects/${this.project.project.id}/script`, {});
+      await this.refresh(); this.view('script');
+    } catch (e) { this.err(e); }
+  },
+  async rewrite(mode) {
+    this.toast('Rewriting…');
+    try {
+      await this.post(`/projects/${this.project.project.id}/script`, { mode });
+      await this.refresh(); this.view('script');
+    } catch (e) { this.err(e); }
+  },
+  async saveScript() {
+    const segs = [...document.querySelectorAll('#segs textarea')].map(t => ({
+      start_s: Number(t.dataset.start), end_s: Number(t.dataset.end), text: t.value,
+    }));
+    try {
+      await this.patch(`/projects/${this.project.project.id}/script`, {
+        title: this.el('s-title').value, hook: this.el('s-hook').value,
+        call_to_action: this.el('s-cta').value, segments: segs,
+      });
+      this.toast('Script saved.', 'ok');
+      await this.refresh();
+    } catch (e) { this.err(e); }
+  },
+
+  // ── Storyboard ────────────────────────────────────────
+  async v_storyboard() {
+    const data = await this.get(`/projects/${this.project.project.id}/storyboard`);
+    const sb = data.storyboard;
+    this.project.storyboard = sb;
+
+    this.html('content', `
+      <div class="wrap">
+        <div class="spread"><h1>Storyboard</h1>
+          <div class="row">
+            <button class="btn" onclick="Studio.genStoryboard()">${sb ? 'Regenerate' : 'Create storyboard'}</button>
+            ${sb ? `<button class="btn pri" onclick="Studio.generateAll()">Generate all visuals</button>` : ''}
+          </div>
+        </div>
+        ${!sb ? '<div class="empty">No storyboard yet. The Director Agent will break the script into shots.</div>' : `
+          <div class="sub" style="margin:8px 0 18px">
+            ${sb.scenes.length} scenes · style: ${this.esc(sb.style)}${sb.pacing ? ` · ${this.esc(sb.pacing)}` : ''}
+          </div>
+          <div id="scenes">${sb.scenes.map(s => this.sceneCard(s)).join('')}</div>
+        `}
+      </div>`);
+  },
+
+  sceneCard(s) {
+    const st = { completed: 'ok', failed: 'err', queued: 'busy', generating: 'busy',
+                 blocked: 'warn', pending: 'idle' }[s.status] || 'idle';
+    const asset = s.selected_asset_id;
+    return `
+      <div class="scene ${s.status === 'failed' ? 'failed' : s.status === 'completed' ? 'done' : ''}">
+        <div class="scene-h">
+          <span class="scene-n">${s.idx + 1}</span>
+          <span class="scene-time">${this.time(s.start_s)} – ${this.time(s.start_s + s.duration_s)} · ${s.duration_s.toFixed(1)}s</span>
+          <span class="tag ${st}">${s.status}</span>
+          <span class="tag idle">${s.asset_type.replace(/_/g, ' ')}</span>
+          <span style="flex:1"></span>
+          <button class="btn sm" onclick="Studio.genScene('${s.id}')">Generate</button>
+          <button class="btn sm" onclick="Studio.regenPrompt('${s.id}')">Re-prompt</button>
+          <button class="btn sm" onclick="Studio.splitScene('${s.id}')">Split</button>
+          <button class="btn sm" onclick="Studio.dupScene('${s.id}')">Duplicate</button>
+          <button class="btn sm danger" onclick="Studio.delScene('${s.id}')">Delete</button>
+        </div>
+        <div class="scene-body">
+          <div class="scene-thumb">${asset
+            ? `<img src="/studio/media/${this.esc(this.project.project.id)}/${s.asset_type === 'ai_video' ? 'video' : 'image'}/${this.esc(asset)}.png" onerror="this.parentElement.textContent='asset stored'">`
+            : (s.status === 'blocked' ? 'no provider' : 'not generated')}</div>
+          <div>
+            <div class="scene-f"><div class="k">Narration</div><div class="v">${this.esc(s.narration) || '—'}</div></div>
+            <div class="scene-f"><div class="k">Visual</div><div class="v">${this.esc(s.visual_description)}</div></div>
+            <div class="scene-f"><div class="k">Camera · transition</div><div class="v">${this.esc(s.camera)} · ${this.esc(s.transition)}</div></div>
+            <div class="scene-f"><div class="k">Generation prompt</div><div class="prompt-box">${this.esc(s.generation_prompt)}</div></div>
+            ${s.error ? `<div class="note err" style="margin-top:8px">${this.esc(s.error)}</div>` : ''}
+          </div>
+        </div>
+      </div>`;
+  },
+
+  async genStoryboard() {
+    this.toast('Directing…');
+    try {
+      await this.post(`/projects/${this.project.project.id}/storyboard`, {});
+      await this.refresh(); this.view('storyboard');
+    } catch (e) { this.err(e); }
+  },
+
+  async genScene(id) {
+    try {
+      const r = await this.post(`/scenes/${id}/generate`, {});
+      if (r.requires_confirmation) return this.confirmCost(r, () => this.genScene2(id));
+      this.toast('Queued.', 'ok'); this.view('storyboard', true);
+    } catch (e) {
+      if (e.status === 402) return this.confirmCost(e, () => this.genScene2(id, true));
+      this.err(e);
+    }
+  },
+  async genScene2(id, overBudget) {
+    try {
+      await this.post(`/scenes/${id}/generate`,
+        { confirm: true, confirm_over_budget: !!overBudget });
+      this.toast('Queued.', 'ok'); this.closeModal(); this.view('storyboard', true);
+    } catch (e) { this.err(e); }
+  },
+
+  async generateAll() {
+    try {
+      const r = await this.post(`/projects/${this.project.project.id}/generate-all`, {});
+      if (r.requires_confirmation) return this.confirmCost(r, () => this.generateAll2());
+      this.toast(`${r.queued} scene(s) queued.`, 'ok');
+    } catch (e) {
+      if (e.status === 402) return this.confirmCost(e, () => this.generateAll2(true));
+      this.err(e);
+    }
+  },
+  async generateAll2(overBudget) {
+    try {
+      const r = await this.post(`/projects/${this.project.project.id}/generate-all`,
+        { confirm: true, confirm_over_budget: !!overBudget });
+      this.closeModal();
+      this.toast(`${r.queued} queued${r.blocked?.length ? `, ${r.blocked.length} blocked` : ''}.`, 'ok');
+      this.view('storyboard', true);
+    } catch (e) { this.err(e); }
+  },
+
+  confirmCost(payload, onConfirm) {
+    const est = payload.estimate || {};
+    const amount = est.known_total !== undefined ? est.known_total : est.amount;
+    const unknown = est.unknown_count || 0;
+    this.modal(`
+      <h2>Confirm generation</h2>
+      <div class="note warn" style="margin:14px 0">
+        <div style="font-size:16px;color:#fff">Estimated cost: ${this.money(amount)}</div>
+        ${unknown ? `<div style="margin-top:6px">Plus ${unknown} item(s) whose cost this provider does not publish.</div>` : ''}
+        <div style="margin-top:8px">This is an <b>estimate</b>, not a guaranteed price.
+        Your provider's actual charge may differ.</div>
+      </div>
+      ${payload.reason ? `<div class="note err">${this.esc(payload.reason)}</div>` : ''}
+      <div class="row" style="margin-top:16px">
+        <button class="btn pri" id="m-go">Generate</button>
+        <button class="btn" onclick="Studio.closeModal()">Cancel</button>
+      </div>`);
+    this.el('m-go').onclick = onConfirm;
+  },
+
+  async regenPrompt(id) {
+    try {
+      const r = await this.post(`/scenes/${id}/prompt`, {});
+      this.toast('Prompt rebuilt.' + (r.consistency_warning ? ' See note.' : ''), 'ok');
+      if (r.consistency_warning) this.toast(r.consistency_warning);
+      this.view('storyboard', true);
+    } catch (e) { this.err(e); }
+  },
+  async splitScene(id) {
+    try { await this.post(`/scenes/${id}/split`, {}); this.view('storyboard'); }
+    catch (e) { this.err(e); }
+  },
+  async dupScene(id) {
+    try { await this.post(`/scenes/${id}/duplicate`, {}); this.view('storyboard'); }
+    catch (e) { this.err(e); }
+  },
+  async delScene(id) {
+    try { await this.del(`/scenes/${id}`); this.view('storyboard'); }
+    catch (e) { this.err(e); }
+  },
+
+  // ── Assets ────────────────────────────────────────────
+  async v_assets() {
+    const r = await this.get(`/projects/${this.project.project.id}/assets`);
+    this.html('content', `
+      <div class="wrap">
+        <div class="spread"><h1>Asset library</h1>
+          <label class="btn" style="text-transform:none;letter-spacing:0;margin:0">
+            Upload<input type="file" style="display:none" onchange="Studio.upload(this)">
+          </label>
+        </div>
+        <div class="sub" style="margin:6px 0 18px">${r.count} asset(s)</div>
+        ${!r.count ? '<div class="empty">Nothing generated or uploaded yet.</div>' : `
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:13px">
+            ${r.assets.map(a => `
+              <div class="asset">
+                <div class="th">${!a.available ? 'missing from storage'
+                  : a.kind === 'image' ? `<img src="${this.esc(a.url)}" loading="lazy">`
+                  : a.kind === 'video' ? `<video src="${this.esc(a.url)}" muted></video>`
+                  : a.kind}</div>
+                <div class="m">
+                  <div style="color:#fff">${this.esc(a.kind)}${a.duration_s ? ` · ${a.duration_s.toFixed(1)}s` : ''}</div>
+                  <div>${this.esc(a.provider || a.source)}${a.width ? ` · ${a.width}×${a.height}` : ''}</div>
+                  <div class="row" style="margin-top:7px">
+                    <a class="btn sm" href="${this.esc(a.url)}" target="_blank" rel="noopener">Open</a>
+                    <button class="btn sm danger" onclick="Studio.delAsset('${a.id}')">Delete</button>
+                  </div>
+                </div>
+              </div>`).join('')}
+          </div>`}
+      </div>`);
+  },
+
+  async upload(input) {
+    const file = input.files[0];
+    if (!file) return;
+    const form = new FormData();
+    form.append('file', file);
+    try {
+      const res = await fetch(`/studio/api/projects/${this.project.project.id}/assets/upload`,
+        { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'upload failed');
+      this.toast('Uploaded.', 'ok');
+      this.view('assets');
+    } catch (e) { this.err(e); }
+  },
+  async delAsset(id) {
+    try { await this.del(`/assets/${id}`); this.view('assets'); }
+    catch (e) { this.err(e); }
+  },
+
+  // ── Voice ─────────────────────────────────────────────
+  async v_voice() {
+    const [voices, timing] = await Promise.all([
+      this.get('/voices'),
+      this.get(`/projects/${this.project.project.id}/timing`),
+    ]);
+    this.html('content', `
+      <div class="wrap">
+        <h1>Voiceover</h1>
+        ${!voices.count ? `
+          <div class="note warn" style="margin:16px 0">
+            No voice provider is connected. Connect one in Settings — nothing can be
+            narrated until then.
+          </div>` : `
+          <div class="card">
+            <div class="field"><label>Voice (${voices.count} available)</label>
+              <select id="v-voice">${voices.voices.slice(0, 300).map(v =>
+                `<option value="${this.esc(v.id)}" data-p="${this.esc(v.provider)}">${this.esc(v.name)} — ${this.esc(v.language)} (${this.esc(v.provider)})</option>`).join('')}</select>
+            </div>
+            <div class="field"><label>Speed</label>
+              <input type="number" id="v-speed" value="1.0" step="0.05" min="0.5" max="1.5"></div>
+            <button class="btn pri" onclick="Studio.genVoice()">Generate narration for all scenes</button>
+          </div>`}
+
+        <h3 style="margin-top:26px">Voice timing</h3>
+        ${timing.conflicts?.length ? timing.conflicts.map(c => `
+          <div class="card" style="border-color:rgba(245,158,11,0.35)">
+            <div style="margin-bottom:10px">⚠ ${this.esc(c.message)}</div>
+            <div class="row">
+              ${c.options.map(o => `
+                <button class="btn sm ${o.recommended ? 'pri' : ''}" title="${this.esc(o.effect)}"
+                  onclick="Studio.resolveTiming('${c.scene_id}','${o.action}')">
+                  ${this.esc(o.label)}${o.warning ? ' ⚠' : ''}
+                </button>`).join('')}
+            </div>
+            <div class="sub" style="margin-top:9px">${c.options.map(o => `<div>• <b>${this.esc(o.label)}</b> — ${this.esc(o.effect)}</div>`).join('')}</div>
+          </div>`).join('') : `<div class="sub">${timing.ok?.length ? `✓ ${timing.ok.length} scene(s) are in sync.` : 'Nothing measured yet.'}</div>`}
+        ${timing.unknown?.length ? `<div class="note" style="margin-top:12px">
+          ${timing.unknown.length} scene(s) have no measured narration duration yet, so their
+          timing cannot be checked.</div>` : ''}
+      </div>`);
+  },
+
+  async genVoice() {
+    const sel = this.el('v-voice');
+    try {
+      const r = await this.post(`/projects/${this.project.project.id}/voice`, {
+        voice_id: sel.value, provider: sel.selectedOptions[0].dataset.p,
+        speed: Number(this.el('v-speed').value),
+      });
+      this.toast(`${r.queued} narration job(s) queued.`, 'ok');
+    } catch (e) { this.err(e); }
+  },
+  async resolveTiming(sceneId, action) {
+    try {
+      const r = await this.post(`/projects/${this.project.project.id}/timing/resolve`,
+        { scene_id: sceneId, action });
+      this.toast(r.note || r.error || 'Applied.', r.ok ? 'ok' : 'err');
+      this.view('voice');
+    } catch (e) { this.err(e); }
+  },
+
+  // ── Music ─────────────────────────────────────────────
+  async v_music() {
+    const [tracks, assets] = await Promise.all([
+      this.get(`/projects/${this.project.project.id}/music`),
+      this.get(`/projects/${this.project.project.id}/assets?kind=audio`),
+    ]);
+    this.html('content', `
+      <div class="wrap">
+        <h1>Music</h1>
+        <div class="note" style="margin:14px 0">
+          Only use music you have the rights to. Uploading it here does not grant a licence,
+          and rendering it does not either.
+        </div>
+        ${assets.count ? `
+          <div class="card">
+            <div class="field"><label>Add an uploaded audio file as music</label>
+              <select id="m-asset">${assets.assets.map(a => `<option value="${a.id}">${this.esc(a.filename)}</option>`).join('')}</select></div>
+            <div class="field"><label><input type="checkbox" id="m-rights" style="width:auto;margin-right:7px">I confirm I hold the rights to use this music</label></div>
+            <button class="btn pri" onclick="Studio.addMusic()">Add track</button>
+          </div>` : `<div class="sub">Upload an audio file under Assets first.</div>`}
+
+        ${tracks.tracks.map(t => `
+          <div class="card">
+            <div class="spread">
+              <div><div>${this.esc(t.title)}</div>
+                <div class="sub">volume ${(t.volume * 100).toFixed(0)}% · fade ${t.fade_in_s}s/${t.fade_out_s}s · ducking ${t.ducking ? 'on' : 'off'}</div></div>
+              <div class="row">
+                <span class="tag ${t.rights_status === 'unverified' ? 'warn' : 'ok'}">${t.rights_status.replace(/_/g, ' ')}</span>
+                <button class="btn sm danger" onclick="Studio.delMusic('${t.id}')">Remove</button>
+              </div>
+            </div>
+          </div>`).join('')}
+      </div>`);
+  },
+
+  async addMusic() {
+    try {
+      const r = await this.post(`/projects/${this.project.project.id}/music`, {
+        asset_id: this.el('m-asset').value,
+        rights_attested: this.el('m-rights').checked,
+      });
+      if (r.warning) this.toast(r.warning);
+      else this.toast('Music added.', 'ok');
+      this.view('music');
+    } catch (e) { this.err(e); }
+  },
+  async delMusic(id) {
+    try { await this.del(`/music/${id}`); this.view('music'); } catch (e) { this.err(e); }
+  },
+
+  // ── Captions ──────────────────────────────────────────
+  async v_captions() {
+    const r = await this.get(`/projects/${this.project.project.id}/captions`);
+    const t = r.track;
+    this.html('content', `
+      <div class="wrap">
+        <div class="spread"><h1>Captions</h1>
+          <div class="row">
+            <button class="btn pri" onclick="Studio.buildCaptions()">${t ? 'Rebuild' : 'Generate captions'}</button>
+            ${t ? `<a class="btn sm" href="/studio/api/projects/${this.project.project.id}/captions/export?format=srt">SRT</a>
+                   <a class="btn sm" href="/studio/api/projects/${this.project.project.id}/captions/export?format=vtt">WebVTT</a>` : ''}
+          </div>
+        </div>
+        ${!t ? '<div class="empty">No captions yet.</div>' : `
+          <div class="note ${t.timing_source === 'voice' ? 'info' : 'warn'}" style="margin:16px 0">
+            ${t.timing_source === 'voice' ? '✓ Timed from measured voiceover durations — accurate.'
+              : t.timing_source === 'manual' ? '✎ Hand-edited timings.'
+              : '⚠ Timed from the planned script, not generated audio. These will drift if the narration runs long. Rebuild after generating voice.'}
+          </div>
+          <div class="card">
+            <div class="field"><label>Style</label>
+              <div class="row" id="opt-cap">
+                ${(this.cfg.caption_styles || []).map(s => `<span class="pill ${s.id === t.style ? 'on' : ''}" data-v="${s.id}" onclick="Studio.pick('opt-cap',this);Studio.setCaptionStyle('${s.id}')">${this.esc(s.label)}</span>`).join('')}
+              </div>
+            </div>
+          </div>
+          <div class="card"><h3>${t.cues.length} cues</h3>
+            ${t.cues.slice(0, 120).map(c => `
+              <div style="display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--border)">
+                <span class="scene-time" style="width:110px;flex-shrink:0">${this.time(c.start_s)} → ${this.time(c.end_s)}</span>
+                <span style="line-height:1.55">${this.esc(c.text)}</span>
+              </div>`).join('')}
+            ${t.cues.length > 120 ? `<div class="sub" style="margin-top:10px">…and ${t.cues.length - 120} more.</div>` : ''}
+          </div>`}
+      </div>`);
+  },
+
+  async buildCaptions() {
+    try {
+      const r = await this.post(`/projects/${this.project.project.id}/captions`, {});
+      this.toast(`${r.cue_count} cues (${r.timing_source} timing).`, 'ok');
+      this.view('captions');
+    } catch (e) { this.err(e); }
+  },
+  async setCaptionStyle(style) {
+    try { await this.patch(`/projects/${this.project.project.id}/captions`, { style }); }
+    catch (e) { this.err(e); }
+  },
+
+  // ── Timeline ──────────────────────────────────────────
+  async v_timeline() {
+    const [tlData, insights] = await Promise.all([
+      this.get(`/projects/${this.project.project.id}/timeline`),
+      this.get(`/projects/${this.project.project.id}/editor-insights`),
+    ]);
+    const t = tlData.timeline;
+    const dur = t?.duration_s || 0;
+
+    this.html('content', `
+      <div class="wrap">
+        <div class="spread"><h1>Timeline</h1>
+          <div class="row">
+            <button class="btn pri" onclick="Studio.assemble()">Auto assemble</button>
+            <button class="btn" onclick="Studio.qualityCheck()">Quality check</button>
+          </div>
+        </div>
+
+        ${!t || !dur ? '<div class="empty">Nothing on the timeline. Generate scene assets, then Auto Assemble.</div>' : `
+          <div class="sub" style="margin:8px 0 16px">${this.time(dur)} · ${t.width}×${t.height} · ${t.fps}fps · ${t.aspect_ratio}</div>
+          <div class="tl-ruler">
+            ${Array.from({ length: 9 }, (_, i) => {
+              const at = dur * i / 8;
+              return `<span class="tl-tick" style="left:${(i / 8) * 100}%">${this.time(at)}</span>`;
+            }).join('')}
+          </div>
+          ${(t.tracks || []).map(tr => `
+            <div class="tl-track">
+              <div class="tl-label">
+                <span onclick="Studio.mute('${tr.id}',${!tr.muted})" style="cursor:pointer">${tr.muted ? '🔇' : '🔊'}</span>
+                ${tr.kind}
+              </div>
+              <div class="tl-lane">
+                ${tr.clips.map(c => `
+                  <div class="tl-clip ${tr.kind} ${c.missing_asset ? 'gap' : ''}"
+                       style="left:${(c.start_s / dur) * 100}%;width:${Math.max(0.4, (c.duration_s / dur) * 100)}%"
+                       title="${this.esc(c.text || c.asset?.filename || tr.kind)} — ${c.duration_s.toFixed(1)}s"
+                       onclick="Studio.selectClip('${c.id}')">
+                    ${c.missing_asset ? '⚠ missing' : this.esc((c.text || c.asset?.filename || tr.kind).slice(0, 28))}
+                  </div>`).join('')}
+              </div>
+            </div>`).join('')}
+        `}
+
+        <h3 style="margin-top:30px">✂️ Editor insights</h3>
+        ${!insights.insights?.length ? `<div class="sub">${this.esc(insights.note || 'Nothing flagged.')}</div>` : `
+          ${insights.insights.map(i => `
+            <div class="finding">
+              <span class="ico">${i.severity === 'warning' ? '⚠' : 'ℹ'}</span>
+              <div><div>${this.esc(i.insight)}</div>
+                <div class="rec">→ ${this.esc(i.recommendation)}</div></div>
+            </div>`).join('')}
+          <div class="note" style="margin-top:14px">${this.esc(insights.note || '')}</div>`}
+      </div>`);
+  },
+
+  async assemble() {
+    this.toast('Assembling…');
+    try {
+      const r = await this.post(`/projects/${this.project.project.id}/timeline/assemble`, {});
+      this.toast(`${r.scenes_placed} clip(s) placed${r.scenes_skipped ? `, ${r.scenes_skipped} gap(s)` : ''}.`, 'ok');
+      if (r.scenes_skipped) {
+        this.toast(`${r.scenes_skipped} scene(s) have no asset and were left as gaps.`);
+      }
+      this.view('timeline');
+    } catch (e) { this.err(e); }
+  },
+  async mute(trackId, muted) {
+    try { await this.patch(`/tracks/${trackId}`, { muted }); this.view('timeline'); }
+    catch (e) { this.err(e); }
+  },
+  selectClip(id) { this.sel = id; this.toast('Clip selected: ' + id.slice(0, 12)); },
+
+  async qualityCheck() {
+    try {
+      const q = await this.post(`/projects/${this.project.project.id}/quality-check`, {});
+      this.showQuality(q);
+      await this.refresh();
+    } catch (e) { this.err(e); }
+  },
+
+  showQuality(q) {
+    const ico = { blocking: '✕', warning: '⚠', note: 'ℹ' };
+    this.modal(`
+      <h2>Quality check</h2>
+      <div class="note ${q.passed ? 'info' : 'err'}" style="margin:12px 0">${this.esc(q.summary)}</div>
+      ${q.findings.map(f => `
+        <div class="finding">
+          <span class="ico">${ico[f.severity] || 'ℹ'}</span>
+          <div><div>${this.esc(f.message)}</div>
+            ${f.recommendation ? `<div class="rec">→ ${this.esc(f.recommendation)}</div>` : ''}</div>
+        </div>`).join('')}
+      <div class="row" style="margin-top:16px"><button class="btn" onclick="Studio.closeModal()">Close</button></div>`);
+  },
+
+  // ── Export ────────────────────────────────────────────
+  async v_export() {
+    const [caps, renders] = await Promise.all([
+      this.get('/render/capabilities'),
+      this.get(`/projects/${this.project.project.id}/renders`),
+    ]);
+    this.html('content', `
+      <div class="wrap">
+        <h1>Export</h1>
+        ${!caps.available ? `
+          <div class="note err" style="margin:16px 0">
+            <div style="font-size:15px;color:#fff;margin-bottom:6px">Rendering is unavailable on this host</div>
+            <div>${this.esc(caps.reason)}</div>
+            <div style="margin-top:8px"><b>Fix:</b> ${this.esc(caps.remedy)}</div>
+            <div style="margin-top:8px">${this.esc(caps.impact)}</div>
+          </div>` : `
+          <div class="card">
+            <div class="grid3">
+              <div class="field"><label>Resolution</label>
+                <select id="x-res">${caps.resolutions.map(r => `<option value="${r.id}" ${r.id === '1080p' ? 'selected' : ''}>${this.esc(r.label)}</option>`).join('')}</select></div>
+              <div class="field"><label>Frame rate</label>
+                <select id="x-fps">${caps.frame_rates.map(f => `<option value="${f.id}" ${f.id === 30 ? 'selected' : ''}>${this.esc(f.label)}</option>`).join('')}</select></div>
+              <div class="field"><label>Format</label>
+                <select id="x-fmt">${caps.formats.map(f => `<option value="${f.id}">${this.esc(f.label)}</option>`).join('')}</select></div>
+            </div>
+            <div class="sub" style="margin-bottom:12px">${this.esc(caps.notes || '')}</div>
+            <button class="btn pri" onclick="Studio.render()">Render final video</button>
+          </div>`}
+
+        <h3 style="margin-top:26px">Renders</h3>
+        ${!renders.renders.length ? '<div class="sub">No renders yet.</div>' :
+          renders.renders.map(r => `
+            <div class="card">
+              <div class="spread">
+                <div style="flex:1;min-width:0">
+                  <div>${this.esc(r.stage_detail || r.stage)}</div>
+                  ${r.progress_pct != null ? `<div class="bar"><i style="width:${r.progress_pct}%"></i></div>
+                    <div class="sub">${r.progress_pct.toFixed(0)}% — measured from the encoder</div>`
+                    : `<div class="sub">Stage: ${this.esc(r.stage)} (this stage reports no percentage)</div>`}
+                  ${r.error ? `<div class="note err" style="margin-top:8px">${this.esc(r.error)}</div>` : ''}
+                </div>
+                <div class="row">
+                  <span class="tag ${r.status === 'completed' ? 'ok' : r.status === 'failed' ? 'err' : 'busy'}">${r.status}</span>
+                  ${r.download_url ? `<a class="btn sm pri" href="${this.esc(r.download_url)}" download>Download</a>` : ''}
+                  ${['queued', 'rendering', 'encoding', 'preparing_assets'].includes(r.status)
+                    ? `<button class="btn sm danger" onclick="Studio.cancelRender('${r.id}')">Cancel</button>` : ''}
+                </div>
+              </div>
+            </div>`).join('')}
+      </div>`);
+  },
+
+  async render() {
+    try {
+      const r = await this.post(`/projects/${this.project.project.id}/render`, {
+        resolution: this.el('x-res').value, fps: Number(this.el('x-fps').value),
+        format: this.el('x-fmt').value,
+      });
+      if (!r.ok) return this.toast(r.error + (r.remedy ? ' — ' + r.remedy : ''), 'err');
+      this.toast('Render queued.', 'ok');
+      this.watchRender(r.render_job_id);
+    } catch (e) {
+      if (e.quality) { this.showQuality(e.quality); return; }
+      this.err(e);
+    }
+  },
+  watchRender(id) {
+    const timer = setInterval(async () => {
+      try {
+        const r = (await this.get(`/render/${id}`)).render;
+        if (this.view_ === 'export') this.view('export', true);
+        if (['completed', 'failed', 'cancelled'].includes(r.status)) {
+          clearInterval(timer);
+          this.toast(r.status === 'completed' ? 'Render complete.' : `Render ${r.status}: ${r.error || ''}`,
+                     r.status === 'completed' ? 'ok' : 'err');
+          this.view('export');
+        }
+      } catch (e) { clearInterval(timer); }
+    }, 3000);
+  },
+  async cancelRender(id) {
+    try { await this.post(`/render/${id}/cancel`); this.view('export'); }
+    catch (e) { this.err(e); }
+  },
+
+  // ── Cost ──────────────────────────────────────────────
+  async v_cost() {
+    const c = await this.get('/cost');
+    const b = c.budget;
+    const pct = b.configured && b.limit ? Math.min(100, (b.used / b.limit) * 100) : 0;
+    this.html('content', `
+      <div class="wrap">
+        <h1>Generation cost center</h1>
+        <div class="card" style="margin-top:16px">
+          <h3>Monthly budget — ${this.esc(b.month)}</h3>
+          ${!b.configured ? `
+            <div class="note warn" style="margin-bottom:14px">${this.esc(b.note)}</div>` : `
+            <div style="font-size:26px;margin:8px 0">${this.money(b.used)} <span style="color:var(--dim);font-size:16px">of ${this.money(b.limit)}</span></div>
+            <div class="bar"><i style="width:${pct}%;background:${pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--amber)' : 'var(--blue)'}"></i></div>
+            <div class="sub">Remaining ${this.money(b.remaining)} · confirmed ${this.money(b.used_confirmed)} · estimated ${this.money(b.used_estimated)}</div>`}
+          <div class="row" style="margin-top:14px">
+            <input type="number" id="bud" placeholder="monthly limit (USD)" style="width:200px" min="0" step="1" value="${b.limit || ''}">
+            <button class="btn" onclick="Studio.setBudget()">Set budget</button>
+          </div>
+        </div>
+
+        <div class="note" style="margin:14px 0">${this.esc(c.disclaimer)}</div>
+
+        <div class="card"><h3>By provider</h3>
+          ${!c.by_provider.length ? '<div class="sub">No usage recorded yet.</div>' : `
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+              <tr style="color:var(--dim);text-align:left">
+                <th style="padding:6px 0">Provider</th><th>Type</th><th>Events</th>
+                <th>Confirmed</th><th>Estimated</th></tr>
+              ${c.by_provider.map(p => `<tr style="border-top:1px solid var(--border)">
+                <td style="padding:8px 0">${this.esc(p.provider)}</td>
+                <td>${this.esc(p.asset_type)}</td><td>${p.events}</td>
+                <td>${this.money(p.confirmed)}</td>
+                <td style="color:var(--dim)">${this.money(p.estimated)}</td></tr>`).join('')}
+            </table>`}
+        </div>
+      </div>`);
+  },
+
+  async setBudget() {
+    try {
+      await this.post('/cost/budget', { amount: Number(this.el('bud').value) });
+      this.cfg = await this.get('/config'); this.renderChips();
+      this.toast('Budget saved.', 'ok'); this.view('cost');
+    } catch (e) { this.err(e); }
+  },
+
+  // ── Settings ──────────────────────────────────────────
+  async v_settings() {
+    const p = await this.get('/providers');
+    const section = (kind, title) => `
+      <div class="card"><h3>${title}</h3>
+        ${(p[kind] || []).map(x => `
+          <div class="prov">
+            <span class="dot ${x.connected ? 'ok' : x.status === 'unavailable' ? 'off' : 'warn'}"></span>
+            <div class="prov-n">
+              <div class="t">${this.esc(x.label)}
+                <span class="tag ${x.connected ? 'ok' : 'idle'}">${x.status.replace(/_/g, ' ')}</span>
+                <span class="tag ${x.verified_ok ? 'ok' : 'warn'}">${x.verified_ok ? 'verified' : 'unverified'}</span>
+              </div>
+              <div class="s">
+                ${x.credential_env.length ? `Needs ${x.credential_env.join(', ')}. ` : 'No credentials required. '}
+                ${this.esc(x.capabilities.notes || '')}
+                ${x.verified_error ? `<br><span style="color:#fca5a5">${this.esc(x.verified_error)}</span>` : ''}
+              </div>
+            </div>
+            <div class="row">
+              ${x.credential_env.length ? `<button class="btn sm" onclick="Studio.setKey('${kind}','${x.name}')">Set key</button>` : ''}
+              <button class="btn sm" onclick="Studio.verifyProv('${kind}','${x.name}')">Verify</button>
+            </div>
+          </div>`).join('')}
+      </div>`;
+
+    this.html('content', `
+      <div class="wrap">
+        <h1>Studio settings</h1>
+        <div class="note info" style="margin:16px 0">
+          A provider must be <b>connected</b> before it can generate anything. "Verified"
+          means we actually called it and it answered — capabilities are otherwise only
+          what the adapter declares.
+        </div>
+        ${section('image', 'Image providers')}
+        ${section('video', 'Video providers')}
+        ${section('voice', 'Voice providers')}
+        <div class="card"><h3>Storage</h3>
+          <div class="sub">Backend: ${this.esc(p.storage.backend)}${p.storage.root ? ` — ${this.esc(p.storage.root)}` : ''}
+          ${p.storage.free_bytes ? `<br>${(p.storage.free_bytes / 1e9).toFixed(1)} GB free` : ''}</div>
+        </div>
+        <div class="card"><h3>Rendering</h3>
+          ${this.cfg.render.available
+            ? `<div class="sub">✓ ffmpeg available · ${this.esc(this.cfg.render.encoders?.join(', ') || '')}</div>`
+            : `<div class="note err">${this.esc(this.cfg.render.reason)}<br><b>Fix:</b> ${this.esc(this.cfg.render.remedy)}</div>`}
+        </div>
+      </div>`);
+  },
+
+  setKey(kind, name) {
+    this.modal(`
+      <h2>Set API key — ${this.esc(name)}</h2>
+      <div class="note" style="margin:12px 0">
+        The key is stored server-side and sent only to the provider. It is never
+        returned by the API or exposed to this page again.
+      </div>
+      <div class="field"><label>API key</label><input type="text" id="k-val" placeholder="paste key"></div>
+      <div class="row">
+        <button class="btn pri" onclick="Studio.saveKey('${kind}','${name}')">Save</button>
+        <button class="btn" onclick="Studio.closeModal()">Cancel</button>
+      </div>`);
+  },
+  async saveKey(kind, name) {
+    try {
+      await this.patch(`/providers/${kind}/${name}`, { api_key: this.el('k-val').value.trim() });
+      this.closeModal();
+      this.cfg = await this.get('/config'); this.renderChips();
+      this.toast('Key saved. Verify it to confirm it works.', 'ok');
+      this.view('settings');
+    } catch (e) { this.err(e); }
+  },
+  async verifyProv(kind, name) {
+    this.toast('Verifying…');
+    try {
+      const r = await this.post(`/providers/${kind}/${name}/verify`, {});
+      this.toast(r.verified ? `✓ ${name} verified.` : `✕ ${name}: ${r.error}`,
+                 r.verified ? 'ok' : 'err');
+      this.cfg = await this.get('/config'); this.renderChips();
+      this.view('settings');
+    } catch (e) { this.err(e); }
+  },
+
+  // ── Modal ─────────────────────────────────────────────
+  modal(markup) {
+    this.html('modal-box', markup);
+    this.el('modal').classList.remove('hide');
+  },
+  closeModal() { this.el('modal').classList.add('hide'); },
+};
+
+document.getElementById('modal').addEventListener('click', e => {
+  if (e.target.id === 'modal') Studio.closeModal();
+});
+Studio.init();
+</script>
+</body>
+</html>

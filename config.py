@@ -54,6 +54,34 @@ SESSION_STATE_FILE  = os.path.join(_BASE_DIR, "session_state.json")
 DAILY_PLAN_FILE     = os.path.join(_BASE_DIR, "daily_plan.json")
 
 # =============================================================================
+# FILE PATHS — LEBENX STUDIO
+# =============================================================================
+# Studio keeps its own SQLite file so that video-production schema changes can
+# never touch the agent's episodic memory in ultron.db.
+STUDIO_DB_FILE      = os.path.join(_BASE_DIR, "studio.db")
+STUDIO_MEDIA_DIR    = os.environ.get("STUDIO_MEDIA_DIR", "").strip() \
+                      or os.path.join(_BASE_DIR, "studio_media")
+STUDIO_RENDER_DIR   = os.path.join(STUDIO_MEDIA_DIR, "renders")
+
+# Storage backend for generated media. "local" is the only backend with a
+# built-in implementation; others require a MediaStorageProvider adapter.
+STUDIO_STORAGE_BACKEND = os.environ.get("STUDIO_STORAGE_BACKEND", "local").strip() or "local"
+
+# Default monthly generation budget in USD. 0 = no budget configured, which
+# the cost centre reports as "unset" rather than as "unlimited".
+STUDIO_MONTHLY_BUDGET = float(os.environ.get("STUDIO_MONTHLY_BUDGET", "0") or 0)
+
+# Hard ceiling on concurrent provider calls from the Studio job worker.
+STUDIO_JOB_WORKERS    = int(os.environ.get("STUDIO_JOB_WORKERS", "2") or 2)
+
+# Provider credentials read here so nothing else in the package touches os.environ
+# directly. Absent key -> provider reports status "missing_credentials".
+REPLICATE_API_TOKEN   = os.environ.get("REPLICATE_API_TOKEN", "").strip() \
+                        or os.environ.get("REPLICATE_API_KEY", "").strip() or None
+TOGETHER_API_KEY      = os.environ.get("TOGETHER_API_KEY", "").strip() or None
+
+
+# =============================================================================
 # HARD CAPS
 # =============================================================================
 MAX_CONVERSATIONS       = 500
