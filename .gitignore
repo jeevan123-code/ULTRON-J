@@ -47,3 +47,10 @@ task_graphs/
 .env
 *.env
 .venv/
+
+# LEBENX STUDIO runtime artifacts
+studio.db
+studio.db-wal
+studio.db-shm
+studio_media/
+.testvenv/

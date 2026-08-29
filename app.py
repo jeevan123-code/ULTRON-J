@@ -274,6 +274,25 @@ try:
 except ImportError as e:
     print(f"[app] loop_routes not loaded: {e}")
 
+# ── LEBENX STUDIO: AI video production system ─────────────────────────────────
+# Registers the Studio blueprint and starts its background job workers.
+# Generation and rendering never run inside a request — the workers own that.
+try:
+    from studio.routes import studio_bp, init_studio
+    app.register_blueprint(studio_bp)
+    _studio_state = init_studio()
+    print(f"[app] LEBENX STUDIO registered "
+          f"(workers={_studio_state['workers']}, "
+          f"render={'available' if _studio_state['render_available'] else 'needs ffmpeg'}, "
+          f"requeued={_studio_state['requeued_jobs']})")
+    STUDIO_AVAILABLE = True
+except ImportError as e:
+    STUDIO_AVAILABLE = False
+    print(f"[app] LEBENX STUDIO not loaded: {e}")
+except Exception as e:
+    STUDIO_AVAILABLE = False
+    print(f"[app] LEBENX STUDIO init error: {e}")
+
 # ── Mode state ─────────────────────────────────────────────────────────────────
 _MODE      = "cloud"
 _mode_lock = threading.Lock()

@@ -123,6 +123,6 @@ def test_total_route_count_lock():
     """Lock the total route count so we notice when blueprints stop
     registering. The number is informational; bump it intentionally
     when adding new endpoints. ~210 routes was the established baseline
-    after Phase 1 wiring."""
+    after Phase 1 wiring; the LEBENX STUDIO blueprint added ~65 more."""
     total = sum(1 for _ in app_module.app.url_map.iter_rules())
-    assert 200 <= total <= 250, f"route count drifted: {total}"
+    assert 250 <= total <= 320, f"route count drifted: {total}"
