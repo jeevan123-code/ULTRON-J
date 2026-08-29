@@ -1,0 +1,8 @@
+# Your API key. The repo root ignores .env too, but this line keeps the
+# folder safe on its own if it is ever moved into its own repository.
+.env
+
+# Your practice record. Created on the first correction and appended to on
+# every one after that. It is yours, not the project's -- committing it would
+# mean a conflict on every pull.
+mistakes.json

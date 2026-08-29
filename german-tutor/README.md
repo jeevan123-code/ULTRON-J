@@ -131,6 +131,11 @@ plain running record. Tags come from this list: `gender`, `case`,
 `verb-form`, `word-order`, `auxiliary`, `preposition`, `adjective-ending`,
 `vocabulary`.
 
+The file is created the first time the tutor corrects you, so a fresh copy of
+this project has no log until you start talking. It is deliberately left out
+of git -- it is your practice record, not part of the project, and keeping it
+untracked means it never conflicts when you pull.
+
 The tutor never mentions the log out loud. Every save is also printed in your
 terminal, so you can watch it working while you talk.
 
