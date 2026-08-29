@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deutsch sprechen</title>
+<style>
+  /* --- Plain CSS, nothing clever. Edit freely. --- */
+  :root {
+    --bg: #12141a;
+    --panel: #1b1e26;
+    --text: #e8e9ed;
+    --dim: #8d93a3;
+    --line: #2c303b;
+    --idle: #4a5163;
+    --listening: #2f9e5e;   /* green  = your turn   */
+    --thinking: #b8892b;    /* amber  = it is working */
+    --speaking: #3b74d4;    /* blue   = tutor talking */
+    --error: #c2453f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 28px 20px 40px; gap: 26px;
+    -webkit-user-select: none; user-select: none;
+  }
+  h1 { font-size: 20px; font-weight: 600; margin: 0; letter-spacing: .2px; }
+  .sub { color: var(--dim); font-size: 13px; margin-top: -18px; }
+
+  /* --- settings row --- */
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 18px; justify-content: center;
+    align-items: center; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px;
+  }
+  .group { display: flex; align-items: center; gap: 8px; }
+  .label { color: var(--dim); font-size: 12px; text-transform: uppercase;
+           letter-spacing: .8px; }
+  .levels { display: flex; gap: 6px; }
+  .levels button {
+    background: transparent; color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 14px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .levels button:hover { border-color: #4a5163; }
+  .levels button[aria-pressed="true"] {
+    background: var(--text); color: var(--bg); border-color: var(--text);
+  }
+  select {
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 10px; font-size: 14px; cursor: pointer;
+  }
+
+  /* --- the one big button --- */
+  #talk {
+    width: 260px; height: 260px; border-radius: 50%;
+    border: 3px solid var(--line); background: var(--panel);
+    color: var(--text); font-size: 19px; font-weight: 600;
+    cursor: pointer; touch-action: none;
+    display: flex; align-items: center; justify-content: center;
+    text-align: center; padding: 24px; line-height: 1.35;
+    transition: transform .08s ease, border-color .15s, box-shadow .15s;
+  }
+  #talk:active { transform: scale(.97); }
+  #talk[data-state="listening"] {
+    border-color: var(--listening);
+    box-shadow: 0 0 0 10px rgba(47,158,94,.14);
+  }
+  #talk[data-state="thinking"]  { border-color: var(--thinking); }
+  #talk[data-state="speaking"]  {
+    border-color: var(--speaking);
+    box-shadow: 0 0 0 10px rgba(59,116,212,.14);
+  }
+  #talk[data-state="error"] { border-color: var(--error); }
+  #talk:disabled { opacity: .55; cursor: progress; }
+
+  /* --- status light --- */
+  .status { display: flex; align-items: center; gap: 10px; font-size: 15px;
+            margin-top: -8px; min-height: 24px; }
+  .dot { width: 11px; height: 11px; border-radius: 50%;
+         background: var(--idle); transition: background .15s; }
+  .dot[data-state="listening"] { background: var(--listening); }
+  .dot[data-state="thinking"]  { background: var(--thinking); }
+  .dot[data-state="speaking"]  { background: var(--speaking); }
+  .dot[data-state="error"]     { background: var(--error); }
+  .hint { color: var(--dim); font-size: 13px; text-align: center;
+          max-width: 420px; }
+</style>
+</head>
+<body>
+
+  <h1>Deutsch sprechen</h1>
+  <p class="sub">Hold the button. Speak German. Listen.</p>
+
+  <div class="controls">
+    <div class="group">
+      <span class="label">Level</span>
+      <div class="levels" id="levels"><!-- filled in by JS --></div>
+    </div>
+    <div class="group">
+      <span class="label">Situation</span>
+      <select id="scenario"><!-- filled in by JS --></select>
+    </div>
+  </div>
+
+  <button id="talk" data-state="idle">Press to start</button>
+
+  <div class="status">
+    <span class="dot" id="dot" data-state="idle"></span>
+    <span id="statusText">Not connected</span>
+  </div>
+  <p class="hint" id="hint">
+    You can also hold the <b>spacebar</b>. Interrupt the tutor any time by
+    talking over it.
+  </p>
+
+<script>
+/* ==========================================================================
+   German tutor -- the whole frontend.
+
+   How it works, in five lines:
+     1. Ask our own server for a short-lived token.
+     2. Open a WebRTC connection straight to OpenAI with it.
+     3. Send microphone audio up; play the tutor's audio back.
+     4. A side channel ("oai-events") carries JSON messages both ways.
+     5. When the tutor logs a mistake, we post it back to our server.
+   ========================================================================== */
+
+const talkBtn    = document.getElementById('talk');
+const dot        = document.getElementById('dot');
+const statusText = document.getElementById('statusText');
+const levelsBox  = document.getElementById('levels');
+const scenarioEl = document.getElementById('scenario');
+
+let pc = null;          // the WebRTC connection
+let dc = null;          // the data channel carrying JSON events
+let micTrack = null;    // our microphone
+let connected = false;
+let connecting = false;
+let holding = false;    // is the button held down right now?
+
+let level = 'A1';
+let scenario = 'free';
+
+// Per-response bookkeeping, used to decide whether the tutor actually spoke.
+let responseHadAudio = false;
+let lastHeardFromMe = '';   // last transcript of my own speech
+
+/* ---------------------------------------------------------------- status */
+
+function setState(state, text) {
+  talkBtn.dataset.state = state;
+  dot.dataset.state = state;
+  statusText.textContent = text;
+}
+
+// Only show "your turn" states when the user is not being talked over.
+function idleState() {
+  if (holding) setState('listening', 'Listening — speak German');
+  else if (connected) setState('idle', 'Your turn — hold the button');
+  else setState('idle', 'Not connected');
+}
+
+/* ------------------------------------------------- settings from server */
+
+async function loadConfig() {
+  const cfg = await (await fetch('/api/config')).json();
+
+  level = cfg.default_level;
+  scenario = cfg.default_scenario;
+
+  // Level buttons (A1 / A2 / B1) come from prompts.py.
+  cfg.levels.forEach(name => {
+    const b = document.createElement('button');
+    b.textContent = name;
+    b.setAttribute('aria-pressed', String(name === level));
+    b.onclick = () => {
+      level = name;
+      [...levelsBox.children].forEach(
+        c => c.setAttribute('aria-pressed', String(c === b)));
+      pushSettings();          // takes effect mid-conversation
+    };
+    levelsBox.appendChild(b);
+  });
+
+  // Scenario dropdown, also straight from prompts.py.
+  cfg.scenarios.forEach(s => {
+    const o = document.createElement('option');
+    o.value = s.id;
+    o.textContent = s.label;
+    o.selected = s.id === scenario;
+    scenarioEl.appendChild(o);
+  });
+  scenarioEl.onchange = () => { scenario = scenarioEl.value; pushSettings(); };
+}
+
+/* Send the new instructions down the OPEN connection. No reload, no restart:
+   the conversation keeps going, the tutor just changes how it teaches. */
+async function pushSettings() {
+  if (!dc || dc.readyState !== 'open') return;   // nothing to update yet
+  const url = `/api/instructions?level=${level}&scenario=${scenario}`;
+  const { instructions } = await (await fetch(url)).json();
+  dc.send(JSON.stringify({
+    type: 'session.update',
+    session: { type: 'realtime', instructions }
+  }));
+}
+
+/* ------------------------------------------------------------- connect */
+
+async function connect() {
+  connecting = true;
+  talkBtn.disabled = true;
+  setState('thinking', 'Connecting…');
+
+  try {
+    // 1. Our server mints a token. The real API key never comes here.
+    const res = await fetch('/api/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ level, scenario })
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || 'session failed');
+    const { client_secret, webrtc_url } = await res.json();
+
+    // 2. Set up the peer connection and play whatever comes back.
+    pc = new RTCPeerConnection();
+    const speaker = document.createElement('audio');
+    speaker.autoplay = true;
+    document.body.appendChild(speaker);
+    pc.ontrack = e => { speaker.srcObject = e.streams[0]; };
+
+    // 3. Microphone. We add the track now but keep it muted until you hold
+    //    the button -- that is what makes this push-to-talk.
+    const mic = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true }
+    });
+    micTrack = mic.getAudioTracks()[0];
+    micTrack.enabled = false;
+    pc.addTrack(micTrack, mic);
+
+    // 4. The JSON side channel. Must be named exactly "oai-events".
+    dc = pc.createDataChannel('oai-events');
+    dc.onmessage = e => handleEvent(JSON.parse(e.data));
+    dc.onopen = () => {
+      // The instructions say "greet me and ask a question". Nudge the tutor
+      // to speak first, otherwise it waits for us.
+      dc.send(JSON.stringify({ type: 'response.create' }));
+    };
+
+    // 5. WebRTC handshake: offer up, answer back, as plain SDP text.
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    const sdpRes = await fetch(webrtc_url, {
+      method: 'POST',
+      body: offer.sdp,
+      headers: {
+        'Authorization': `Bearer ${client_secret}`,
+        'Content-Type': 'application/sdp'
+      }
+    });
+    if (!sdpRes.ok) throw new Error(`OpenAI refused the call: ${await sdpRes.text()}`);
+    await pc.setRemoteDescription({ type: 'answer', sdp: await sdpRes.text() });
+
+    connected = true;
+    talkBtn.textContent = 'Hold to speak';
+    idleState();
+  } catch (err) {
+    console.error(err);
+    setState('error', String(err.message || err));
+    talkBtn.textContent = 'Press to try again';
+    connected = false;
+  } finally {
+    connecting = false;
+    talkBtn.disabled = false;
+    // If the button is still held from the first press, open the mic now.
+    if (connected && holding && micTrack) {
+      micTrack.enabled = true;
+      idleState();
+    }
+  }
+}
+
+/* ------------------------------------------------- incoming JSON events */
+
+function handleEvent(event) {
+  const t = event.type || '';
+
+  // Names in this API get renamed occasionally, so match loosely on the
+  // meaningful part rather than on one exact string.
+
+  if (t === 'response.created') {
+    responseHadAudio = false;
+    if (!holding) setState('thinking', 'Thinking…');
+  }
+
+  else if (t.includes('audio.delta') || t.includes('output_audio_buffer.started')) {
+    if (!responseHadAudio) {
+      responseHadAudio = true;
+      setState('speaking', 'Tutor is speaking — talk over it to interrupt');
+    }
+  }
+
+  // What I said, transcribed. Kept as a fallback for the mistake log.
+  else if (t.includes('input_audio_transcription.completed')) {
+    lastHeardFromMe = event.transcript || '';
+  }
+
+  else if (t === 'response.done') {
+    handleToolCalls(event);
+    idleState();
+  }
+
+  else if (t === 'error') {
+    console.error('Realtime error:', event);
+    setState('error', event.error?.message || 'Something went wrong');
+  }
+}
+
+/* The tutor logs a correction by calling the log_mistake tool. The finished
+   response carries the call, so we read it here, save it, and tell the model
+   we are done. */
+function handleToolCalls(doneEvent) {
+  const outputs = doneEvent.response?.output || [];
+  let answered = false;
+
+  outputs.forEach(item => {
+    if (item.type !== 'function_call' || item.name !== 'log_mistake') return;
+
+    let args = {};
+    try { args = JSON.parse(item.arguments || '{}'); } catch (_) {}
+
+    fetch('/api/mistakes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        said: args.said || lastHeardFromMe,
+        correction: args.correction || '',
+        tag: args.tag || 'vocabulary',
+        note: args.note || null,
+        level, scenario
+      })
+    }).catch(err => console.error('Could not save mistake:', err));
+
+    // Close the loop so the model does not sit waiting on the tool.
+    dc.send(JSON.stringify({
+      type: 'conversation.item.create',
+      item: {
+        type: 'function_call_output',
+        call_id: item.call_id,
+        output: JSON.stringify({ saved: true })
+      }
+    }));
+    answered = true;
+  });
+
+  // If the tutor only called the tool and never actually spoke, ask it to
+  // speak now -- otherwise we would be left in silence.
+  if (answered && !responseHadAudio) {
+    dc.send(JSON.stringify({ type: 'response.create' }));
+  }
+}
+
+/* --------------------------------------------------------- push to talk */
+
+function press() {
+  if (connecting) return;
+  holding = true;
+  if (!connected) { connect(); return; }   // first press connects
+  micTrack.enabled = true;
+  setState('listening', 'Listening — speak German');
+}
+
+function release() {
+  if (!holding) return;
+  holding = false;
+  if (micTrack) micTrack.enabled = false;
+  // Releasing does not force an answer: the tutor decides when you have
+  // finished, which is also how it can cut in mid-sentence.
+  if (connected && talkBtn.dataset.state === 'listening') {
+    setState('thinking', 'Thinking…');
+  }
+}
+
+talkBtn.addEventListener('pointerdown', e => { e.preventDefault(); press(); });
+talkBtn.addEventListener('pointerup', release);
+talkBtn.addEventListener('pointercancel', release);
+talkBtn.addEventListener('pointerleave', release);
+talkBtn.addEventListener('contextmenu', e => e.preventDefault());
+
+// Spacebar does the same thing, so you can keep your hands still.
+addEventListener('keydown', e => {
+  if (e.code === 'Space' && !e.repeat && e.target.tagName !== 'SELECT') {
+    e.preventDefault(); press();
+  }
+});
+addEventListener('keyup', e => {
+  if (e.code === 'Space') { e.preventDefault(); release(); }
+});
+
+loadConfig();
+</script>
+</body>
+</html>
