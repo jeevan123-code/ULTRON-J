@@ -8,7 +8,8 @@
   var prog = OM.progress, P = OM.phys;
   var doc = root.document;
 
-  var UI = OM.ui = { screen: null, lastMode: 'endless' };
+  var UI = OM.ui = { screen: null, lastMode: 'endless', lastFamily: null };
+  var replay = null;
   var $ = function (id) { return doc.getElementById(id); };
   var screens = {};
 
@@ -47,10 +48,13 @@
       case 'resume': UI.resume(); break;
       case 'quit': UI.show('menu'); OM.game.state = 'idle'; OM.game.run = null; OM.audio.stopMusic(); break;
       case 'share': UI.share(); break;
+      case 'trial': UI.startTrial(); break;
+      case 'nightmare': UI.startRun('nightmare'); break;
     }
   }
 
   UI.show = function (name) {
+    if (replay && name !== 'result') replay.stop();
     for (var k in screens) screens[k].classList.toggle('on', k === name);
     UI.screen = name;
     $('pause-btn').classList.toggle('on', name === null);
@@ -58,15 +62,26 @@
   };
 
   UI.hideAll = function () {
+    if (replay) replay.stop();
     for (var k in screens) screens[k].classList.remove('on');
     UI.screen = null;
     $('pause-btn').classList.add('on');
   };
 
-  UI.startRun = function (mode) {
+  UI.startRun = function (mode, opts) {
     UI.lastMode = mode;
+    if (replay) replay.stop();
     UI.hideAll();
-    OM.game.start(mode, {});
+    OM.game.start(mode, opts || (mode === 'trial' ? { family: UI.lastFamily } : {}));
+  };
+
+  /* A Trial points the generator at whatever is actually killing you. It is not
+     a different game — same physics, same proven patterns, different selection. */
+  UI.startTrial = function () {
+    var rd = OM.analysis.read();
+    if (rd.kind !== 'weakness') { UI.toast('NOT ENOUGH RUNS YET'); return; }
+    UI.lastFamily = rd.family;
+    UI.startRun('trial', { family: rd.family });
   };
 
   UI.pause = function () {
@@ -96,6 +111,21 @@
     var key = OM.dayKey(OM.dayIndex());
     var done = d.daily[key];
     $('daily-badge').textContent = done ? 'today: ' + OM.fmtTime(done, 2) : 'not played today';
+
+    var nb = $('menu-nightmare');
+    if (prog.nightmareUnlocked()) {
+      nb.hidden = false;
+      nb.querySelector('em').textContent = d.nightmare
+        ? 'best ' + OM.fmtTime(d.nightmare, 2) : 'no warnings, no warm-up';
+    } else nb.hidden = true;
+
+    var rd = OM.analysis.read(), tb = $('menu-trial');
+    if (rd.kind === 'weakness') {
+      tb.hidden = false;
+      var best = d.trial[rd.family];
+      tb.querySelector('em').textContent = rd.headline.toLowerCase() +
+        (best ? ' · best ' + OM.fmtTime(best, 2) : ' · not attempted');
+    } else tb.hidden = true;
   }
 
   /* ---------- daily ---------- */
@@ -117,7 +147,10 @@
     var best = s.mode === 'endless' ? d.best : (d.daily[OM.dayKey(s.day)] || 0);
     var res = s.result;
 
-    $('r-kicker').textContent = res.record ? 'NEW RECORD' : 'YOU SURVIVED';
+    $('r-kicker').textContent = res.record
+      ? (s.mode === 'trial' ? 'BEST TRIAL' : 'NEW RECORD')
+      : (s.mode === 'trial' ? 'TRIAL · ' + (OM.analysis.families[s.family || UI.lastFamily] || { name: '' }).name
+                            : 'YOU SURVIVED');
     $('r-time').textContent = OM.fmtTime(s.time, 2);
 
     var dEl = $('r-delta');
@@ -132,6 +165,21 @@
     $('r-stats').innerHTML =
       stat(s.nearMiss, 'NEAR MISS') + stat(s.perfect, 'PERFECT') +
       stat(s.flips, 'FLIPS') + stat(s.world.name, 'REACHED');
+
+    // last moments
+    var box = doc.querySelector('.replay');
+    if (!replay) replay = OM.ReplayPlayer($('r-replay'));
+    if (s.replay && s.replay.frames && s.replay.frames.length > 6) {
+      box.classList.remove('off');
+      replay.load(s.replay);
+      // the element has to be laid out before the canvas can size itself
+      requestAnimationFrame(function () { replay.start(); });
+    } else {
+      box.classList.add('off');
+      replay.stop();
+    }
+
+    renderRead(s);
 
     var li = prog.levelInfo();
     $('r-xpfill').style.width = (li.frac * 100).toFixed(1) + '%';
@@ -152,6 +200,35 @@
     return '<div><span class="n">' + v + '</span><span class="k">' + k + '</span></div>';
   }
 
+  /* One honest sentence, or nothing. Never a fabricated percentile, never a
+     comparison to players we cannot see. */
+  function renderRead(s) {
+    var el = $('r-read'), rd = OM.analysis.read(), tr = OM.analysis.trend();
+    var html = '';
+    if (rd.kind === 'none') {
+      el.className = 'read quiet';
+      html = '<b>READING YOU</b><span>' + rd.need +
+             ' more run' + (rd.need === 1 ? '' : 's') +
+             ' and the game will tell you what keeps killing you.</span>';
+    } else if (rd.kind === 'balanced') {
+      el.className = 'read quiet';
+      html = '<b>' + rd.headline + '</b><span>' + rd.line + '</span>';
+    } else {
+      el.className = 'read';
+      html = '<b>' + rd.headline + '</b><span>' + rd.line + ' ' +
+             Math.round(rd.share * 100) + '% of your last ' + rd.n + ' deaths.</span>' +
+             '<i>' + rd.fix + '</i>';
+    }
+    if (tr && Math.abs(tr.pct) > 0.12) {
+      html += '<i>' + (tr.delta > 0 ? 'Improving: ' : 'Slipping: ') +
+              'median run ' + OM.fmtTime(tr.early, 2) + ' \u2192 ' + OM.fmtTime(tr.recent, 2) + '</i>';
+    }
+    el.innerHTML = html;
+    var tb = doc.querySelector('#r-actions [data-act="trial"]');
+    tb.hidden = rd.kind !== 'weakness';
+    if (rd.kind === 'weakness') UI.lastFamily = rd.family;
+  }
+
   /* ---------- records ---------- */
   UI.showRecords = function () {
     var d = prog.data, li = prog.levelInfo();
@@ -164,11 +241,43 @@
       days.push(row(k + (i === 0 ? ' · today' : ''), d.daily[k] ? OM.fmtTime(d.daily[k], 2) : '—'));
     }
 
+    var rd = OM.analysis.read(), tr = OM.analysis.trend(), tl = OM.analysis.tally();
+    var readBlock = '';
+    if (rd.kind === 'weakness') {
+      readBlock = '<div class="read"><b>' + rd.headline + '</b><span>' + rd.line + ' ' +
+        rd.count + ' of your last ' + rd.n + ' deaths (' + Math.round(rd.share * 100) + '%).</span>' +
+        '<i>' + rd.fix + '</i></div>';
+    } else if (rd.kind === 'balanced') {
+      readBlock = '<div class="read quiet"><b>' + rd.headline + '</b><span>' + rd.line + '</span></div>';
+    } else {
+      readBlock = '<div class="read quiet"><b>READING YOU</b><span>' + rd.need +
+        ' more runs before the game can say anything useful about how you play.</span></div>';
+    }
+    if (tr) {
+      readBlock += '<div class="list">' +
+        row('Median run, first 15', OM.fmtTime(tr.early, 2)) +
+        row('Median run, last 15', OM.fmtTime(tr.recent, 2)) +
+        row('Change', (tr.delta >= 0 ? '+' : '') + OM.fmtDelta(tr.delta)) +
+      '</div>';
+    }
+    var famRows = Object.keys(tl.byFamily).sort(function (a, b) { return tl.byFamily[b] - tl.byFamily[a]; })
+      .map(function (f) {
+        return row(OM.analysis.families[f].name.charAt(0) + OM.analysis.families[f].name.slice(1).toLowerCase(),
+                   tl.byFamily[f] + ' · ' + Math.round(tl.byFamily[f] / tl.n * 100) + '%');
+      }).join('');
+
     $('rec-body').innerHTML =
+      '<h3>THE READ</h3>' + readBlock +
+      sparkline(OM.analysis.history()) +
+      (famRows ? '<h3>DEATHS BY KIND</h3><div class="list">' + famRows + '</div>' : '') +
       '<div class="split"><div><span class="lbl">BEST RUN</span><span class="val">' +
         (d.best ? OM.fmtTime(d.best, 2) : '—') + '</span></div>' +
       '<div><span class="lbl">LEVEL</span><span class="val">' + li.level + '</span></div>' +
       '<div><span class="lbl">RUNS</span><span class="val">' + d.runs + '</span></div></div>' +
+      (d.nightmare ? '<div class="list">' + row('Nightmare best', OM.fmtTime(d.nightmare, 2)) +
+        Object.keys(d.trial).map(function (f) {
+          return row('Trial · ' + OM.analysis.families[f].name, OM.fmtTime(d.trial[f], 2));
+        }).join('') + '</div>' : '') +
 
       '<h3>TOTALS</h3><div class="list">' +
         row('Time survived', fmtLong(d.totalTime)) +
@@ -193,11 +302,38 @@
                  '<i>' + a.line + '</i></b><span>' + (got ? '✓' : '') + '</span></div>';
         }).join('') +
       '</div>' +
-      '<p class="muted small">Records are stored on this device only. There is no server yet, so nothing here is a global leaderboard.</p>';
+      '<p class="muted small">Everything here is measured from your own runs and stored on this device. ' +
+      'There is no server yet, so nothing here is a global leaderboard and nothing is compared to other players.</p>';
     UI.show('records');
   };
 
   function row(k, v) { return '<div class="item"><b>' + k + '</b><span>' + v + '</span></div>'; }
+
+  /* Your last thirty runs as bars, with your best marked. Inline SVG so it
+     needs no canvas lifecycle and scales with the layout. It is the clearest
+     possible answer to "am I actually getting better". */
+  function sparkline(hist) {
+    var runs = hist.slice(-30);
+    if (runs.length < 6) return '';
+    var max = 0, i;
+    for (i = 0; i < runs.length; i++) max = Math.max(max, runs[i].t);
+    if (max <= 0) return '';
+    var W = 100, H = 30, bw = W / runs.length, bars = '', bestI = 0;
+    for (i = 0; i < runs.length; i++) if (runs[i].t > runs[bestI].t) bestI = i;
+    for (i = 0; i < runs.length; i++) {
+      var h = Math.max(0.8, (runs[i].t / max) * (H - 2));
+      bars += '<rect x="' + (i * bw + bw * 0.16).toFixed(2) + '" y="' + (H - h).toFixed(2) +
+              '" width="' + (bw * 0.68).toFixed(2) + '" height="' + h.toFixed(2) +
+              '" fill="' + (i === bestI ? '#e8eaf0' : 'rgba(232,234,240,0.34)') + '"/>';
+    }
+    return '<h3>LAST ' + runs.length + ' RUNS</h3>' +
+      '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" ' +
+      'style="width:100%;height:64px;display:block;margin:10px 0 4px" role="img" ' +
+      'aria-label="Bar chart of your last ' + runs.length + ' run times, longest run highlighted">' +
+      bars + '</svg>' +
+      '<p class="muted small" style="text-align:left;margin:0 0 6px">' +
+      'oldest on the left · longest run highlighted · peak ' + OM.fmtTime(max, 2) + '</p>';
+  }
   function fmtLong(sec) {
     var h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60;
     return (h ? h + 'h ' : '') + m + 'm ' + Math.floor(sec % 60) + 's';

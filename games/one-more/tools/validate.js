@@ -45,7 +45,8 @@ var MAX_FLIPS = 12;    // and will not execute a twelve-input line under pressur
 var R2 = P.R * P.R;
 
 function isDynamic(p) {
-  for (var i = 0; i < p.items.length; i++) if (p.items[i].t === 'mover' || p.items[i].t === 'laser') return true;
+  var DYN = { mover: 1, laser: 1, piston: 1, gate: 1 };
+  for (var i = 0; i < p.items.length; i++) if (DYN[p.items[i].t]) return true;
   return false;
 }
 
@@ -384,7 +385,17 @@ var speeds = [P.speedAt(0), P.speedAt(70), P.speedAt(260)];
 var fails = [], warns = [], rows = [];
 var t0Start = Date.now();
 
-PAT.list.forEach(function (p) {
+/* --only a,b,c validates just those patterns, at full rigour. Tuning one
+   pattern should not cost a six-minute run of the whole library. */
+var onlyArg = process.argv.indexOf('--only');
+var ONLY = onlyArg >= 0 ? String(process.argv[onlyArg + 1] || '').split(',') : null;
+var TARGETS = ONLY ? PAT.list.filter(function (p) { return ONLY.indexOf(p.id) >= 0; }) : PAT.list;
+if (ONLY && TARGETS.length !== ONLY.length) {
+  console.error('  unknown pattern id in --only');
+  process.exit(2);
+}
+
+TARGETS.forEach(function (p) {
   var dyn = isDynamic(p);
   var phases = dyn ? [0, 0.17, 0.34, 0.51, 0.68, 0.85] : [0];
   var allOk = true, failAt = null, minFlips = 99, worstWindow = Infinity;
@@ -437,7 +448,7 @@ console.log('  ' + '-'.repeat(64));
 console.log('  * = moving geometry, validated across 6 phase offsets');
 console.log('  slack = timing error the most forgiving line tolerates, at top speed');
 console.log('  >= marks a lower bound (line needs 3+ flips; space not scanned exhaustively)');
-console.log('  ' + rows.length + ' patterns / ' + (rows.length - fails.length) +
+console.log('  ' + rows.length + (ONLY ? ' selected' : '') + ' patterns / ' + (rows.length - fails.length) +
   ' survivable at every speed, entry side and phase  (' + ((Date.now() - t0Start) / 1000).toFixed(1) + 's)');
 if (warns.length) console.log('  BELOW TIER FLOOR: ' + warns.join(', '));
 if (fails.length) { console.log('  UNSURVIVABLE:\n    ' + fails.join('\n    ') + '\n'); process.exit(1); }

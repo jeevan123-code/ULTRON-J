@@ -18,23 +18,35 @@
        which is the difference between a game that feels instant and one that
        feels like a web page. */
     function press(e) {
-      if (OM.ui.screen === 'result') {
-        // tap anywhere to go again — but not on a button, which has its own job
-        if (e.target && e.target.closest && e.target.closest('[data-act]')) return;
-        if (OM.game.run && OM.game.run.deadFor > 0.22) {
-          e.preventDefault();
-          OM.ui.startRun(OM.ui.lastMode);
-        }
-        return;
-      }
       if (OM.ui.screen !== null) return;      // a menu is open; let it have the tap
       e.preventDefault();
       OM.audio.unlock();
       OM.game.flip();
     }
-
     canvas.addEventListener('pointerdown', press);
-    doc.getElementById('s-result').addEventListener('pointerdown', press);
+
+    /* The results screen scrolls on a phone, so "tap anywhere to go again" has
+       to be a real tap: press and release in the same place, quickly. Firing on
+       pointerdown would restart the run every time somebody tried to scroll
+       down to read the death analysis. */
+    var resultEl = doc.getElementById('s-result');
+    var tap = null;
+    resultEl.addEventListener('pointerdown', function (e) {
+      if (e.target && e.target.closest && e.target.closest('[data-act], canvas')) { tap = null; return; }
+      tap = { x: e.clientX, y: e.clientY, t: performance.now() };
+    });
+    resultEl.addEventListener('pointerup', function (e) {
+      if (!tap) return;
+      var moved = Math.abs(e.clientX - tap.x) + Math.abs(e.clientY - tap.y);
+      var held = performance.now() - tap.t;
+      tap = null;
+      if (moved > 12 || held > 500) return;                 // that was a scroll or a hold
+      if (OM.ui.screen !== 'result') return;
+      if (!OM.game.run || OM.game.run.deadFor <= 0.22) return;
+      e.preventDefault();
+      OM.ui.startRun(OM.ui.lastMode);
+    });
+    resultEl.addEventListener('pointercancel', function () { tap = null; });
 
     doc.addEventListener('keydown', function (e) {
       if (e.repeat) return;

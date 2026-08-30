@@ -14,7 +14,7 @@
     W: 1280, H: P.H, dpr: 1,
     run: null, state: 'idle',    // idle | playing | dead
     pool: null, trail: null, screen: null,
-    hint: 0
+    hint: 0, praise: 0
   };
 
   /* ---------- setup ---------- */
@@ -70,27 +70,47 @@
                                 : (Math.random() * 0xffffffff) >>> 0;
     var rng = OM.rng(seed);
 
+    /* A Trial is a run built mostly from the patterns you actually fail, and it
+       starts past the tutorial band because you are not here to be taught. */
+    var pool = null, tBias = 0, family = opts.family || null;
+    if (mode === 'trial') {
+      pool = OM.analysis.trialPatterns(family);
+      tBias = 30;
+    } else if (mode === 'nightmare') {
+      /* Starts where the endless run ends. No runway, no tier-one warm-up, top
+         speed from the first second — the mode that exists so a good player has
+         somewhere left to go. */
+      tBias = 245;
+    }
+
     var ghostData = null;
     if (mode === 'endless') ghostData = prog.data.ghost;
+    else if (mode === 'trial') ghostData = null;
     else if (prog.data.dailyGhost && prog.data.dailyGhost.key === OM.dayKey(day)) {
       ghostData = prog.data.dailyGhost.data;
     }
 
-    var target = mode === 'endless' ? prog.data.best : (prog.data.daily[OM.dayKey(day)] || 0);
+    var target = mode === 'endless' ? prog.data.best
+               : mode === 'trial' ? (prog.data.trial[family] || 0)
+               : mode === 'nightmare' ? prog.data.nightmare
+               : (prog.data.daily[OM.dayKey(day)] || 0);
 
     G.run = {
       mode: mode, day: day, seed: seed, rng: rng,
-      gen: OM.Generator(OM.rng(seed ^ 0x9e3779b9)),
+      gen: OM.Generator(OM.rng(seed ^ 0x9e3779b9), { pool: pool, startX: mode === 'nightmare' ? 620 : undefined }),
+      tBias: tBias, family: family,
       sched: MUT.schedule(OM.rng(seed ^ 0x85ebca6b)),
-      t: 0, px: 0, speed: P.speedAt(0),
+      t: 0, px: 0, speed: P.speedAt(tBias > 100 ? 200 : 0),
       y: P.FLOOR - P.R, vy: 0, grav: 1, grounded: true,
       rot: 0, rotTarget: 0,
+      squash: 0, wasGrounded: true, lastVy: 0, marks: [],
       flips: 0, nearMiss: 0, perfect: 0,
       sinceFlip: 99, sinceNear: 99, sinceRecord: 99, deadFor: 0,
       dead: false, cause: null, threat: 0,
-      world: P.WORLDS[0], worldFlash: 0, mutFlash: 0, mutLabel: null,
+      world: P.worldAt(tBias > 100 ? tBias : 0), worldFlash: 0, mutFlash: 0, mutLabel: null,
       target: target, beat: false,
       rec: OM.GhostRecorder(),
+      replay: OM.ReplayBuffer(),
       ghost: OM.GhostPlayer(ghostData),
       mods: MUT.activeAt([], 0)
     };
@@ -113,12 +133,22 @@
       r.flips++;
       r.sinceFlip = 0;
       r.rotTarget += Math.PI;
-      G.screen.kick(3);
+      G.screen.kick(3.5);
+      r.squash = -0.45;                        // stretch along the new direction
+      var fx = G.playerScreenX();
+      G.pool.spawn(fx, r.y, 0, 0, 0.22, P.R_VIS * 0.9, 3);
+      for (var b = 0; b < 5; b++) {
+        G.pool.spawn(fx, r.y, (Math.random() - 0.5) * 90 - r.speed * 0.1,
+                     -r.grav * (110 + Math.random() * 130), 0.2 + Math.random() * 0.2, 1.6, 0);
+      }
       OM.audio.play('flip', r.grav);
       if (prog.data.settings.haptics && root.navigator && root.navigator.vibrate) {
         try { root.navigator.vibrate(8); } catch (e) {}
       }
-      if (!prog.data.seen.tutorial) { prog.data.seen.tutorial = true; prog.touch(); G.hint = 0; }
+      if (!prog.data.seen.tutorial) {
+        prog.data.seen.tutorial = true; prog.touch();
+        G.hint = 0; G.praise = 1.1;          // acknowledge the first input, once
+      }
       return true;
     }
     if (G.state === 'dead' && G.run.deadFor > DEAD_LOCKOUT) {
@@ -127,6 +157,30 @@
     }
     return false;
   };
+
+  /* Arrival matters as much as departure. A flip that ends in a soundless,
+     motionless stop reads as the character being teleported onto the surface;
+     the compression, the dust and the mark on the floor are what make it read
+     as landing. Strength scales with impact speed so a short hop and a full
+     ceiling-to-floor drop do not feel the same. */
+  function land(r, v) {
+    var f = clamp(v / 1900, 0.15, 1);
+    r.squash = f;
+    var sx = G.playerScreenX();
+    var surfY = r.grav > 0 ? P.FLOOR : P.CEIL;
+    var dir = r.grav > 0 ? -1 : 1;
+    for (var i = 0; i < 4 + Math.round(f * 9); i++) {
+      var a = (Math.random() - 0.5) * 2.2;
+      G.pool.spawn(sx + (Math.random() - 0.5) * 16, surfY + dir * 3,
+                   Math.sin(a) * 190 * f - r.speed * 0.12, dir * Math.abs(Math.cos(a)) * 150 * f,
+                   0.22 + Math.random() * 0.34, 1 + Math.random() * 2.4, 0);
+    }
+    G.pool.spawn(sx, surfY + dir * 4, 0, 0, 0.26, 6 + f * 10, 3);
+    r.marks.push({ x: r.px, side: r.grav > 0 ? 'floor' : 'ceil', life: 0.5, f: f });
+    if (r.marks.length > 10) r.marks.shift();
+    G.screen.kick(2 + f * 7);
+    OM.audio.play('land', f);
+  }
 
   function die(cause) {
     var r = G.run;
@@ -144,9 +198,21 @@
     OM.fx.death(G.pool, prog.data.cosmetics.death, G.playerScreenX(), r.y, P.R_VIS);
 
     var summary = {
-      mode: r.mode, day: r.day, time: r.t, cause: cause,
+      mode: r.mode, day: r.day, family: r.family, time: r.t, cause: cause,
       nearMiss: r.nearMiss, perfect: r.perfect, flips: r.flips,
-      world: r.world, ghost: r.rec.finish(), seed: r.seed
+      world: r.world, ghost: r.rec.finish(), seed: r.seed,
+      replay: OM.captureDeath(r, cause),
+      /* Context for the death analysis: what killed you is far less useful than
+         what you were doing when it did. */
+      context: {
+        tier: patternTierAt(r),
+        speed: r.speed,
+        airborne: !r.grounded,
+        sinceFlip: r.sinceFlip,
+        mutations: r.mods.list.map(function (m) { return m.m.id; }),
+        worldId: r.world.id,
+        flipRate: r.flips / Math.max(1, r.t)
+      }
     };
     summary.result = prog.commitRun(summary);
     r.summary = summary;
@@ -155,6 +221,18 @@
   }
 
   G.playerScreenX = function () { return G.W * (G.playerXFrac || P.PLAYER_X_FRAC); };
+
+  /* Which authored pattern was the player inside when it ended? This is the
+     single most useful fact for telling somebody what they are bad at. */
+  function patternTierAt(r) {
+    var best = null, bestD = 1e9;
+    for (var i = 0; i < r.gen.obstacles.length; i++) {
+      var o = r.gen.obstacles[i];
+      var d = Math.abs(o.x + (o.w || 0) / 2 - r.px);
+      if (d < bestD) { bestD = d; best = o; }
+    }
+    return best && bestD < 600 ? best.pat : null;
+  }
 
   /* Advances the simulation with no rendering. tools/playtest.js drives an
      automated player through this, so hours of game can be measured in seconds
@@ -178,10 +256,10 @@
     r.mods = mods;
 
     r.t += dt;
-    r.speed = P.speedAt(r.t) * mods.speed;
+    r.speed = P.speedAt(r.t + (r.tBias > 100 ? r.tBias : 0)) * mods.speed;
     var g = P.gravityFor(r.speed, 1);
 
-    var world = P.worldAt(r.t);
+    var world = P.worldAt(r.t + (r.tBias > 100 ? r.tBias : 0));
     if (world.id !== r.world.id) {
       r.world = world; r.worldFlash = 2.4;
       OM.audio.play('world');
@@ -200,17 +278,20 @@
     }
 
     // integrate in fixed sub-steps
-    var remaining = dt;
+    var remaining = dt, landedAt = 0;
     while (remaining > 0) {
       var h = Math.min(STEP, remaining);
       remaining -= h;
       r.px += r.speed * h;
+      var vBefore = r.vy;
       var out = P.stepPlayer(r, h, g, r.px, r.gen.holes);
       if (out === 'void') { die('void'); return; }
-      if (r.grounded && r.vy === 0 && r.sinceFlip < 0.05) OM.audio.play('land');
+      if (r.grounded && !r.wasGrounded) landedAt = Math.abs(vBefore);
+      r.wasGrounded = r.grounded;
     }
+    if (landedAt > 240) land(r, landedAt);
 
-    r.gen.ensure(r.px + G.W + 700, r.t, mods.spacing);
+    r.gen.ensure(r.px + G.W + 700, r.t + r.tBias, mods.spacing);
     r.gen.prune(r.px - G.W * 0.6);
 
     // collision + near miss
@@ -228,6 +309,7 @@
         if (d2 <= R2) { die(o.t); return; }
         if (d2 < nearD2 && !o._nm) {
           o._nm = true;
+          o._flash = 1;
           r.nearMiss++;
           r.sinceNear = 0;
           var perfect = r.sinceFlip < P.PERFECT_WINDOW;
@@ -239,8 +321,37 @@
       }
     }
 
+    // audible tell for pistons about to fire near you
+    for (var pi = 0; pi < list.length; pi++) {
+      var po = list[pi];
+      if (po.t !== 'piston') continue;
+      var d = po.x - r.px;
+      if (d < -120 || d > G.W * 0.55) { po._fired = false; continue; }
+      var ext = PAT.pistonExt(po, r.t);
+      if (ext > 8 && !po._fired) {
+        po._fired = true;
+        OM.audio.play('piston', clamp(1 - d / (G.W * 0.55), 0, 1));
+      } else if (ext <= 0.5) po._fired = false;
+    }
+
+    /* Every announcement timer decays on GAME time, inside the simulation.
+       Decaying them on frame time in tick() meant a paused or fast-forwarded
+       game left world cards and mutation banners frozen on screen. */
+    if (G.hint > 0) G.hint -= dt;
+    if (G.praise > 0) G.praise -= dt;
+    if (r.worldFlash > 0) r.worldFlash -= dt;
+    if (r.mutFlash > 0) r.mutFlash -= dt;
+    r.squash = OM.math.approach(r.squash, 0, 11, dt);
+    for (var m = r.marks.length - 1; m >= 0; m--) {
+      r.marks[m].life -= dt;
+      if (r.marks[m].life <= 0) r.marks.splice(m, 1);
+    }
+    for (var fl = 0; fl < list.length; fl++) {
+      if (list[fl]._flash > 0) list[fl]._flash = Math.max(0, list[fl]._flash - dt * 2.6);
+    }
     r.threat = OM.render.threatOf(list, r.px - G.playerScreenX(), G.playerScreenX(), G.W);
     r.rec.sample(dt, r.px, r.y, r.grav);
+    r.replay.sample(dt, r);
 
     // rotation eases toward the flip target — instant response, visible follow-through
     r.rot = OM.math.approach(r.rot, r.rotTarget, 17, dt);
@@ -268,10 +379,7 @@
     } else if (G.state === 'dead') {
       r.deadFor += dt;
     }
-    G.pool.update(dt, G.state === 'dead' ? 0 : r.speed * 0.35);
-    if (r.worldFlash > 0) r.worldFlash -= dt;
-    if (r.mutFlash > 0) r.mutFlash -= dt;
-    if (G.hint > 0) G.hint -= dt;
+    G.pool.update(dt, G.state === 'dead' ? 0 : r.speed);
     G.draw();
   };
 
@@ -302,8 +410,11 @@
       g.scale(1, -1);
     }
 
-    OM.render.backdrop(g, G.W, P.H, r.world.id, r.t, corrupt, clamp(r.t / 200, 0, 1));
-    OM.render.surfaces(g, G.W, camX, r.gen.holes, r.t, clamp(r.t / 200, 0, 1));
+    var speedFrac = clamp((r.speed - P.BASE_SPEED) / 520, 0, 1);
+    OM.render.backdrop(g, G.W, P.H, r.world.id, r.t, corrupt, speedFrac);
+    OM.render.speedLines(g, G.W, camX, r.y, speedFrac);
+    OM.render.surfaces(g, G.W, camX, r.gen.holes, r.t, speedFrac);
+    drawMarks(g, r, camX);
     OM.render.obstacles(g, G.W, camX, r.gen.obstacles, r.t, {
       fade: mods.fade, strobe: mods.strobe, vision: mods.vision, playerX: G.playerScreenX()
     });
@@ -314,8 +425,10 @@
     G.pool.draw(g);
 
     if (!r.dead) {
+      var sq = r.squash;
       OM.nanogon.draw(g, {
         x: G.playerScreenX(), y: r.y, r: P.R_VIS, rot: r.rot,
+        sx: 1 - sq * 0.30, sy: 1 + sq * 0.34,
         evo: prog.activeCore(),
         mood: OM.nanogon.moodFor({
           dead: false, sinceNear: r.sinceNear, sinceRecord: r.sinceRecord,
@@ -343,6 +456,22 @@
 
     drawHud(g, r, corrupt, mods);
   };
+
+  /* A brief bright scar on the surface where you touched down. It is gone in
+     half a second, but it is the difference between a floor you land on and a
+     floor you merely stop at. */
+  function drawMarks(g, r, camX) {
+    if (!r.marks.length) return;
+    g.save();
+    for (var i = 0; i < r.marks.length; i++) {
+      var m = r.marks[i], a = clamp(m.life / 0.5, 0, 1);
+      var w = 20 + m.f * 60 * (1.4 - a);
+      g.globalAlpha = a * a * 0.85;
+      g.fillStyle = '#fff';
+      g.fillRect(m.x - camX - w / 2, m.side === 'floor' ? P.FLOOR - 3 : P.CEIL, w, 3);
+    }
+    g.restore();
+  }
 
   function drawGhost(g, r, camX) {
     if (!r.ghost) return;
@@ -426,6 +555,10 @@
       g.globalAlpha = clamp(G.hint / 3.2, 0, 1) * (0.55 + Math.sin(r.t * 5) * 0.25);
       g.font = '600 20px ui-sans-serif, system-ui, sans-serif';
       g.fillText('TAP TO FLIP GRAVITY', G.W / 2, r.y + (r.grav > 0 ? -60 : 66));
+    } else if (G.praise > 0 && !r.dead) {
+      g.globalAlpha = clamp(G.praise / 1.1, 0, 1) * 0.8;
+      g.font = '600 20px ui-sans-serif, system-ui, sans-serif';
+      g.fillText('THAT IS THE WHOLE GAME', G.W / 2, P.H / 2 - 40);
     }
     g.restore();
   }

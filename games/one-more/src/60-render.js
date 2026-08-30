@@ -70,6 +70,35 @@
       }
     },
 
+    /* Speed streaks. An earlier version scattered these across the whole tunnel
+       at fixed heights, which read as scratches on the screen rather than as
+       motion — the eye reads a static y as dirt. These re-seed their height on
+       every wrap, stay near the player's altitude where the eye already is, and
+       only appear once the world is genuinely moving fast. */
+    speedLines: function (g, W, camX, playerY, frac) {
+      if (frac < 0.34) return;
+      var f = (frac - 0.34) / 0.66;
+      var n = 4 + Math.round(f * 9);
+      g.save();
+      g.fillStyle = '#fff';
+      for (var i = 0; i < n; i++) {
+        var seed = i * 2654435761 % 100000;
+        var rate = 1.5 + (seed % 5) * 0.22;
+        var span = 70 + f * 210 + (seed % 60);
+        var cycle = W + span * 2;
+        var travel = camX * rate + seed;
+        var lap = Math.floor(travel / cycle);
+        var x = W + span - (travel - lap * cycle);
+        // fresh height each lap, biased toward wherever the player is looking
+        var hs = ((lap * 2654435761 + seed) >>> 0) % 1000 / 1000;
+        var y = playerY + (hs - 0.5) * 320;
+        if (y < P.CEIL + 10 || y > P.FLOOR - 10) continue;
+        g.globalAlpha = (0.05 + f * 0.13) * (1 - Math.abs(hs - 0.5) * 1.2);
+        g.fillRect(x, y, span, 1);
+      }
+      g.restore();
+    },
+
     /* ---- floor and ceiling ---- */
     surfaces: function (g, W, camX, holes, t, speedFrac) {
       var x0 = camX - 40, x1 = camX + W + 40;
@@ -131,6 +160,17 @@
         if (alpha < 0.03) continue;
         g.globalAlpha = alpha;
         drawObstacle(g, o, sx, t);
+        // the thing you just grazed lights up: near misses should be legible
+        // after the fact, not only felt
+        if (o._flash > 0.01) {
+          g.globalAlpha = alpha * o._flash * 0.8;
+          g.strokeStyle = '#fff';
+          g.lineWidth = 2 + o._flash * 5;
+          var rects = PAT.rectsOf(o, t, []);
+          for (var q = 0; q < rects.length; q++) {
+            g.strokeRect(rects[q].x - 4, rects[q].y - 4, rects[q].w + 8, rects[q].h + 8);
+          }
+        }
       }
       g.restore();
     },
@@ -212,6 +252,39 @@
         g.globalAlpha *= 0.25;
         g.fillRect(sx + o.w / 2 - 1, o.cy - o.amp - o.h / 2, 2, o.amp * 2 + o.h);
         g.globalAlpha /= 0.25;
+        break;
+      }
+      case 'piston': {
+        var pe = PAT.pistonExt(o, t);
+        var base = o.side === 'floor' ? FLOOR : CEIL;
+        // housing: always visible, so the threat has a fixed address
+        g.fillStyle = '#fff';
+        g.fillRect(o.side === 'floor' ? sx - 4 : sx - 4, o.side === 'floor' ? base - 10 : base, o.w + 8, 10);
+        if (pe > 1) {
+          var py = o.side === 'floor' ? base - pe : base;
+          mass(g, sx, py, o.w, pe);
+          g.fillStyle = '#fff';                     // the head, the part that kills
+          g.fillRect(sx - 3, o.side === 'floor' ? py : py + pe - 7, o.w + 6, 7);
+        } else {
+          // primed: a short stub that grows just before it fires
+          var pp = (o.phase + t * o.rate) % 1;
+          var soon = Math.max(0, 1 - (1 - pp) / (1 - o.duty) * 3);
+          g.globalAlpha *= 0.25 + soon * 0.6;
+          g.fillRect(sx + o.w / 2 - 2, o.side === 'floor' ? base - 22 : base, 4, 22);
+          g.globalAlpha /= (0.25 + soon * 0.6);
+        }
+        break;
+      }
+      case 'gate': {
+        var gc = PAT.gateCenter(o, t);
+        mass(g, sx, CEIL, o.w, (gc - o.half) - CEIL);
+        mass(g, sx, gc + o.half, o.w, FLOOR - (gc + o.half));
+        g.fillStyle = '#fff';                        // the two edges of the opening
+        g.fillRect(sx - 3, gc - o.half - 5, o.w + 6, 5);
+        g.fillRect(sx - 3, gc + o.half, o.w + 6, 5);
+        g.globalAlpha *= 0.22;                       // where the opening will travel
+        g.fillRect(sx + o.w / 2 - 1, o.cy - o.amp - o.half, 2, (o.amp + o.half) * 2);
+        g.globalAlpha /= 0.22;
         break;
       }
       case 'laser': {

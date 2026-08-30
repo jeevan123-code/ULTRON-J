@@ -55,6 +55,10 @@
       g.globalAlpha = alpha;
       g.translate(st.x + (tremble ? (Math.random() - 0.5) * tremble : 0),
                   st.y + (tremble ? (Math.random() - 0.5) * tremble : 0));
+      /* Squash and stretch in world axes, before the spin. Rotating inside a
+         non-uniform scale shears the shape slightly, which is exactly what a
+         compressed object mid-tumble should look like. */
+      if (st.sx || st.sy) g.scale(st.sx || 1, st.sy || 1);
       g.rotate(st.rot || 0);
 
       // outer glow — a couple of cheap wide strokes rather than a shadow blur,

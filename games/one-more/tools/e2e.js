@@ -35,26 +35,26 @@ function ok(name, cond, detail) {
      (await page.textContent('#s-menu .tag')).indexOf('sideways') >= 0);
 
   await page.click('[data-act="play"]');
-  await page.waitForTimeout(120);
+  await page.waitForFunction("OM.game.state === 'playing'", null, { timeout: 5000 }).catch(function () {});
   ok('PLAY starts a run', await page.evaluate('OM.game.state') === 'playing');
   ok('menus get out of the way', await page.evaluate('OM.ui.screen') === null);
 
   // a tap on the canvas must flip gravity
   var g0 = await page.evaluate('OM.game.run.grav');
   await page.tap('#stage');
-  await page.waitForTimeout(60);
+  await page.waitForFunction('OM.game.run.grav !== ' + g0, null, { timeout: 3000 }).catch(function () {});
   ok('tapping the canvas flips gravity', await page.evaluate('OM.game.run.grav') !== g0);
 
   // pause and resume must not lose the run
   await page.click('#pause-btn');
-  await page.waitForTimeout(80);
+  await page.waitForFunction("OM.game.state === 'paused'", null, { timeout: 5000 }).catch(function () {});
   ok('pause halts the run', await page.evaluate('OM.game.state') === 'paused');
   var tPaused = await page.evaluate('OM.game.run.t');
   await page.waitForTimeout(400);
   ok('time does not advance while paused',
      Math.abs(await page.evaluate('OM.game.run.t') - tPaused) < 0.02);
   await page.click('[data-act="resume"]');
-  await page.waitForTimeout(80);
+  await page.waitForFunction("OM.game.state === 'playing'", null, { timeout: 5000 }).catch(function () {});
   ok('resume returns to play', await page.evaluate('OM.game.state') === 'playing');
 
   // die on purpose, then check the results screen and the one-tap restart
@@ -63,7 +63,10 @@ function ok(name, cond, detail) {
     while (OM.game.state === 'playing' && t < 90) { OM.game.stepHeadless(1 / 120); t += 1 / 120; }
   });
   ok('a run ends in death, not a hang', await page.evaluate('OM.game.state') === 'dead');
-  await page.waitForTimeout(900);
+  /* Wait on the condition, never on the clock. The results screen is scheduled
+     620ms after death; a fixed sleep that is comfortable on an idle machine
+     starts failing the moment anything else is competing for the CPU. */
+  await page.waitForFunction("OM.ui.screen === 'result'", null, { timeout: 8000 });
   ok('results appear after death', await page.evaluate('OM.ui.screen') === 'result');
   var shown = await page.textContent('#r-time');
   ok('results show the survival time', /^\d\d:\d\d\.\d\d$/.test(shown), shown);
@@ -71,8 +74,9 @@ function ok(name, cond, detail) {
      (await page.textContent('#r-kicker')).indexOf('RECORD') >= 0);
   ok('xp was awarded', (await page.textContent('#r-xplabel')).indexOf('+') >= 0);
 
+  await page.waitForFunction('OM.game.run.deadFor > 0.25', null, { timeout: 5000 });
   await page.tap('#s-result', { position: { x: 200, y: 60 } });
-  await page.waitForTimeout(150);
+  await page.waitForFunction("OM.game.state === 'playing'", null, { timeout: 5000 }).catch(function () {});
   ok('tapping the results screen goes again', await page.evaluate('OM.game.state') === 'playing');
 
   // the second run must show the gap to the record — the "one more" engine
@@ -133,6 +137,116 @@ function ok(name, cond, detail) {
   ok('records survive a reload', await page.evaluate('OM.progress.data.runs') >= 1);
   ok('cosmetics survive a reload',
      await page.evaluate('OM.progress.data.cosmetics.trail') === 'particle');
+
+  // ---- death replay ----
+  await page.evaluate(function () {
+    OM.ui.hideAll(); OM.game.start('endless', {}); OM.audio.setMuted(true);
+    var t = 0;
+    while (OM.game.state === 'playing' && t < 90) { OM.game.stepHeadless(1 / 120); t += 1 / 120; }
+  });
+  await page.waitForFunction("OM.ui.screen === 'result'", null, { timeout: 8000 });
+  ok('death captures a replay', await page.evaluate('OM.game.run.summary.replay.frames.length') > 6);
+  /* Solid obstacles AND holes — a death by falling through a gap legitimately
+     has no solid geometry nearby, and asserting only on obstacles turned that
+     into a phantom failure. */
+  ok('replay captured the geometry around the death', await page.evaluate(function () {
+    var r = OM.game.run.summary.replay;
+    return r.obstacles.length + r.holes.length > 0;
+  }));
+  ok('a void death captures the gap that swallowed you', await page.evaluate(function () {
+    var r = OM.game.run.summary.replay;
+    return r.cause !== 'void' || r.holes.length > 0;
+  }));
+  ok('replay panel is visible', await page.isVisible('.replay'));
+  await page.waitForFunction('document.getElementById("r-replay").width > 0', null, { timeout: 5000 })
+    .catch(function () {});
+  ok('replay canvas is sized and drawing',
+     await page.evaluate('document.getElementById("r-replay").width > 0'));
+  ok('replay names the cause',
+     ['spike', 'block', 'bar', 'mover', 'laser', 'piston', 'gate', 'void']
+       .indexOf(await page.evaluate('OM.game.run.summary.replay.cause')) >= 0);
+
+  // ---- the read ----
+  ok('the read stays quiet until it has evidence',
+     (await page.textContent('#r-read')).indexOf('READING YOU') >= 0);
+  ok('trial is hidden without a diagnosis', await page.isHidden('#r-actions [data-act="trial"]'));
+
+  await page.evaluate(function () {
+    // 20 synthetic deaths, heavily weighted to moving geometry
+    for (var i = 0; i < 20; i++) {
+      OM.analysis.record({
+        time: 20 + i, cause: i % 5 === 0 ? 'spike' : 'mover',
+        context: { tier: 't3_mover_pair', airborne: true, sinceFlip: 0.4, mutations: [], worldId: 'origin', flipRate: 1.2 }
+      });
+    }
+  });
+  var rd = await page.evaluate('JSON.stringify(OM.analysis.read())');
+  rd = JSON.parse(rd);
+  ok('a lopsided death history produces a diagnosis', rd.kind === 'weakness', rd.kind);
+  ok('it names the right weakness', rd.family === 'prediction', rd.family);
+  ok('the diagnosis cites real counts', rd.n >= 20 && rd.share > 0.5);
+
+  ok('a balanced history refuses to invent a weakness', await page.evaluate(function () {
+    OM.analysis.clear();
+    var causes = ['spike', 'mover', 'bar', 'void'];
+    for (var i = 0; i < 40; i++) {
+      OM.analysis.record({ time: 30, cause: causes[i % 4], context: {} });
+    }
+    return OM.analysis.read().kind === 'balanced';
+  }));
+
+  // ---- trial ----
+  await page.evaluate(function () {
+    OM.analysis.clear();
+    for (var i = 0; i < 20; i++) OM.analysis.record({ time: 25, cause: 'void', context: {} });
+    OM.ui.show('menu');
+  });
+  ok('menu offers a trial once diagnosed', await page.isVisible('#menu-trial'));
+  await page.click('#menu-trial');
+  await page.waitForTimeout(150);
+  ok('trial starts', await page.evaluate('OM.game.run.mode') === 'trial');
+  ok('trial targets the diagnosed weakness', await page.evaluate('OM.game.run.family') === 'nerve');
+  ok('trial skips the tutorial difficulty band', await page.evaluate('OM.game.run.tBias') > 0);
+  ok('trial only uses proven patterns', await page.evaluate(function () {
+    OM.game.run.gen.ensure(30000, 60, 1);
+    var ids = {};
+    OM.game.run.gen.obstacles.forEach(function (o) { ids[o.pat] = 1; });
+    var known = {};
+    OM.patterns.list.forEach(function (p) { known[p.id] = 1; });
+    return Object.keys(ids).every(function (k) { return known[k]; }) && Object.keys(ids).length > 0;
+  }));
+
+  // ---- nightmare ----
+  await page.evaluate(function () { OM.game.state = 'idle'; OM.game.run = null; OM.ui.show('menu'); });
+  ok('nightmare is locked before 120s', await page.isHidden('#menu-nightmare'));
+  await page.evaluate(function () {
+    OM.progress.data.best = 150; OM.progress.touch(); OM.ui.show('menu');
+  });
+  ok('nightmare unlocks at 120s', await page.isVisible('#menu-nightmare'));
+  await page.click('#menu-nightmare');
+  await page.waitForTimeout(150);
+  ok('nightmare starts at speed', await page.evaluate('OM.game.run.speed') > 850);
+  ok('nightmare starts in the last world',
+     await page.evaluate('OM.game.run.world.id') === 'nightmare');
+
+  // ---- render cost ----
+  var perf = await page.evaluate(function () {
+    OM.ui.hideAll(); OM.game.start('endless', {}); OM.audio.setMuted(true);
+    var t = 0, guard = 0;
+    // fast-forward into a busy part of the world, restarting on death
+    while (t < 120 && guard++ < 200000) {
+      if (OM.game.state !== 'playing') { OM.game.start('endless', {}); }
+      OM.game.stepHeadless(1 / 120); t += 1 / 120;
+    }
+    var n = 240, t0 = performance.now();
+    for (var i = 0; i < n; i++) OM.game.draw();
+    return (performance.now() - t0) / n;
+  });
+  /* Headless Chromium does not composite, so this measures the cost of issuing
+     a frame's draw calls, not GPU time. It is still a real regression guard: it
+     is where an accidental O(n^2) over the obstacle list would show up. */
+  ok('a frame issues its draw calls in under 4ms', perf < 4, perf.toFixed(2) + 'ms/frame');
+  console.log('    (draw-call cost: ' + perf.toFixed(2) + 'ms per frame, 60 patterns live)');
 
   console.log('  ' + '-'.repeat(52));
   if (errors.length) {

@@ -11,6 +11,8 @@
     v: 1, xp: 0, runs: 0, totalTime: 0,
     best: 0, bestAt: 0,
     daily: {},            // dayKey -> best seconds
+    trial: {},            // weakness family -> best seconds
+    nightmare: 0,         // best in the unlockable hard mode
     dailyDone: [],        // dayKeys played, for the streak
     nearMiss: 0, perfect: 0, flips: 0, deaths: {},
     cosmetics: { core: 'auto', trail: 'line', death: 'shatter' },
@@ -109,7 +111,12 @@
     { id: 'd7', name: 'SEVEN DAYS', line: 'Play 7 Daily Challenges.', test: function (s) { return s.dailyDone.length >= 7; } },
     { id: 'lv10', name: 'PULSE', line: 'Reach level 10.', test: function (s) { return levelInfo(s.xp).level >= 10; } },
     { id: 'lv25', name: 'PHASE', line: 'Reach level 25.', test: function (s) { return levelInfo(s.xp).level >= 25; } },
-    { id: 'hour', name: 'AN HOUR OF THIS', line: 'One hour of total survival.', test: function (s) { return s.totalTime >= 3600; } }
+    { id: 'hour', name: 'AN HOUR OF THIS', line: 'One hour of total survival.', test: function (s) { return s.totalTime >= 3600; } },
+    { id: 'nm_open', name: 'NO WARNINGS', line: 'Unlock Nightmare (survive 120s).', test: function (s) { return s.best >= 120; } },
+    { id: 'nm30', name: 'THIRTY IN THE DARK', line: 'Survive 30s in Nightmare.', test: function (s) { return s.nightmare >= 30; } },
+    { id: 'trial1', name: 'FACING IT', line: 'Finish a Trial run.', test: function (s) { return Object.keys(s.trial).length >= 1; } },
+    { id: 'trial60', name: 'WEAKNESS ADDRESSED', line: 'Survive 60s in a Trial.', test: function (s) {
+        for (var k in s.trial) if (s.trial[k] >= 60) return true; return false; } }
   ];
 
   function checkAchievements() {
@@ -125,6 +132,7 @@
   /* ---- recording a run ---- */
   function commitRun(r) {
     var beforeLevel = levelInfo(save.xp).level;
+    if (OM.analysis) OM.analysis.record(r);
     save.runs++;
     save.totalTime += r.time;
     save.nearMiss += r.nearMiss;
@@ -138,6 +146,14 @@
     if (r.mode === 'endless') {
       if (r.time > save.best) { save.best = r.time; save.bestAt = Date.now(); record = true; xp += 60; }
       if (r.ghost && r.time > save.ghostTime) { save.ghost = r.ghost; save.ghostTime = r.time; }
+    } else if (r.mode === 'nightmare') {
+      if (r.time > save.nightmare) { save.nightmare = r.time; record = true; xp += 80; }
+      xp = Math.round(xp * 1.6);
+    } else if (r.mode === 'trial') {
+      if (!save.trial[r.family] || r.time > save.trial[r.family]) {
+        save.trial[r.family] = r.time; record = true;
+      }
+      xp = Math.round(xp * 1.25);       // drilling your weakness is worth more
     } else if (r.mode === 'daily') {
       var k = OM.dayKey(r.day);
       if (save.dailyDone.indexOf(k) < 0) { save.dailyDone.push(k); xp += 25; }
@@ -174,6 +190,7 @@
     needFor: needFor,
     commitRun: commitRun,
     dailyStreak: dailyStreak,
+    nightmareUnlocked: function () { return save.best >= 120; },
     achievements: ACH,
     cores: CORES, trails: TRAILS, deaths: DEATHS,
     unlockedCores: function () { return unlockedIn(CORES, levelInfo(save.xp).level); },

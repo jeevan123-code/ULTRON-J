@@ -19,6 +19,7 @@ require(path.join(SRC, '10-physics.js'));
 require(path.join(SRC, '20-patterns.js'));
 require(path.join(SRC, '25-generator.js'));
 require(path.join(SRC, '30-mutations.js'));
+require(path.join(SRC, '32-analysis.js'));
 require(path.join(SRC, '35-progress.js'));
 require(path.join(SRC, '40-ghost.js'));
 
@@ -121,6 +122,22 @@ ok('no pattern seals the tunnel', (function () {
   });
 })());
 ok('unique ids', new Set(PAT.list.map(function (p) { return p.id; })).size === PAT.list.length);
+ok('piston extends and retracts', (function () {
+  var o = { t: 'piston', side: 'floor', x: 0, w: 80, h: 300, rate: 1, duty: 0.5, phase: 0 };
+  var mid = PAT.pistonExt(o, 0.25), out = PAT.pistonExt(o, 0.6);
+  return near(mid, 300, 1) && out === 0 && PAT.pistonExt(o, 0.01) < 300;
+})());
+ok('gate always leaves an opening', (function () {
+  var o = { t: 'gate', x: 0, w: 80, half: 110, cy: (P.CEIL + P.FLOOR) / 2, amp: 400, rate: 1, phase: 0 };
+  for (var t = 0; t < 3; t += 0.01) {
+    var r = PAT.rectsOf(o, t);
+    if (r.length !== 2) return false;
+    var gap = r[1].y - (r[0].y + r[0].h);
+    if (gap < 2 * P.R + 10) return false;            // must stay passable
+    if (r[0].h < 10 || r[1].h < 10) return false;    // and both jaws must be real
+  }
+  return true;
+})());
 ok('laser rects follow the duty cycle', (function () {
   var o = { t: 'laser', side: 'floor', x: 0, w: 40, h: 300, rate: 1, duty: 0.5, phase: 0 };
   return PAT.rectsOf(o, 0.1).length === 1 && PAT.rectsOf(o, 0.7).length === 0;
@@ -250,6 +267,85 @@ ok('x deltas stay small (cheap to store)', (function () {
   var d = rec.finish();
   return d.dx.every(function (v) { return Math.abs(v) < 200; });
 })());
+
+console.log('\n  the read');
+var A = OM.analysis;
+function feed(cause, n, extra) {
+  for (var i = 0; i < n; i++) A.record({ time: 20 + i, cause: cause, context: extra || {} });
+}
+ok('says nothing until it has evidence', (function () {
+  A.clear(); feed('mover', 8);
+  var r = A.read();
+  return r.kind === 'none' && r.need === 4;
+})(), 'an early diagnosis from four runs would be noise dressed up as insight');
+ok('diagnoses a single dominant cause', (function () {
+  A.clear(); feed('void', 20);
+  var r = A.read();
+  return r.kind === 'weakness' && r.family === 'nerve' && r.share === 1;
+})(), 'this is the case that regressed once: 1-of-1 families read as an even split');
+ok('diagnoses a dominant family across causes', (function () {
+  A.clear(); feed('mover', 9); feed('laser', 8); feed('spike', 3);
+  var r = A.read();
+  return r.kind === 'weakness' && r.family === 'prediction';
+})());
+ok('refuses to invent a weakness from an even spread', (function () {
+  A.clear(); feed('spike', 10); feed('mover', 10); feed('bar', 10); feed('void', 10);
+  return A.read().kind === 'balanced';
+})());
+ok('cites counts that match the history', (function () {
+  A.clear(); feed('mover', 15); feed('spike', 5);
+  var r = A.read();
+  return r.n === 20 && r.count === 15 && Math.abs(r.share - 0.75) < 1e-9;
+})());
+ok('history is capped so storage stays flat', (function () {
+  A.clear(); feed('spike', 400);
+  return A.history().length <= 260;
+})());
+ok('trend needs enough runs before it claims anything', (function () {
+  A.clear(); feed('spike', 20);
+  return A.trend() === null;
+})());
+ok('trend detects improvement', (function () {
+  A.clear();
+  for (var i = 0; i < 15; i++) A.record({ time: 10, cause: 'spike', context: {} });
+  for (i = 0; i < 15; i++) A.record({ time: 40, cause: 'spike', context: {} });
+  var t = A.trend();
+  return t && t.delta > 25 && t.recent > t.early;
+})());
+ok('trend detects decline', (function () {
+  A.clear();
+  for (var i = 0; i < 15; i++) A.record({ time: 50, cause: 'spike', context: {} });
+  for (i = 0; i < 15; i++) A.record({ time: 12, cause: 'spike', context: {} });
+  var t = A.trend();
+  return t && t.delta < -25;
+})());
+ok('a trial pool is built only from proven patterns', (function () {
+  var fams = ['timing', 'prediction', 'commitment', 'nerve'];
+  for (var f = 0; f < fams.length; f++) {
+    var pool = A.trialPatterns(fams[f]);
+    if (pool.length < 4) return false;
+    for (var i = 0; i < pool.length; i++) if (PAT.list.indexOf(pool[i]) < 0) return false;
+  }
+  return true;
+})(), 'a Trial must never invent geometry — it is a different selection, not different rules');
+ok('a trial pool actually matches its weakness', (function () {
+  var pool = A.trialPatterns('nerve');
+  var withHole = pool.filter(function (p) {
+    return p.items.some(function (it) { return it.t === 'hole'; });
+  });
+  return withHole.length / pool.length >= 0.5;
+})());
+ok('every family maps to copy the UI can render', (function () {
+  var seen = {};
+  ['spike', 'block', 'bar', 'mover', 'gate', 'piston', 'laser', 'void'].forEach(function (c) {
+    seen[A.familyOf(c)] = 1;
+  });
+  return Object.keys(seen).every(function (f) {
+    var c = A.families[f];
+    return c && c.name && c.line && c.fix;
+  });
+})());
+A.clear();
 
 console.log('\n  progression');
 ok('levels need progressively more xp', (function () {

@@ -25,6 +25,22 @@
   function laser(side, dx, w, rate, duty, phase) {
     return { t: 'laser', side: side, dx: dx, w: w, rate: rate, duty: duty, phase: phase || 0, h: LASER_H };
   }
+
+  /* A piston is the physical cousin of the laser: a block that drives out of a
+     surface and retracts. Same decision — be on the other side — but it extends
+     over time instead of blinking, so it is readable from much further out and
+     the moment of commitment is visible rather than remembered. Capped at 58%
+     of the tunnel so the opposite surface is always an answer. */
+  function piston(side, dx, w, h, rate, duty, phase) {
+    return { t: 'piston', side: side, dx: dx, w: w, h: h, rate: rate, duty: duty, phase: phase || 0 };
+  }
+
+  /* A gate is a needle that will not hold still: floor and ceiling both close in
+     at one x, and the opening between them slides up and down. You cannot learn
+     the spot, only the timing. */
+  function gate(dx, w, half, cy, amp, rate, phase) {
+    return { t: 'gate', dx: dx, w: w, half: half, cy: cy, amp: amp, rate: rate, phase: phase || 0 };
+  }
   function pat(id, tier, len, items) { return { id: id, tier: tier, len: len, items: items }; }
 
   /* A "needle" is the signature moment: floor and ceiling both close in at the
@@ -135,6 +151,71 @@
     bar(1340, 150, CEIL + 180, FLOOR - 180)
   ]));
 
+  /* ---- expansion set ----
+     Added in the depth pass. Same rules: authored, tiered, and every one of
+     them proven by tools/validate.js before it was allowed to ship. */
+
+  // TIER 1
+  L.push(pat('t1_block_ceil', 1, 620, [block('ceil', 140, 230, 150)]));
+  L.push(pat('t1_hole_wide', 1, 800, [hole('floor', 150, 320)]));
+  L.push(pat('t1_bar_high', 1, 700, [bar(180, 180, CEIL + 90, FLOOR - 250)]));
+
+  // TIER 2
+  L.push(pat('t2_piston', 2, 940, [piston('floor', 300, 110, 330, 0.38, 0.5, 0)]));
+  L.push(pat('t2_piston_ceil', 2, 940, [piston('ceil', 300, 110, 330, 0.38, 0.5, 0.5)]));
+  L.push(pat('t2_spike_hole', 2, 1080, [spike('ceil', 110, 180, 115), hole('floor', 580, 240)]));
+  L.push(pat('t2_zig_ceil', 2, 1220, [
+    spike('ceil', 100, 165, 115), spike('floor', 460, 165, 115), spike('ceil', 820, 165, 115)
+  ]));
+  L.push(pat('t2_double_wide', 2, 1180, [spike('floor', 110, 280, 120), spike('ceil', 620, 280, 120)]));
+
+  // TIER 3
+  L.push(pat('t3_gate', 3, 1080, [gate(420, 30, 220, (CEIL + FLOOR) / 2, 34, 0.14, 0)]));
+  L.push(pat('t3_piston_pair', 3, 1300, [
+    piston('floor', 200, 100, 330, 0.4, 0.45, 0), piston('ceil', 800, 100, 330, 0.4, 0.45, 0.5)
+  ]));
+  L.push(pat('t3_laser_ceil', 3, 1000, [laser('ceil', 320, 90, 0.42, 0.5, 0)]));
+  L.push(pat('t3_zig5', 3, 1800, [
+    spike('floor', 80, 130, 112), spike('ceil', 440, 130, 112), spike('floor', 800, 130, 112),
+    spike('ceil', 1160, 130, 112), spike('floor', 1520, 130, 112)
+  ]));
+  L.push(pat('t3_hole_bar_hole', 3, 1500, [
+    hole('floor', 100, 280), bar(620, 170, CEIL + 170, FLOOR - 170), hole('ceil', 1060, 280)
+  ]));
+
+  // TIER 4
+  L.push(pat('t4_gate_fast', 4, 1140, [gate(440, 38, 184, (CEIL + FLOOR) / 2, 82, 0.26, 0)]));
+  L.push(pat('t4_piston_zig', 4, 1600, [
+    piston('floor', 160, 100, 330, 0.45, 0.45, 0), spike('ceil', 660, 160, 118),
+    piston('floor', 1140, 100, 330, 0.45, 0.45, 0.5)
+  ]));
+  L.push(pat('t4_comb_hole', 4, 1620, [
+    spike('floor', 80, 130, 115), spike('ceil', 440, 130, 115),
+    hole('floor', 800, 300), spike('ceil', 1240, 130, 115)
+  ]));
+  L.push(pat('t4_laser_pair', 4, 1480, [
+    laser('floor', 240, 90, 0.45, 0.5, 0), laser('ceil', 900, 90, 0.45, 0.5, 0.5)
+  ]));
+  L.push(pat('t4_bar_needle', 4, 1700, [bar(120, 160, CEIL + 140, FLOOR - 230)].concat(needle(960, 40, 178))));
+
+  // TIER 5
+  L.push(pat('t5_piston_storm', 5, 2000, [
+    piston('floor', 150, 95, 330, 0.5, 0.42, 0), piston('ceil', 700, 95, 330, 0.5, 0.42, 0.45),
+    piston('floor', 1250, 95, 330, 0.5, 0.42, 0.9)
+  ]));
+  L.push(pat('t5_gate_pair', 5, 2160, [
+    gate(380, 34, 188, (CEIL + FLOOR) / 2, 72, 0.24, 0),
+    gate(1420, 34, 188, (CEIL + FLOOR) / 2, 72, 0.24, 1.7)
+  ]));
+  L.push(pat('t5_full_house', 5, 2300, [
+    spike('floor', 90, 140, 115), bar(500, 160, CEIL + 150, FLOOR - 230),
+    gate(1080, 38, 178, (CEIL + FLOOR) / 2, 82, 0.26, 0.6), spike('ceil', 1700, 140, 115)
+  ]));
+  L.push(pat('t5_laser_gauntlet', 5, 2100, [
+    laser('floor', 200, 85, 0.48, 0.48, 0), spike('ceil', 700, 140, 115),
+    laser('ceil', 1180, 85, 0.48, 0.48, 0.5), spike('floor', 1680, 140, 115)
+  ]));
+
   /* ---- collision geometry -------------------------------------------------
      Everything reduces to axis-aligned rects. Spikes get a generous inset so a
      death always looks like a death — nothing is ever killed by a pixel of a
@@ -158,6 +239,19 @@
       case 'mover':
         out.push({ x: o.x, y: moverY(o, t) - o.h / 2, w: o.w, h: o.h, o: o });
         break;
+      case 'piston': {
+        var e = pistonExt(o, t);
+        if (e > 0.5) {
+          out.push({ x: o.x, y: o.side === 'floor' ? FLOOR - e : CEIL, w: o.w, h: e, o: o });
+        }
+        break;
+      }
+      case 'gate': {
+        var c = gateCenter(o, t);
+        out.push({ x: o.x, y: CEIL, w: o.w, h: (c - o.half) - CEIL, o: o });
+        out.push({ x: o.x, y: c + o.half, w: o.w, h: FLOOR - (c + o.half), o: o });
+        break;
+      }
       case 'laser':
         if (laserOn(o, t)) {
           out.push({ x: o.x, y: o.side === 'ceil' ? CEIL : FLOOR - o.h, w: o.w, h: o.h, o: o });
@@ -176,6 +270,22 @@
   function laserPhase(o, t) { return (o.phase + t * o.rate) % 1; }
   function laserOn(o, t) { var p = laserPhase(o, t); return p >= 0 && p < o.duty; }
 
+  /* Piston extension in px. It ramps out, holds, ramps back — the ramps are what
+     make it readable: you can see it committing before it has committed. */
+  function pistonExt(o, t) {
+    var p = (o.phase + t * o.rate) % 1;
+    if (p >= o.duty) return 0;
+    var f = p / o.duty;
+    var e = f < 0.18 ? f / 0.18 : (f > 0.82 ? (1 - f) / 0.18 : 1);
+    return o.h * Math.max(0, Math.min(1, e));
+  }
+
+  function gateCenter(o, t) {
+    var c = o.cy + Math.sin(o.phase + t * o.rate * Math.PI * 2) * o.amp;
+    // both jaws must keep real mass, or the "gate" quietly becomes an open door
+    return Math.max(CEIL + o.half + 26, Math.min(FLOOR - o.half - 26, c));
+  }
+
   OM.patterns = {
     list: L,
     byTier: (function () {
@@ -185,6 +295,8 @@
     })(),
     rectsOf: rectsOf,
     moverY: moverY,
+    pistonExt: pistonExt,
+    gateCenter: gateCenter,
     laserOn: laserOn,
     laserPhase: laserPhase,
     needle: needle

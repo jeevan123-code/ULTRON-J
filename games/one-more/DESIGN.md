@@ -53,7 +53,7 @@ Slack is the timing error the most forgiving line tolerates. It is measured
 exactly where the solution space is small enough to scan outright (one- and
 two-flip lines) and reported as a lower bound otherwise.
 
-Two findings from building that tool that changed the game:
+Three findings from building that tool that changed the game:
 
 - **A full-height blinking laser is not a skill test.** The player cannot
   control when they arrive at it, so whether it is lit is luck. Lasers now cover
@@ -63,6 +63,12 @@ Two findings from building that tool that changed the game:
   middle of the tunnel at maximum vertical speed, so how *long* they must hold a
   narrow band costs far more slack than how tall the band is. Every gate got
   narrower and every gap got taller.
+- **Sliding gates compound both problems.** All four shipped their first draft
+  between 9 and 35 ms. Fair versions are narrow with slowly-moving openings —
+  which made them hard to *see*, so they gained approach rails: faint lines
+  running back from each jaw that show where the opening is and which way it is
+  travelling, long before you reach it. Fairness and legibility are the same
+  problem viewed from two ends.
 
 ## 4. The character is the HUD
 
@@ -84,10 +90,20 @@ readable at thumbnail size and instantly recognisable in a still frame, which
 matters more for how it spreads than any amount of visual richness would.
 
 The art-direction rule: if removing 30 % of an effect makes the frame read
-better, it was decoration and not feedback. Applied literally — solid obstacle
-masses were originally striped, which made them read as ladders you could climb;
-they are now a white frame over a dimmed hatch, which reads as "solid, do not
-touch" at a glance and stays quiet in the frame.
+better, it was decoration and not feedback. Applied literally, twice:
+
+- Solid obstacle masses were originally striped, which made them read as ladders
+  you could climb. They are now a white frame over a dimmed hatch, which reads
+  as "solid, do not touch" at a glance and stays quiet in the frame.
+- Speed streaks were first scattered across the whole tunnel at fixed heights,
+  which the eye read as scratches on the screen rather than as motion — a static
+  y reads as dirt. They now re-seed their height on every wrap, cluster near the
+  player's altitude, and only appear once the world is genuinely moving.
+
+The same rule cuts the other way for landing. A flip that ended in a soundless,
+motionless stop read as the character being *teleported* onto the surface. The
+compression, the dust, the brief scar on the floor and a thump pitched to the
+impact speed are not decoration: they are what gives the character mass.
 
 ## 6. Arriving, not choosing
 
@@ -97,7 +113,46 @@ value ramps up and starts tearing at the backdrop, the character's shell and
 eventually the interface itself — the timer jitters, a glyph swaps. Long runs
 should feel like territory you are not supposed to be in.
 
-## 7. Honest opponents
+## 7. The read
+
+The differentiator is not that the game is hard. It is that it pays attention.
+
+Every death records what killed you and what you were doing when it did: which
+authored pattern you were inside, whether you were airborne, how long since your
+last flip, which mutations were running. Deaths are then grouped into four
+families a person can actually practise — timing, prediction, commitment, nerve
+— because "you die on moving geometry" is actionable and "you die on
+t4_mover_gate" is trivia.
+
+The discipline is in what it refuses to say:
+
+- Under twelve deaths it says nothing, and tells you how many runs are left
+  before it will.
+- If your deaths are evenly spread it says so. It does not manufacture a
+  weakness to have something to report.
+- Every claim carries its own evidence: "100 % of your last 21 deaths", not
+  "you seem to struggle with".
+- The trend line is your own median, first fifteen runs against last fifteen. It
+  can and does tell you that you are getting worse.
+
+When there is a diagnosis, there is a **Trial**: a run built mostly from the
+patterns you actually fail. A Trial narrows *which* proven patterns can appear
+and starts past the tutorial band. It never changes the rules, the physics or
+the geometry — because those are the things the fairness proof covers, and a
+mode that quietly escaped that proof would be the least fair part of the game.
+
+## 8. The last two seconds
+
+Every death captures the player's path and a copy of the geometry around them,
+and replays it in slow motion on the results screen with the tunnel framed in
+full. Not framed tight on the character, which looks dramatic and answers
+nothing — you need to see the surface you failed to reach.
+
+It does two jobs at once: it is the honest answer to "what just happened", and
+it is the thing worth posting. A game that generates its own clips does not need
+a marketing budget as badly as one that does not.
+
+## 9. Honest opponents
 
 There is no server, so there is no global leaderboard — and the game does not
 pretend otherwise. No fabricated rival names, no invented world records, no
@@ -113,7 +168,7 @@ without a server.
 Both were built in the shape a backend would want. The ghost format is a few
 bytes per frame; the daily seed is a pure function of the date.
 
-## 8. Audio does the tension
+## 10. Audio does the tension
 
 The music is a step sequencer whose layers arrive with survival time: drone,
 then kick, then hats, then a bass figure, then a detuned pad. When your personal
@@ -121,7 +176,7 @@ best comes within six seconds it strips to a bare heartbeat. Going quiet is the
 loudest thing the soundtrack can do at that moment, and it costs nothing to
 build.
 
-## 9. What is deliberately missing
+## 11. What is deliberately missing
 
 Real-time multiplayer, chat, clans, battle passes, multiple currencies,
 inventories, crafting, pets, a story, and any monetisation that touches the

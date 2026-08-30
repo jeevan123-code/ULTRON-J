@@ -40,6 +40,10 @@ html, body {
 #s-menu { background: linear-gradient(180deg, rgba(8,9,12,.94) 0%, rgba(8,9,12,.72) 40%, rgba(8,9,12,.94) 100%); backdrop-filter: none; -webkit-backdrop-filter: none; }
 @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .wrap { width: min(460px, 100%); text-align: center; }
+/* The results screen carries a replay and an analysis now, so it scrolls on a
+   phone. Tap-to-restart is a real tap detector in boot.js precisely because of
+   this — firing on pointerdown would restart the run on every scroll. */
+.wrap.result { max-height: 100%; overflow-y: auto; touch-action: pan-y; padding: 2px; }
 .wrap.scrolly { max-height: 100%; overflow-y: auto; touch-action: pan-y; padding: 4px; }
 
 /* ---------- type ---------- */
@@ -71,7 +75,7 @@ html, body {
 .btn:active { transform: scale(.978); }
 .btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .btn.primary:hover { background: #fff; }
-.btn.huge { font-size: 19px; padding: 22px; margin-top: 20px; letter-spacing: .2em; }
+.btn.huge { font-size: 19px; padding: 22px; margin: 4px 0 18px; letter-spacing: .2em; }
 .btn.small { width: auto; flex: 1 1 auto; padding: 12px 16px; font-size: 12px; }
 .btn em { font-style: normal; display: block; font-size: 10px; color: var(--faint); letter-spacing: .1em; margin-top: 4px; }
 .btn.primary em { color: rgba(8, 9, 12, .6); }
@@ -82,17 +86,32 @@ html, body {
   letter-spacing: -.02em; line-height: 1; margin: 4px 0 8px;
   font-variant-numeric: tabular-nums;
 }
-.delta { font-family: var(--mono); font-size: 13px; color: var(--dim); margin: 0 0 22px; min-height: 18px; }
+.delta { font-family: var(--mono); font-size: 13px; color: var(--dim); margin: 0 0 14px; min-height: 18px; }
 .delta.record { color: var(--ink); letter-spacing: .18em; font-weight: 600; }
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); margin-bottom: 18px; }
 .stats div { background: var(--bg); padding: 12px 4px; }
 .stats .n { font-family: var(--mono); font-size: 17px; display: block; }
 .stats .k { font-size: 9px; letter-spacing: .14em; color: var(--faint); display: block; margin-top: 4px; }
+/* Death replay: a wide, cinematic strip. Fixed aspect so the layout never
+   jumps when it loads, and it sits directly under the time because "what
+   killed me" is the first question anyone has. */
+.replay { position: relative; width: 100%; aspect-ratio: 20 / 9; border: 1px solid var(--line); margin-bottom: 16px; background: var(--bg); overflow: hidden; }
+.replay canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.replay.off { display: none; }
+
+/* The read: the game's one honest observation about how you play. */
+.read { border-left: 2px solid var(--ink); padding: 10px 0 10px 14px; margin: 0 0 16px; text-align: left; }
+.read b { display: block; font-size: 11px; letter-spacing: .22em; margin-bottom: 5px; }
+.read span { display: block; font-size: 12px; color: var(--dim); line-height: 1.5; }
+.read i { display: block; font-style: normal; font-size: 11px; color: var(--faint); margin-top: 5px; }
+.read.quiet { border-left-color: var(--line); }
+
 .xpbar { position: relative; height: 22px; border: 1px solid var(--line); margin-bottom: 6px; }
 .xpbar i { position: absolute; inset: 0 auto 0 0; background: rgba(232, 234, 240, .16); transition: width .5s ease; }
 .xpbar span { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--mono); font-size: 10px; letter-spacing: .16em; }
 .unlocks { min-height: 0; }
 .unlocks p { font-size: 11px; letter-spacing: .16em; margin: 8px 0 0; animation: fade .3s ease-out; }
+.result .row { margin-top: 16px; }
 
 /* ---------- cards / lists ---------- */
 .card { border: 1px solid var(--line); padding: 26px 20px; margin-bottom: 16px; }
@@ -158,8 +177,10 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       <div class="stack">
         <button class="btn primary" data-act="play">PLAY</button>
         <button class="btn" data-act="daily">DAILY CHALLENGE<em id="daily-badge"></em></button>
+        <button class="btn" id="menu-trial" data-act="trial" hidden>TRIAL<em></em></button>
+        <button class="btn" id="menu-nightmare" data-act="nightmare" hidden>NIGHTMARE<em></em></button>
         <div class="row">
-          <button class="btn small" data-act="records">RECORDS</button>
+          <button class="btn small" data-act="records">PROFILE</button>
           <button class="btn small" data-act="garage">GARAGE</button>
           <button class="btn small" data-act="settings">SETTINGS</button>
         </div>
@@ -174,11 +195,17 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       <p class="kicker" id="r-kicker">YOU SURVIVED</p>
       <div class="bigtime" id="r-time">00:00.00</div>
       <p class="delta" id="r-delta"></p>
+      <!-- The restart button sits directly under the time so it is above the
+           fold on every screen. Everything below it is optional detail; the one
+           thing that must never require a scroll is going again. -->
+      <button class="btn primary huge" data-act="again">ONE MORE</button>
+      <div class="replay"><canvas id="r-replay"></canvas></div>
       <div class="stats" id="r-stats"></div>
+      <div class="read" id="r-read"></div>
       <div class="xpbar"><i id="r-xpfill"></i><span id="r-xplabel"></span></div>
       <div id="r-unlocks" class="unlocks"></div>
-      <button class="btn primary huge" data-act="again">ONE MORE</button>
-      <div class="row">
+      <div class="row" id="r-actions">
+        <button class="btn small" data-act="trial" hidden>TRIAL</button>
         <button class="btn small" data-act="share">SHARE</button>
         <button class="btn small" data-act="menu">MENU</button>
       </div>
@@ -531,6 +558,22 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
   function laser(side, dx, w, rate, duty, phase) {
     return { t: 'laser', side: side, dx: dx, w: w, rate: rate, duty: duty, phase: phase || 0, h: LASER_H };
   }
+
+  /* A piston is the physical cousin of the laser: a block that drives out of a
+     surface and retracts. Same decision — be on the other side — but it extends
+     over time instead of blinking, so it is readable from much further out and
+     the moment of commitment is visible rather than remembered. Capped at 58%
+     of the tunnel so the opposite surface is always an answer. */
+  function piston(side, dx, w, h, rate, duty, phase) {
+    return { t: 'piston', side: side, dx: dx, w: w, h: h, rate: rate, duty: duty, phase: phase || 0 };
+  }
+
+  /* A gate is a needle that will not hold still: floor and ceiling both close in
+     at one x, and the opening between them slides up and down. You cannot learn
+     the spot, only the timing. */
+  function gate(dx, w, half, cy, amp, rate, phase) {
+    return { t: 'gate', dx: dx, w: w, half: half, cy: cy, amp: amp, rate: rate, phase: phase || 0 };
+  }
   function pat(id, tier, len, items) { return { id: id, tier: tier, len: len, items: items }; }
 
   /* A "needle" is the signature moment: floor and ceiling both close in at the
@@ -641,6 +684,71 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     bar(1340, 150, CEIL + 180, FLOOR - 180)
   ]));
 
+  /* ---- expansion set ----
+     Added in the depth pass. Same rules: authored, tiered, and every one of
+     them proven by tools/validate.js before it was allowed to ship. */
+
+  // TIER 1
+  L.push(pat('t1_block_ceil', 1, 620, [block('ceil', 140, 230, 150)]));
+  L.push(pat('t1_hole_wide', 1, 800, [hole('floor', 150, 320)]));
+  L.push(pat('t1_bar_high', 1, 700, [bar(180, 180, CEIL + 90, FLOOR - 250)]));
+
+  // TIER 2
+  L.push(pat('t2_piston', 2, 940, [piston('floor', 300, 110, 330, 0.38, 0.5, 0)]));
+  L.push(pat('t2_piston_ceil', 2, 940, [piston('ceil', 300, 110, 330, 0.38, 0.5, 0.5)]));
+  L.push(pat('t2_spike_hole', 2, 1080, [spike('ceil', 110, 180, 115), hole('floor', 580, 240)]));
+  L.push(pat('t2_zig_ceil', 2, 1220, [
+    spike('ceil', 100, 165, 115), spike('floor', 460, 165, 115), spike('ceil', 820, 165, 115)
+  ]));
+  L.push(pat('t2_double_wide', 2, 1180, [spike('floor', 110, 280, 120), spike('ceil', 620, 280, 120)]));
+
+  // TIER 3
+  L.push(pat('t3_gate', 3, 1080, [gate(420, 30, 220, (CEIL + FLOOR) / 2, 34, 0.14, 0)]));
+  L.push(pat('t3_piston_pair', 3, 1300, [
+    piston('floor', 200, 100, 330, 0.4, 0.45, 0), piston('ceil', 800, 100, 330, 0.4, 0.45, 0.5)
+  ]));
+  L.push(pat('t3_laser_ceil', 3, 1000, [laser('ceil', 320, 90, 0.42, 0.5, 0)]));
+  L.push(pat('t3_zig5', 3, 1800, [
+    spike('floor', 80, 130, 112), spike('ceil', 440, 130, 112), spike('floor', 800, 130, 112),
+    spike('ceil', 1160, 130, 112), spike('floor', 1520, 130, 112)
+  ]));
+  L.push(pat('t3_hole_bar_hole', 3, 1500, [
+    hole('floor', 100, 280), bar(620, 170, CEIL + 170, FLOOR - 170), hole('ceil', 1060, 280)
+  ]));
+
+  // TIER 4
+  L.push(pat('t4_gate_fast', 4, 1140, [gate(440, 38, 184, (CEIL + FLOOR) / 2, 82, 0.26, 0)]));
+  L.push(pat('t4_piston_zig', 4, 1600, [
+    piston('floor', 160, 100, 330, 0.45, 0.45, 0), spike('ceil', 660, 160, 118),
+    piston('floor', 1140, 100, 330, 0.45, 0.45, 0.5)
+  ]));
+  L.push(pat('t4_comb_hole', 4, 1620, [
+    spike('floor', 80, 130, 115), spike('ceil', 440, 130, 115),
+    hole('floor', 800, 300), spike('ceil', 1240, 130, 115)
+  ]));
+  L.push(pat('t4_laser_pair', 4, 1480, [
+    laser('floor', 240, 90, 0.45, 0.5, 0), laser('ceil', 900, 90, 0.45, 0.5, 0.5)
+  ]));
+  L.push(pat('t4_bar_needle', 4, 1700, [bar(120, 160, CEIL + 140, FLOOR - 230)].concat(needle(960, 40, 178))));
+
+  // TIER 5
+  L.push(pat('t5_piston_storm', 5, 2000, [
+    piston('floor', 150, 95, 330, 0.5, 0.42, 0), piston('ceil', 700, 95, 330, 0.5, 0.42, 0.45),
+    piston('floor', 1250, 95, 330, 0.5, 0.42, 0.9)
+  ]));
+  L.push(pat('t5_gate_pair', 5, 2160, [
+    gate(380, 34, 188, (CEIL + FLOOR) / 2, 72, 0.24, 0),
+    gate(1420, 34, 188, (CEIL + FLOOR) / 2, 72, 0.24, 1.7)
+  ]));
+  L.push(pat('t5_full_house', 5, 2300, [
+    spike('floor', 90, 140, 115), bar(500, 160, CEIL + 150, FLOOR - 230),
+    gate(1080, 38, 178, (CEIL + FLOOR) / 2, 82, 0.26, 0.6), spike('ceil', 1700, 140, 115)
+  ]));
+  L.push(pat('t5_laser_gauntlet', 5, 2100, [
+    laser('floor', 200, 85, 0.48, 0.48, 0), spike('ceil', 700, 140, 115),
+    laser('ceil', 1180, 85, 0.48, 0.48, 0.5), spike('floor', 1680, 140, 115)
+  ]));
+
   /* ---- collision geometry -------------------------------------------------
      Everything reduces to axis-aligned rects. Spikes get a generous inset so a
      death always looks like a death — nothing is ever killed by a pixel of a
@@ -664,6 +772,19 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       case 'mover':
         out.push({ x: o.x, y: moverY(o, t) - o.h / 2, w: o.w, h: o.h, o: o });
         break;
+      case 'piston': {
+        var e = pistonExt(o, t);
+        if (e > 0.5) {
+          out.push({ x: o.x, y: o.side === 'floor' ? FLOOR - e : CEIL, w: o.w, h: e, o: o });
+        }
+        break;
+      }
+      case 'gate': {
+        var c = gateCenter(o, t);
+        out.push({ x: o.x, y: CEIL, w: o.w, h: (c - o.half) - CEIL, o: o });
+        out.push({ x: o.x, y: c + o.half, w: o.w, h: FLOOR - (c + o.half), o: o });
+        break;
+      }
       case 'laser':
         if (laserOn(o, t)) {
           out.push({ x: o.x, y: o.side === 'ceil' ? CEIL : FLOOR - o.h, w: o.w, h: o.h, o: o });
@@ -682,6 +803,22 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
   function laserPhase(o, t) { return (o.phase + t * o.rate) % 1; }
   function laserOn(o, t) { var p = laserPhase(o, t); return p >= 0 && p < o.duty; }
 
+  /* Piston extension in px. It ramps out, holds, ramps back — the ramps are what
+     make it readable: you can see it committing before it has committed. */
+  function pistonExt(o, t) {
+    var p = (o.phase + t * o.rate) % 1;
+    if (p >= o.duty) return 0;
+    var f = p / o.duty;
+    var e = f < 0.18 ? f / 0.18 : (f > 0.82 ? (1 - f) / 0.18 : 1);
+    return o.h * Math.max(0, Math.min(1, e));
+  }
+
+  function gateCenter(o, t) {
+    var c = o.cy + Math.sin(o.phase + t * o.rate * Math.PI * 2) * o.amp;
+    // both jaws must keep real mass, or the "gate" quietly becomes an open door
+    return Math.max(CEIL + o.half + 26, Math.min(FLOOR - o.half - 26, c));
+  }
+
   OM.patterns = {
     list: L,
     byTier: (function () {
@@ -691,6 +828,8 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     })(),
     rectsOf: rectsOf,
     moverY: moverY,
+    pistonExt: pistonExt,
+    gateCenter: gateCenter,
     laserOn: laserOn,
     laserPhase: laserPhase,
     needle: needle
@@ -738,9 +877,25 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       return 1;
     }
 
+    /* An optional restricted pool powers Trial runs. It narrows WHICH proven
+       patterns can appear — never how they are built — so a Trial is exactly as
+       fair as the main game, just pointed at your weakness. */
+    var poolByTier = null;
+    if (opts.pool && opts.pool.length) {
+      poolByTier = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+      for (var q = 0; q < opts.pool.length; q++) poolByTier[opts.pool[q].tier].push(opts.pool[q]);
+    }
+
     function pickPattern(tier) {
-      var pool = PAT.byTier[tier];
-      if (!pool || !pool.length) pool = PAT.byTier[1];
+      var pool = poolByTier ? poolByTier[tier] : PAT.byTier[tier];
+      if (poolByTier && (!pool || !pool.length)) {
+        // the weakness has no pattern at this tier: take the nearest tier that does
+        for (var d = 1; d <= 4 && (!pool || !pool.length); d++) {
+          pool = poolByTier[Math.max(1, tier - d)];
+          if (!pool || !pool.length) pool = poolByTier[Math.min(5, tier + d)];
+        }
+      }
+      if (!pool || !pool.length) pool = PAT.byTier[tier] || PAT.byTier[1];
       // Up to 6 tries to avoid something we just showed — repetition is what
       // makes a procedural runner feel cheap.
       for (var a = 0; a < 6; a++) {
@@ -866,6 +1021,196 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
   OM.mutations = { list: M, byId: BY_ID, schedule: schedule, activeAt: activeAt };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 
+/* ==== src/32-analysis.js ==== */
+/* ONE MORE — the read.
+ *
+ * The game watches how you die and tells you. Not with invented flattery and
+ * not with a fake global percentile: with your own numbers, held against your
+ * own baseline, and only once there is enough of them to mean anything.
+ *
+ * Every claim this file makes is checkable against the recorded history. When
+ * there is nothing honest to say, it says nothing.
+ */
+(function (root) {
+  'use strict';
+  var OM = root.OM || (root.OM = {});
+  var PAT = OM.patterns;
+  var KEY = 'onemore.deaths.v1';
+  var CAP = 260;                 // rolling history; enough to read, cheap to store
+  var MIN_FOR_READ = 12;         // below this, any pattern is noise
+
+  var log = OM.store.get(KEY, []);
+  if (!Array.isArray(log)) log = [];
+
+  function record(summary) {
+    var c = summary.context || {};
+    log.push({
+      t: Math.round(summary.time * 10) / 10,
+      cause: summary.cause,
+      pat: c.tier || null,
+      air: c.airborne ? 1 : 0,
+      sf: Math.round((c.sinceFlip || 0) * 100) / 100,
+      muts: c.mutations || [],
+      world: c.worldId,
+      fr: Math.round((c.flipRate || 0) * 100) / 100,
+      at: Date.now()
+    });
+    while (log.length > CAP) log.shift();
+    OM.store.set(KEY, log);
+  }
+
+  function tierOf(patId) {
+    for (var i = 0; i < PAT.list.length; i++) if (PAT.list[i].id === patId) return PAT.list[i].tier;
+    return null;
+  }
+
+  /* Group deaths by the family of thing that killed you. Individual pattern ids
+     are too granular to be actionable — "you die on moving geometry" is a thing
+     a person can practise; "you die on t4_mover_gate" is trivia. */
+  var FAMILY = {
+    spike: 'timing', block: 'timing', bar: 'commitment',
+    mover: 'prediction', gate: 'prediction', piston: 'prediction', laser: 'prediction',
+    void: 'nerve'
+  };
+  var FAMILY_COPY = {
+    timing: {
+      name: 'TIMING',
+      line: 'You flip late into static geometry.',
+      fix: 'Commit to the flip when you see the gap, not when you reach it.'
+    },
+    prediction: {
+      name: 'PREDICTION',
+      line: 'Moving geometry catches you out.',
+      fix: 'Read where it will be, not where it is. Watch the guide rails.'
+    },
+    commitment: {
+      name: 'COMMITMENT',
+      line: 'Bars and blocks catch you mid-decision.',
+      fix: 'Pick a surface early and stay on it through the obstacle.'
+    },
+    nerve: {
+      name: 'NERVE',
+      line: 'The floor disappearing is what gets you.',
+      fix: 'A gap is not a wall. Ride the ceiling across it.'
+    }
+  };
+
+  function tally() {
+    var byFamily = {}, byCause = {}, byPat = {}, n = log.length;
+    var airborne = 0, lateFlip = 0, times = [];
+    for (var i = 0; i < n; i++) {
+      var d = log[i];
+      var fam = FAMILY[d.cause] || 'timing';
+      byFamily[fam] = (byFamily[fam] || 0) + 1;
+      byCause[d.cause] = (byCause[d.cause] || 0) + 1;
+      if (d.pat) byPat[d.pat] = (byPat[d.pat] || 0) + 1;
+      if (d.air) airborne++;
+      if (d.sf > 0.9) lateFlip++;
+      times.push(d.t);
+    }
+    times.sort(function (a, b) { return a - b; });
+    return {
+      n: n, byFamily: byFamily, byCause: byCause, byPat: byPat,
+      airborne: airborne, lateFlip: lateFlip,
+      median: times.length ? times[Math.floor(times.length / 2)] : 0,
+      recentMedian: (function () {
+        var r = log.slice(-15).map(function (d) { return d.t; }).sort(function (a, b) { return a - b; });
+        return r.length ? r[Math.floor(r.length / 2)] : 0;
+      })(),
+      earlyMedian: (function () {
+        var r = log.slice(0, 15).map(function (d) { return d.t; }).sort(function (a, b) { return a - b; });
+        return r.length ? r[Math.floor(r.length / 2)] : 0;
+      })()
+    };
+  }
+
+  /* The headline. One sentence, only when the evidence supports it.
+     Returns null rather than inventing something to say. */
+  function read() {
+    var s = tally();
+    if (s.n < MIN_FOR_READ) {
+      return { kind: 'none', need: MIN_FOR_READ - s.n };
+    }
+    // strongest over-representation among families
+    var fams = Object.keys(s.byFamily);
+    var top = null, topShare = 0;
+    for (var i = 0; i < fams.length; i++) {
+      var share = s.byFamily[fams[i]] / s.n;
+      if (share > topShare) { topShare = share; top = fams[i]; }
+    }
+    /* A family counts as a weakness only if it is genuinely lopsided against an
+       even split of ALL the families that could occur — not of the ones that
+       happen to appear. Measuring against the observed set means somebody who
+       dies to exactly one thing scores 1/1 = "even", and gets told they have no
+       weakness at the precise moment they most obviously do. */
+    var possible = Object.keys(FAMILY_COPY).length;
+    var even = 1 / possible;
+    if (topShare < Math.max(0.42, even * 1.6)) {
+      return {
+        kind: 'balanced',
+        headline: 'NO SINGLE WEAKNESS',
+        line: 'Your deaths are spread evenly. Speed is what is beating you now.',
+        share: topShare, n: s.n
+      };
+    }
+    var copy = FAMILY_COPY[top];
+    return {
+      kind: 'weakness',
+      family: top,
+      headline: copy.name,
+      line: copy.line,
+      fix: copy.fix,
+      share: topShare,
+      count: s.byFamily[top],
+      n: s.n
+    };
+  }
+
+  /* Are you actually getting better? Median of your last 15 runs against your
+     first 15. Honest, and it does not need a server. */
+  function trend() {
+    var s = tally();
+    if (s.n < 24) return null;
+    var d = s.recentMedian - s.earlyMedian;
+    return { delta: d, recent: s.recentMedian, early: s.earlyMedian,
+             pct: s.earlyMedian > 0 ? d / s.earlyMedian : 0 };
+  }
+
+  /* Build a Trial: a run composed mostly of what you are bad at.
+     It returns tier weights the generator can use directly, so the Trial is
+     made of the same proven-fair patterns as everything else — it is a
+     different selection, never different rules. */
+  var FAMILY_TYPES = {
+    timing: { spike: 1, block: 1 },
+    prediction: { mover: 1, laser: 1, piston: 1, gate: 1 },
+    commitment: { bar: 1, block: 1 },
+    nerve: { hole: 1 }
+  };
+
+  function trialPatterns(family) {
+    var want = FAMILY_TYPES[family] || FAMILY_TYPES.timing;
+    var out = [];
+    for (var i = 0; i < PAT.list.length; i++) {
+      var p = PAT.list[i], hit = 0;
+      for (var j = 0; j < p.items.length; j++) if (want[p.items[j].t]) hit++;
+      if (hit >= 1 && hit / p.items.length >= 0.5) out.push(p);
+    }
+    return out.length >= 4 ? out : PAT.list.slice();
+  }
+
+  OM.analysis = {
+    record: record,
+    read: read,
+    trend: trend,
+    tally: tally,
+    trialPatterns: trialPatterns,
+    families: FAMILY_COPY,
+    familyOf: function (cause) { return FAMILY[cause] || 'timing'; },
+    clear: function () { log = []; OM.store.del(KEY); },
+    history: function () { return log.slice(); }
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
 /* ==== src/35-progress.js ==== */
 /* ONE MORE — save data, XP, unlocks, records, statistics.
    Everything is local. There is no server, so there is nothing here that
@@ -880,6 +1225,8 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     v: 1, xp: 0, runs: 0, totalTime: 0,
     best: 0, bestAt: 0,
     daily: {},            // dayKey -> best seconds
+    trial: {},            // weakness family -> best seconds
+    nightmare: 0,         // best in the unlockable hard mode
     dailyDone: [],        // dayKeys played, for the streak
     nearMiss: 0, perfect: 0, flips: 0, deaths: {},
     cosmetics: { core: 'auto', trail: 'line', death: 'shatter' },
@@ -978,7 +1325,12 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     { id: 'd7', name: 'SEVEN DAYS', line: 'Play 7 Daily Challenges.', test: function (s) { return s.dailyDone.length >= 7; } },
     { id: 'lv10', name: 'PULSE', line: 'Reach level 10.', test: function (s) { return levelInfo(s.xp).level >= 10; } },
     { id: 'lv25', name: 'PHASE', line: 'Reach level 25.', test: function (s) { return levelInfo(s.xp).level >= 25; } },
-    { id: 'hour', name: 'AN HOUR OF THIS', line: 'One hour of total survival.', test: function (s) { return s.totalTime >= 3600; } }
+    { id: 'hour', name: 'AN HOUR OF THIS', line: 'One hour of total survival.', test: function (s) { return s.totalTime >= 3600; } },
+    { id: 'nm_open', name: 'NO WARNINGS', line: 'Unlock Nightmare (survive 120s).', test: function (s) { return s.best >= 120; } },
+    { id: 'nm30', name: 'THIRTY IN THE DARK', line: 'Survive 30s in Nightmare.', test: function (s) { return s.nightmare >= 30; } },
+    { id: 'trial1', name: 'FACING IT', line: 'Finish a Trial run.', test: function (s) { return Object.keys(s.trial).length >= 1; } },
+    { id: 'trial60', name: 'WEAKNESS ADDRESSED', line: 'Survive 60s in a Trial.', test: function (s) {
+        for (var k in s.trial) if (s.trial[k] >= 60) return true; return false; } }
   ];
 
   function checkAchievements() {
@@ -994,6 +1346,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
   /* ---- recording a run ---- */
   function commitRun(r) {
     var beforeLevel = levelInfo(save.xp).level;
+    if (OM.analysis) OM.analysis.record(r);
     save.runs++;
     save.totalTime += r.time;
     save.nearMiss += r.nearMiss;
@@ -1007,6 +1360,14 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     if (r.mode === 'endless') {
       if (r.time > save.best) { save.best = r.time; save.bestAt = Date.now(); record = true; xp += 60; }
       if (r.ghost && r.time > save.ghostTime) { save.ghost = r.ghost; save.ghostTime = r.time; }
+    } else if (r.mode === 'nightmare') {
+      if (r.time > save.nightmare) { save.nightmare = r.time; record = true; xp += 80; }
+      xp = Math.round(xp * 1.6);
+    } else if (r.mode === 'trial') {
+      if (!save.trial[r.family] || r.time > save.trial[r.family]) {
+        save.trial[r.family] = r.time; record = true;
+      }
+      xp = Math.round(xp * 1.25);       // drilling your weakness is worth more
     } else if (r.mode === 'daily') {
       var k = OM.dayKey(r.day);
       if (save.dailyDone.indexOf(k) < 0) { save.dailyDone.push(k); xp += 25; }
@@ -1043,6 +1404,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     needFor: needFor,
     commitRun: commitRun,
     dailyStreak: dailyStreak,
+    nightmareUnlocked: function () { return save.best >= 120; },
     achievements: ACH,
     cores: CORES, trails: TRAILS, deaths: DEATHS,
     unlockedCores: function () { return unlockedIn(CORES, levelInfo(save.xp).level); },
@@ -1180,7 +1542,21 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       noise(t, 0.055, 0.30, dir > 0 ? 1500 : 2100, 2.2, sfxBus, dir > 0 ? 700 : 3000);
       tone(dir > 0 ? 300 : 420, t, 0.09, 0.16, 'triangle', sfxBus, dir > 0 ? 170 : 250);
     },
-    land: function () { var t = now(); noise(t, 0.05, 0.11, 320, 1.1); },
+    /* Landing scales with impact: a short hop and a full ceiling-to-floor drop
+       must not sound the same, or the character stops feeling like it has mass. */
+    land: function (f) {
+      f = f == null ? 0.5 : f;
+      var t = now();
+      noise(t, 0.035 + f * 0.055, 0.05 + f * 0.20, 240 + f * 320, 1.2, sfxBus, 90);
+      tone(170 - f * 45, t, 0.09 + f * 0.07, 0.05 + f * 0.13, 'sine', sfxBus, 55);
+    },
+    /* Mechanical cue for a piston committing near you — the threat announces
+       itself before it is visible in your peripheral vision. */
+    piston: function (near) {
+      var t = now(), v = 0.05 + (near || 0) * 0.13;
+      noise(t, 0.09, v, 520, 1.6, sfxBus, 160);
+      tone(96, t, 0.13, v * 0.8, 'square', sfxBus, 62);
+    },
     near: function () {
       var t = now();
       tone(1760, t, 0.09, 0.075, 'sine', sfxBus, 2400);
@@ -1195,6 +1571,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       noise(t, 0.42, 0.55, 900, 0.6, sfxBus, 60);
       tone(180, t, 0.5, 0.32, 'sawtooth', sfxBus, 32);
       tone(90, t, 0.65, 0.22, 'sine', sfxBus, 26);
+      tone(46, t + 0.02, 0.9, 0.26, 'sine', sfxBus, 24);   // the floor going out from under it
     },
     record: function () {
       var t = now();
@@ -1349,6 +1726,10 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       g.globalAlpha = alpha;
       g.translate(st.x + (tremble ? (Math.random() - 0.5) * tremble : 0),
                   st.y + (tremble ? (Math.random() - 0.5) * tremble : 0));
+      /* Squash and stretch in world axes, before the spin. Rotating inside a
+         non-uniform scale shears the shape slightly, which is exactly what a
+         compressed object mid-tumble should look like. */
+      if (st.sx || st.sy) g.scale(st.sx || 1, st.sy || 1);
       g.rotate(st.rot || 0);
 
       // outer glow — a couple of cheap wide strokes rather than a shadow blur,
@@ -1747,6 +2128,35 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       }
     },
 
+    /* Speed streaks. An earlier version scattered these across the whole tunnel
+       at fixed heights, which read as scratches on the screen rather than as
+       motion — the eye reads a static y as dirt. These re-seed their height on
+       every wrap, stay near the player's altitude where the eye already is, and
+       only appear once the world is genuinely moving fast. */
+    speedLines: function (g, W, camX, playerY, frac) {
+      if (frac < 0.34) return;
+      var f = (frac - 0.34) / 0.66;
+      var n = 4 + Math.round(f * 9);
+      g.save();
+      g.fillStyle = '#fff';
+      for (var i = 0; i < n; i++) {
+        var seed = i * 2654435761 % 100000;
+        var rate = 1.5 + (seed % 5) * 0.22;
+        var span = 70 + f * 210 + (seed % 60);
+        var cycle = W + span * 2;
+        var travel = camX * rate + seed;
+        var lap = Math.floor(travel / cycle);
+        var x = W + span - (travel - lap * cycle);
+        // fresh height each lap, biased toward wherever the player is looking
+        var hs = ((lap * 2654435761 + seed) >>> 0) % 1000 / 1000;
+        var y = playerY + (hs - 0.5) * 320;
+        if (y < P.CEIL + 10 || y > P.FLOOR - 10) continue;
+        g.globalAlpha = (0.05 + f * 0.13) * (1 - Math.abs(hs - 0.5) * 1.2);
+        g.fillRect(x, y, span, 1);
+      }
+      g.restore();
+    },
+
     /* ---- floor and ceiling ---- */
     surfaces: function (g, W, camX, holes, t, speedFrac) {
       var x0 = camX - 40, x1 = camX + W + 40;
@@ -1808,6 +2218,17 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
         if (alpha < 0.03) continue;
         g.globalAlpha = alpha;
         drawObstacle(g, o, sx, t);
+        // the thing you just grazed lights up: near misses should be legible
+        // after the fact, not only felt
+        if (o._flash > 0.01) {
+          g.globalAlpha = alpha * o._flash * 0.8;
+          g.strokeStyle = '#fff';
+          g.lineWidth = 2 + o._flash * 5;
+          var rects = PAT.rectsOf(o, t, []);
+          for (var q = 0; q < rects.length; q++) {
+            g.strokeRect(rects[q].x - 4, rects[q].y - 4, rects[q].w + 8, rects[q].h + 8);
+          }
+        }
       }
       g.restore();
     },
@@ -1891,6 +2312,39 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
         g.globalAlpha /= 0.25;
         break;
       }
+      case 'piston': {
+        var pe = PAT.pistonExt(o, t);
+        var base = o.side === 'floor' ? FLOOR : CEIL;
+        // housing: always visible, so the threat has a fixed address
+        g.fillStyle = '#fff';
+        g.fillRect(o.side === 'floor' ? sx - 4 : sx - 4, o.side === 'floor' ? base - 10 : base, o.w + 8, 10);
+        if (pe > 1) {
+          var py = o.side === 'floor' ? base - pe : base;
+          mass(g, sx, py, o.w, pe);
+          g.fillStyle = '#fff';                     // the head, the part that kills
+          g.fillRect(sx - 3, o.side === 'floor' ? py : py + pe - 7, o.w + 6, 7);
+        } else {
+          // primed: a short stub that grows just before it fires
+          var pp = (o.phase + t * o.rate) % 1;
+          var soon = Math.max(0, 1 - (1 - pp) / (1 - o.duty) * 3);
+          g.globalAlpha *= 0.25 + soon * 0.6;
+          g.fillRect(sx + o.w / 2 - 2, o.side === 'floor' ? base - 22 : base, 4, 22);
+          g.globalAlpha /= (0.25 + soon * 0.6);
+        }
+        break;
+      }
+      case 'gate': {
+        var gc = PAT.gateCenter(o, t);
+        mass(g, sx, CEIL, o.w, (gc - o.half) - CEIL);
+        mass(g, sx, gc + o.half, o.w, FLOOR - (gc + o.half));
+        g.fillStyle = '#fff';                        // the two edges of the opening
+        g.fillRect(sx - 3, gc - o.half - 5, o.w + 6, 5);
+        g.fillRect(sx - 3, gc + o.half, o.w + 6, 5);
+        g.globalAlpha *= 0.22;                       // where the opening will travel
+        g.fillRect(sx + o.w / 2 - 1, o.cy - o.amp - o.half, 2, (o.amp + o.half) * 2);
+        g.globalAlpha /= 0.22;
+        break;
+      }
       case 'laser': {
         var ly = o.side === 'ceil' ? CEIL : FLOOR - o.h;
         var ph = PAT.laserPhase(o, t), on = ph < o.duty;
@@ -1931,7 +2385,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     W: 1280, H: P.H, dpr: 1,
     run: null, state: 'idle',    // idle | playing | dead
     pool: null, trail: null, screen: null,
-    hint: 0
+    hint: 0, praise: 0
   };
 
   /* ---------- setup ---------- */
@@ -1987,27 +2441,47 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
                                 : (Math.random() * 0xffffffff) >>> 0;
     var rng = OM.rng(seed);
 
+    /* A Trial is a run built mostly from the patterns you actually fail, and it
+       starts past the tutorial band because you are not here to be taught. */
+    var pool = null, tBias = 0, family = opts.family || null;
+    if (mode === 'trial') {
+      pool = OM.analysis.trialPatterns(family);
+      tBias = 30;
+    } else if (mode === 'nightmare') {
+      /* Starts where the endless run ends. No runway, no tier-one warm-up, top
+         speed from the first second — the mode that exists so a good player has
+         somewhere left to go. */
+      tBias = 245;
+    }
+
     var ghostData = null;
     if (mode === 'endless') ghostData = prog.data.ghost;
+    else if (mode === 'trial') ghostData = null;
     else if (prog.data.dailyGhost && prog.data.dailyGhost.key === OM.dayKey(day)) {
       ghostData = prog.data.dailyGhost.data;
     }
 
-    var target = mode === 'endless' ? prog.data.best : (prog.data.daily[OM.dayKey(day)] || 0);
+    var target = mode === 'endless' ? prog.data.best
+               : mode === 'trial' ? (prog.data.trial[family] || 0)
+               : mode === 'nightmare' ? prog.data.nightmare
+               : (prog.data.daily[OM.dayKey(day)] || 0);
 
     G.run = {
       mode: mode, day: day, seed: seed, rng: rng,
-      gen: OM.Generator(OM.rng(seed ^ 0x9e3779b9)),
+      gen: OM.Generator(OM.rng(seed ^ 0x9e3779b9), { pool: pool, startX: mode === 'nightmare' ? 620 : undefined }),
+      tBias: tBias, family: family,
       sched: MUT.schedule(OM.rng(seed ^ 0x85ebca6b)),
-      t: 0, px: 0, speed: P.speedAt(0),
+      t: 0, px: 0, speed: P.speedAt(tBias > 100 ? 200 : 0),
       y: P.FLOOR - P.R, vy: 0, grav: 1, grounded: true,
       rot: 0, rotTarget: 0,
+      squash: 0, wasGrounded: true, lastVy: 0, marks: [],
       flips: 0, nearMiss: 0, perfect: 0,
       sinceFlip: 99, sinceNear: 99, sinceRecord: 99, deadFor: 0,
       dead: false, cause: null, threat: 0,
-      world: P.WORLDS[0], worldFlash: 0, mutFlash: 0, mutLabel: null,
+      world: P.worldAt(tBias > 100 ? tBias : 0), worldFlash: 0, mutFlash: 0, mutLabel: null,
       target: target, beat: false,
       rec: OM.GhostRecorder(),
+      replay: OM.ReplayBuffer(),
       ghost: OM.GhostPlayer(ghostData),
       mods: MUT.activeAt([], 0)
     };
@@ -2030,12 +2504,22 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       r.flips++;
       r.sinceFlip = 0;
       r.rotTarget += Math.PI;
-      G.screen.kick(3);
+      G.screen.kick(3.5);
+      r.squash = -0.45;                        // stretch along the new direction
+      var fx = G.playerScreenX();
+      G.pool.spawn(fx, r.y, 0, 0, 0.22, P.R_VIS * 0.9, 3);
+      for (var b = 0; b < 5; b++) {
+        G.pool.spawn(fx, r.y, (Math.random() - 0.5) * 90 - r.speed * 0.1,
+                     -r.grav * (110 + Math.random() * 130), 0.2 + Math.random() * 0.2, 1.6, 0);
+      }
       OM.audio.play('flip', r.grav);
       if (prog.data.settings.haptics && root.navigator && root.navigator.vibrate) {
         try { root.navigator.vibrate(8); } catch (e) {}
       }
-      if (!prog.data.seen.tutorial) { prog.data.seen.tutorial = true; prog.touch(); G.hint = 0; }
+      if (!prog.data.seen.tutorial) {
+        prog.data.seen.tutorial = true; prog.touch();
+        G.hint = 0; G.praise = 1.1;          // acknowledge the first input, once
+      }
       return true;
     }
     if (G.state === 'dead' && G.run.deadFor > DEAD_LOCKOUT) {
@@ -2044,6 +2528,30 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     }
     return false;
   };
+
+  /* Arrival matters as much as departure. A flip that ends in a soundless,
+     motionless stop reads as the character being teleported onto the surface;
+     the compression, the dust and the mark on the floor are what make it read
+     as landing. Strength scales with impact speed so a short hop and a full
+     ceiling-to-floor drop do not feel the same. */
+  function land(r, v) {
+    var f = clamp(v / 1900, 0.15, 1);
+    r.squash = f;
+    var sx = G.playerScreenX();
+    var surfY = r.grav > 0 ? P.FLOOR : P.CEIL;
+    var dir = r.grav > 0 ? -1 : 1;
+    for (var i = 0; i < 4 + Math.round(f * 9); i++) {
+      var a = (Math.random() - 0.5) * 2.2;
+      G.pool.spawn(sx + (Math.random() - 0.5) * 16, surfY + dir * 3,
+                   Math.sin(a) * 190 * f - r.speed * 0.12, dir * Math.abs(Math.cos(a)) * 150 * f,
+                   0.22 + Math.random() * 0.34, 1 + Math.random() * 2.4, 0);
+    }
+    G.pool.spawn(sx, surfY + dir * 4, 0, 0, 0.26, 6 + f * 10, 3);
+    r.marks.push({ x: r.px, side: r.grav > 0 ? 'floor' : 'ceil', life: 0.5, f: f });
+    if (r.marks.length > 10) r.marks.shift();
+    G.screen.kick(2 + f * 7);
+    OM.audio.play('land', f);
+  }
 
   function die(cause) {
     var r = G.run;
@@ -2061,9 +2569,21 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     OM.fx.death(G.pool, prog.data.cosmetics.death, G.playerScreenX(), r.y, P.R_VIS);
 
     var summary = {
-      mode: r.mode, day: r.day, time: r.t, cause: cause,
+      mode: r.mode, day: r.day, family: r.family, time: r.t, cause: cause,
       nearMiss: r.nearMiss, perfect: r.perfect, flips: r.flips,
-      world: r.world, ghost: r.rec.finish(), seed: r.seed
+      world: r.world, ghost: r.rec.finish(), seed: r.seed,
+      replay: OM.captureDeath(r, cause),
+      /* Context for the death analysis: what killed you is far less useful than
+         what you were doing when it did. */
+      context: {
+        tier: patternTierAt(r),
+        speed: r.speed,
+        airborne: !r.grounded,
+        sinceFlip: r.sinceFlip,
+        mutations: r.mods.list.map(function (m) { return m.m.id; }),
+        worldId: r.world.id,
+        flipRate: r.flips / Math.max(1, r.t)
+      }
     };
     summary.result = prog.commitRun(summary);
     r.summary = summary;
@@ -2072,6 +2592,18 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
   }
 
   G.playerScreenX = function () { return G.W * (G.playerXFrac || P.PLAYER_X_FRAC); };
+
+  /* Which authored pattern was the player inside when it ended? This is the
+     single most useful fact for telling somebody what they are bad at. */
+  function patternTierAt(r) {
+    var best = null, bestD = 1e9;
+    for (var i = 0; i < r.gen.obstacles.length; i++) {
+      var o = r.gen.obstacles[i];
+      var d = Math.abs(o.x + (o.w || 0) / 2 - r.px);
+      if (d < bestD) { bestD = d; best = o; }
+    }
+    return best && bestD < 600 ? best.pat : null;
+  }
 
   /* Advances the simulation with no rendering. tools/playtest.js drives an
      automated player through this, so hours of game can be measured in seconds
@@ -2095,10 +2627,10 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     r.mods = mods;
 
     r.t += dt;
-    r.speed = P.speedAt(r.t) * mods.speed;
+    r.speed = P.speedAt(r.t + (r.tBias > 100 ? r.tBias : 0)) * mods.speed;
     var g = P.gravityFor(r.speed, 1);
 
-    var world = P.worldAt(r.t);
+    var world = P.worldAt(r.t + (r.tBias > 100 ? r.tBias : 0));
     if (world.id !== r.world.id) {
       r.world = world; r.worldFlash = 2.4;
       OM.audio.play('world');
@@ -2117,17 +2649,20 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     }
 
     // integrate in fixed sub-steps
-    var remaining = dt;
+    var remaining = dt, landedAt = 0;
     while (remaining > 0) {
       var h = Math.min(STEP, remaining);
       remaining -= h;
       r.px += r.speed * h;
+      var vBefore = r.vy;
       var out = P.stepPlayer(r, h, g, r.px, r.gen.holes);
       if (out === 'void') { die('void'); return; }
-      if (r.grounded && r.vy === 0 && r.sinceFlip < 0.05) OM.audio.play('land');
+      if (r.grounded && !r.wasGrounded) landedAt = Math.abs(vBefore);
+      r.wasGrounded = r.grounded;
     }
+    if (landedAt > 240) land(r, landedAt);
 
-    r.gen.ensure(r.px + G.W + 700, r.t, mods.spacing);
+    r.gen.ensure(r.px + G.W + 700, r.t + r.tBias, mods.spacing);
     r.gen.prune(r.px - G.W * 0.6);
 
     // collision + near miss
@@ -2145,6 +2680,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
         if (d2 <= R2) { die(o.t); return; }
         if (d2 < nearD2 && !o._nm) {
           o._nm = true;
+          o._flash = 1;
           r.nearMiss++;
           r.sinceNear = 0;
           var perfect = r.sinceFlip < P.PERFECT_WINDOW;
@@ -2156,8 +2692,37 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       }
     }
 
+    // audible tell for pistons about to fire near you
+    for (var pi = 0; pi < list.length; pi++) {
+      var po = list[pi];
+      if (po.t !== 'piston') continue;
+      var d = po.x - r.px;
+      if (d < -120 || d > G.W * 0.55) { po._fired = false; continue; }
+      var ext = PAT.pistonExt(po, r.t);
+      if (ext > 8 && !po._fired) {
+        po._fired = true;
+        OM.audio.play('piston', clamp(1 - d / (G.W * 0.55), 0, 1));
+      } else if (ext <= 0.5) po._fired = false;
+    }
+
+    /* Every announcement timer decays on GAME time, inside the simulation.
+       Decaying them on frame time in tick() meant a paused or fast-forwarded
+       game left world cards and mutation banners frozen on screen. */
+    if (G.hint > 0) G.hint -= dt;
+    if (G.praise > 0) G.praise -= dt;
+    if (r.worldFlash > 0) r.worldFlash -= dt;
+    if (r.mutFlash > 0) r.mutFlash -= dt;
+    r.squash = OM.math.approach(r.squash, 0, 11, dt);
+    for (var m = r.marks.length - 1; m >= 0; m--) {
+      r.marks[m].life -= dt;
+      if (r.marks[m].life <= 0) r.marks.splice(m, 1);
+    }
+    for (var fl = 0; fl < list.length; fl++) {
+      if (list[fl]._flash > 0) list[fl]._flash = Math.max(0, list[fl]._flash - dt * 2.6);
+    }
     r.threat = OM.render.threatOf(list, r.px - G.playerScreenX(), G.playerScreenX(), G.W);
     r.rec.sample(dt, r.px, r.y, r.grav);
+    r.replay.sample(dt, r);
 
     // rotation eases toward the flip target — instant response, visible follow-through
     r.rot = OM.math.approach(r.rot, r.rotTarget, 17, dt);
@@ -2185,10 +2750,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     } else if (G.state === 'dead') {
       r.deadFor += dt;
     }
-    G.pool.update(dt, G.state === 'dead' ? 0 : r.speed * 0.35);
-    if (r.worldFlash > 0) r.worldFlash -= dt;
-    if (r.mutFlash > 0) r.mutFlash -= dt;
-    if (G.hint > 0) G.hint -= dt;
+    G.pool.update(dt, G.state === 'dead' ? 0 : r.speed);
     G.draw();
   };
 
@@ -2219,8 +2781,11 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       g.scale(1, -1);
     }
 
-    OM.render.backdrop(g, G.W, P.H, r.world.id, r.t, corrupt, clamp(r.t / 200, 0, 1));
-    OM.render.surfaces(g, G.W, camX, r.gen.holes, r.t, clamp(r.t / 200, 0, 1));
+    var speedFrac = clamp((r.speed - P.BASE_SPEED) / 520, 0, 1);
+    OM.render.backdrop(g, G.W, P.H, r.world.id, r.t, corrupt, speedFrac);
+    OM.render.speedLines(g, G.W, camX, r.y, speedFrac);
+    OM.render.surfaces(g, G.W, camX, r.gen.holes, r.t, speedFrac);
+    drawMarks(g, r, camX);
     OM.render.obstacles(g, G.W, camX, r.gen.obstacles, r.t, {
       fade: mods.fade, strobe: mods.strobe, vision: mods.vision, playerX: G.playerScreenX()
     });
@@ -2231,8 +2796,10 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     G.pool.draw(g);
 
     if (!r.dead) {
+      var sq = r.squash;
       OM.nanogon.draw(g, {
         x: G.playerScreenX(), y: r.y, r: P.R_VIS, rot: r.rot,
+        sx: 1 - sq * 0.30, sy: 1 + sq * 0.34,
         evo: prog.activeCore(),
         mood: OM.nanogon.moodFor({
           dead: false, sinceNear: r.sinceNear, sinceRecord: r.sinceRecord,
@@ -2260,6 +2827,22 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
 
     drawHud(g, r, corrupt, mods);
   };
+
+  /* A brief bright scar on the surface where you touched down. It is gone in
+     half a second, but it is the difference between a floor you land on and a
+     floor you merely stop at. */
+  function drawMarks(g, r, camX) {
+    if (!r.marks.length) return;
+    g.save();
+    for (var i = 0; i < r.marks.length; i++) {
+      var m = r.marks[i], a = clamp(m.life / 0.5, 0, 1);
+      var w = 20 + m.f * 60 * (1.4 - a);
+      g.globalAlpha = a * a * 0.85;
+      g.fillStyle = '#fff';
+      g.fillRect(m.x - camX - w / 2, m.side === 'floor' ? P.FLOOR - 3 : P.CEIL, w, 3);
+    }
+    g.restore();
+  }
 
   function drawGhost(g, r, camX) {
     if (!r.ghost) return;
@@ -2343,6 +2926,10 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       g.globalAlpha = clamp(G.hint / 3.2, 0, 1) * (0.55 + Math.sin(r.t * 5) * 0.25);
       g.font = '600 20px ui-sans-serif, system-ui, sans-serif';
       g.fillText('TAP TO FLIP GRAVITY', G.W / 2, r.y + (r.grav > 0 ? -60 : 66));
+    } else if (G.praise > 0 && !r.dead) {
+      g.globalAlpha = clamp(G.praise / 1.1, 0, 1) * 0.8;
+      g.font = '600 20px ui-sans-serif, system-ui, sans-serif';
+      g.fillText('THAT IS THE WHOLE GAME', G.W / 2, P.H / 2 - 40);
     }
     g.restore();
   }
@@ -2395,6 +2982,197 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 
+/* ==== src/72-replay.js ==== */
+/* ONE MORE — death replay.
+   Every death captures the last two seconds: the player's path, and the actual
+   obstacles around them. It replays on the results screen in slow motion,
+   framed close on the moment it went wrong.
+   It answers "what killed me" honestly — and it is the clip people post. */
+(function (root) {
+  'use strict';
+  var OM = root.OM || (root.OM = {});
+  var P = OM.phys, PAT = OM.patterns;
+
+  var WINDOW = 2.1;      // seconds kept
+  var RATE = 60;         // samples per second
+  /* The window always shows the FULL tunnel height with margin above and below
+     for the caption strip. An earlier version framed tight on the player, which
+     looked dramatic and answered nothing: you could not see the surface you
+     failed to reach. Context is the whole point.
+     Horizontal extent is derived from the canvas rather than fixed, so the
+     visible width and the width used for culling can never disagree — they did,
+     and the right third of the panel rendered empty. */
+  var ZOOM_H = 700, PLAYER_AT = 0.42;
+
+  /* A ring buffer on the run; costs about 130 tiny objects. */
+  OM.ReplayBuffer = function () {
+    var f = [], acc = 0;
+    return {
+      frames: f,
+      sample: function (dt, r) {
+        acc += dt;
+        if (acc < 1 / RATE) return;
+        acc = 0;
+        f.push({ t: r.t, x: r.px, y: r.y, grav: r.grav, rot: r.rot });
+        while (f.length && f[0].t < r.t - WINDOW) f.shift();
+      }
+    };
+  };
+
+  /* Freeze what mattered: the path, plus a deep copy of the geometry near the
+     death so the replay cannot be invalidated by the generator moving on. */
+  OM.captureDeath = function (r, cause) {
+    var lo = r.px - 1500, hi = r.px + 700;
+    function near(list) {
+      var out = [];
+      for (var i = 0; i < list.length; i++) {
+        var o = list[i];
+        if (o.x + (o.w || 0) < lo || o.x > hi) continue;
+        var c = {};
+        for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k) && k.charAt(0) !== '_') c[k] = o[k];
+        out.push(c);
+      }
+      return out;
+    }
+    return {
+      frames: r.replay.frames.slice(),
+      obstacles: near(r.gen.obstacles),
+      holes: near(r.gen.holes),
+      deathT: r.t, deathX: r.px, deathY: r.y, grav: r.grav, rot: r.rot,
+      cause: cause, world: r.world.id, evo: OM.progress.activeCore()
+    };
+  };
+
+  var CAUSE_LABEL = {
+    spike: 'SPIKES', block: 'A BLOCK', bar: 'A BAR', mover: 'A MOVER',
+    laser: 'A LASER', piston: 'A PISTON', gate: 'A GATE', void: 'THE VOID'
+  };
+  OM.causeLabel = function (c) { return CAUSE_LABEL[c] || 'SOMETHING'; };
+
+  /* Playback. Owns its own frame loop so it can run while the game loop is
+     idle on the results screen, and stops itself the moment it is hidden. */
+  OM.ReplayPlayer = function (canvas) {
+    var g = canvas.getContext('2d', { alpha: false });
+    var data = null, raf = 0, t0 = 0, running = false;
+    var SPEED = 0.34, HOLD = 1.0;
+
+    function size() {
+      var rect = canvas.getBoundingClientRect();
+      var dpr = Math.min(root.devicePixelRatio || 1, 2);
+      canvas.width = Math.max(1, Math.round(rect.width * dpr));
+      canvas.height = Math.max(1, Math.round(rect.height * dpr));
+      return canvas.height / ZOOM_H;
+    }
+
+    function frameAt(t) {
+      var f = data.frames;
+      if (!f.length) return null;
+      if (t <= f[0].t) return f[0];
+      for (var i = 1; i < f.length; i++) {
+        if (f[i].t >= t) {
+          var a = f[i - 1], b = f[i], m = (t - a.t) / Math.max(1e-4, b.t - a.t);
+          return { t: t, x: a.x + (b.x - a.x) * m, y: a.y + (b.y - a.y) * m,
+                   grav: b.grav, rot: a.rot + (b.rot - a.rot) * m };
+        }
+      }
+      return f[f.length - 1];
+    }
+
+    function draw(now) {
+      if (!running || !data) return;
+      var scale = size();
+      var span = Math.max(0.2, data.deathT - data.frames[0].t);
+      var elapsed = (now - t0) / 1000;
+      var loop = span / SPEED + HOLD;
+      if (elapsed > loop) { t0 = now; elapsed = 0; }
+      var dead = elapsed * SPEED >= span;
+      var t = data.frames[0].t + Math.min(span, elapsed * SPEED);
+      var f = frameAt(t) || { x: data.deathX, y: data.deathY, rot: 0 };
+
+      /* One camera. Logical x is measured from the left edge of the visible
+         window, which is derived from the canvas so culling and rendering can
+         never disagree; logical y stays in tunnel coordinates so the shared
+         renderers work unchanged. */
+      var visW = canvas.width / scale;
+      var camX = f.x - visW * PLAYER_AT;
+      var mid = (P.CEIL + P.FLOOR) / 2;
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.fillStyle = '#08090c';
+      g.fillRect(0, 0, canvas.width, canvas.height);
+      g.setTransform(scale, 0, 0, scale, 0, canvas.height / 2 - mid * scale);
+
+      OM.render.surfaces(g, visW, camX, data.holes, t, 0.4);
+      OM.render.obstacles(g, visW, camX, data.obstacles, t, { playerX: visW * PLAYER_AT });
+
+      // the path taken, drawn up to the current moment
+      g.save();
+      g.strokeStyle = '#fff'; g.lineWidth = 2.2; g.globalAlpha = 0.4;
+      g.beginPath();
+      var started = false;
+      for (var i = 0; i < data.frames.length; i++) {
+        var p = data.frames[i];
+        if (p.t > t) break;
+        if (!started) { g.moveTo(p.x - camX, p.y); started = true; }
+        else g.lineTo(p.x - camX, p.y);
+      }
+      g.stroke();
+      g.restore();
+
+      if (!dead) {
+        OM.nanogon.draw(g, {
+          x: f.x - camX, y: f.y, r: P.R_VIS, rot: f.rot,
+          evo: data.evo, mood: 'alert', t: t, glow: 0.85, corrupt: 0
+        });
+      } else {
+        var since = elapsed - span / SPEED;
+        var burst = OM.math.clamp(1 - since / 0.6, 0, 1);
+        var dx = data.deathX - camX;
+        g.save();
+        g.globalAlpha = burst;
+        g.strokeStyle = '#fff'; g.lineWidth = 2;
+        g.beginPath();
+        g.arc(dx, data.deathY, 10 + (1 - burst) * 110, 0, 6.2832);
+        g.stroke();
+        g.fillStyle = '#fff';
+        for (var k = 0; k < 12; k++) {
+          var ang = k * 0.5236, d = 14 + (1 - burst) * 80;
+          g.fillRect(dx + Math.cos(ang) * d - 2, data.deathY + Math.sin(ang) * d - 2, 4, 4);
+        }
+        g.restore();
+      }
+
+      // caption, on its own strip so it never fights the geometry behind it
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      var fs = Math.max(9, Math.round(10 * (canvas.width / 620)));
+      var strip = fs * 2.6;
+      g.fillStyle = 'rgba(8,9,12,0.78)';
+      g.fillRect(0, canvas.height - strip, canvas.width, strip);
+      g.fillStyle = 'rgba(232,234,240,0.6)';
+      g.font = '600 ' + fs + 'px ui-monospace, Menlo, monospace';
+      g.textAlign = 'left';
+      var baseline = canvas.height - strip / 2 + fs * 0.36;
+      g.fillText('LAST MOMENTS · ' + Math.round(SPEED * 100) + '% SPEED', 12, baseline);
+      g.textAlign = 'right';
+      g.fillText('KILLED BY ' + OM.causeLabel(data.cause), canvas.width - 12, baseline);
+
+      raf = root.requestAnimationFrame(draw);
+    }
+
+    return {
+      load: function (d) { data = d; },
+      start: function () {
+        if (!data || !data.frames.length) return false;
+        running = true; t0 = performance.now();
+        root.cancelAnimationFrame(raf);
+        raf = root.requestAnimationFrame(draw);
+        return true;
+      },
+      stop: function () { running = false; root.cancelAnimationFrame(raf); },
+      restart: function () { t0 = performance.now(); }
+    };
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
 /* ==== src/80-ui.js ==== */
 /* ONE MORE — screens.
    The only rule that matters here: from death to playing again must be one tap
@@ -2406,7 +3184,8 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
   var prog = OM.progress, P = OM.phys;
   var doc = root.document;
 
-  var UI = OM.ui = { screen: null, lastMode: 'endless' };
+  var UI = OM.ui = { screen: null, lastMode: 'endless', lastFamily: null };
+  var replay = null;
   var $ = function (id) { return doc.getElementById(id); };
   var screens = {};
 
@@ -2445,10 +3224,13 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       case 'resume': UI.resume(); break;
       case 'quit': UI.show('menu'); OM.game.state = 'idle'; OM.game.run = null; OM.audio.stopMusic(); break;
       case 'share': UI.share(); break;
+      case 'trial': UI.startTrial(); break;
+      case 'nightmare': UI.startRun('nightmare'); break;
     }
   }
 
   UI.show = function (name) {
+    if (replay && name !== 'result') replay.stop();
     for (var k in screens) screens[k].classList.toggle('on', k === name);
     UI.screen = name;
     $('pause-btn').classList.toggle('on', name === null);
@@ -2456,15 +3238,26 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
   };
 
   UI.hideAll = function () {
+    if (replay) replay.stop();
     for (var k in screens) screens[k].classList.remove('on');
     UI.screen = null;
     $('pause-btn').classList.add('on');
   };
 
-  UI.startRun = function (mode) {
+  UI.startRun = function (mode, opts) {
     UI.lastMode = mode;
+    if (replay) replay.stop();
     UI.hideAll();
-    OM.game.start(mode, {});
+    OM.game.start(mode, opts || (mode === 'trial' ? { family: UI.lastFamily } : {}));
+  };
+
+  /* A Trial points the generator at whatever is actually killing you. It is not
+     a different game — same physics, same proven patterns, different selection. */
+  UI.startTrial = function () {
+    var rd = OM.analysis.read();
+    if (rd.kind !== 'weakness') { UI.toast('NOT ENOUGH RUNS YET'); return; }
+    UI.lastFamily = rd.family;
+    UI.startRun('trial', { family: rd.family });
   };
 
   UI.pause = function () {
@@ -2494,6 +3287,21 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     var key = OM.dayKey(OM.dayIndex());
     var done = d.daily[key];
     $('daily-badge').textContent = done ? 'today: ' + OM.fmtTime(done, 2) : 'not played today';
+
+    var nb = $('menu-nightmare');
+    if (prog.nightmareUnlocked()) {
+      nb.hidden = false;
+      nb.querySelector('em').textContent = d.nightmare
+        ? 'best ' + OM.fmtTime(d.nightmare, 2) : 'no warnings, no warm-up';
+    } else nb.hidden = true;
+
+    var rd = OM.analysis.read(), tb = $('menu-trial');
+    if (rd.kind === 'weakness') {
+      tb.hidden = false;
+      var best = d.trial[rd.family];
+      tb.querySelector('em').textContent = rd.headline.toLowerCase() +
+        (best ? ' · best ' + OM.fmtTime(best, 2) : ' · not attempted');
+    } else tb.hidden = true;
   }
 
   /* ---------- daily ---------- */
@@ -2515,7 +3323,10 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     var best = s.mode === 'endless' ? d.best : (d.daily[OM.dayKey(s.day)] || 0);
     var res = s.result;
 
-    $('r-kicker').textContent = res.record ? 'NEW RECORD' : 'YOU SURVIVED';
+    $('r-kicker').textContent = res.record
+      ? (s.mode === 'trial' ? 'BEST TRIAL' : 'NEW RECORD')
+      : (s.mode === 'trial' ? 'TRIAL · ' + (OM.analysis.families[s.family || UI.lastFamily] || { name: '' }).name
+                            : 'YOU SURVIVED');
     $('r-time').textContent = OM.fmtTime(s.time, 2);
 
     var dEl = $('r-delta');
@@ -2530,6 +3341,21 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     $('r-stats').innerHTML =
       stat(s.nearMiss, 'NEAR MISS') + stat(s.perfect, 'PERFECT') +
       stat(s.flips, 'FLIPS') + stat(s.world.name, 'REACHED');
+
+    // last moments
+    var box = doc.querySelector('.replay');
+    if (!replay) replay = OM.ReplayPlayer($('r-replay'));
+    if (s.replay && s.replay.frames && s.replay.frames.length > 6) {
+      box.classList.remove('off');
+      replay.load(s.replay);
+      // the element has to be laid out before the canvas can size itself
+      requestAnimationFrame(function () { replay.start(); });
+    } else {
+      box.classList.add('off');
+      replay.stop();
+    }
+
+    renderRead(s);
 
     var li = prog.levelInfo();
     $('r-xpfill').style.width = (li.frac * 100).toFixed(1) + '%';
@@ -2550,6 +3376,35 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     return '<div><span class="n">' + v + '</span><span class="k">' + k + '</span></div>';
   }
 
+  /* One honest sentence, or nothing. Never a fabricated percentile, never a
+     comparison to players we cannot see. */
+  function renderRead(s) {
+    var el = $('r-read'), rd = OM.analysis.read(), tr = OM.analysis.trend();
+    var html = '';
+    if (rd.kind === 'none') {
+      el.className = 'read quiet';
+      html = '<b>READING YOU</b><span>' + rd.need +
+             ' more run' + (rd.need === 1 ? '' : 's') +
+             ' and the game will tell you what keeps killing you.</span>';
+    } else if (rd.kind === 'balanced') {
+      el.className = 'read quiet';
+      html = '<b>' + rd.headline + '</b><span>' + rd.line + '</span>';
+    } else {
+      el.className = 'read';
+      html = '<b>' + rd.headline + '</b><span>' + rd.line + ' ' +
+             Math.round(rd.share * 100) + '% of your last ' + rd.n + ' deaths.</span>' +
+             '<i>' + rd.fix + '</i>';
+    }
+    if (tr && Math.abs(tr.pct) > 0.12) {
+      html += '<i>' + (tr.delta > 0 ? 'Improving: ' : 'Slipping: ') +
+              'median run ' + OM.fmtTime(tr.early, 2) + ' \u2192 ' + OM.fmtTime(tr.recent, 2) + '</i>';
+    }
+    el.innerHTML = html;
+    var tb = doc.querySelector('#r-actions [data-act="trial"]');
+    tb.hidden = rd.kind !== 'weakness';
+    if (rd.kind === 'weakness') UI.lastFamily = rd.family;
+  }
+
   /* ---------- records ---------- */
   UI.showRecords = function () {
     var d = prog.data, li = prog.levelInfo();
@@ -2562,11 +3417,43 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       days.push(row(k + (i === 0 ? ' · today' : ''), d.daily[k] ? OM.fmtTime(d.daily[k], 2) : '—'));
     }
 
+    var rd = OM.analysis.read(), tr = OM.analysis.trend(), tl = OM.analysis.tally();
+    var readBlock = '';
+    if (rd.kind === 'weakness') {
+      readBlock = '<div class="read"><b>' + rd.headline + '</b><span>' + rd.line + ' ' +
+        rd.count + ' of your last ' + rd.n + ' deaths (' + Math.round(rd.share * 100) + '%).</span>' +
+        '<i>' + rd.fix + '</i></div>';
+    } else if (rd.kind === 'balanced') {
+      readBlock = '<div class="read quiet"><b>' + rd.headline + '</b><span>' + rd.line + '</span></div>';
+    } else {
+      readBlock = '<div class="read quiet"><b>READING YOU</b><span>' + rd.need +
+        ' more runs before the game can say anything useful about how you play.</span></div>';
+    }
+    if (tr) {
+      readBlock += '<div class="list">' +
+        row('Median run, first 15', OM.fmtTime(tr.early, 2)) +
+        row('Median run, last 15', OM.fmtTime(tr.recent, 2)) +
+        row('Change', (tr.delta >= 0 ? '+' : '') + OM.fmtDelta(tr.delta)) +
+      '</div>';
+    }
+    var famRows = Object.keys(tl.byFamily).sort(function (a, b) { return tl.byFamily[b] - tl.byFamily[a]; })
+      .map(function (f) {
+        return row(OM.analysis.families[f].name.charAt(0) + OM.analysis.families[f].name.slice(1).toLowerCase(),
+                   tl.byFamily[f] + ' · ' + Math.round(tl.byFamily[f] / tl.n * 100) + '%');
+      }).join('');
+
     $('rec-body').innerHTML =
+      '<h3>THE READ</h3>' + readBlock +
+      sparkline(OM.analysis.history()) +
+      (famRows ? '<h3>DEATHS BY KIND</h3><div class="list">' + famRows + '</div>' : '') +
       '<div class="split"><div><span class="lbl">BEST RUN</span><span class="val">' +
         (d.best ? OM.fmtTime(d.best, 2) : '—') + '</span></div>' +
       '<div><span class="lbl">LEVEL</span><span class="val">' + li.level + '</span></div>' +
       '<div><span class="lbl">RUNS</span><span class="val">' + d.runs + '</span></div></div>' +
+      (d.nightmare ? '<div class="list">' + row('Nightmare best', OM.fmtTime(d.nightmare, 2)) +
+        Object.keys(d.trial).map(function (f) {
+          return row('Trial · ' + OM.analysis.families[f].name, OM.fmtTime(d.trial[f], 2));
+        }).join('') + '</div>' : '') +
 
       '<h3>TOTALS</h3><div class="list">' +
         row('Time survived', fmtLong(d.totalTime)) +
@@ -2591,11 +3478,38 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
                  '<i>' + a.line + '</i></b><span>' + (got ? '✓' : '') + '</span></div>';
         }).join('') +
       '</div>' +
-      '<p class="muted small">Records are stored on this device only. There is no server yet, so nothing here is a global leaderboard.</p>';
+      '<p class="muted small">Everything here is measured from your own runs and stored on this device. ' +
+      'There is no server yet, so nothing here is a global leaderboard and nothing is compared to other players.</p>';
     UI.show('records');
   };
 
   function row(k, v) { return '<div class="item"><b>' + k + '</b><span>' + v + '</span></div>'; }
+
+  /* Your last thirty runs as bars, with your best marked. Inline SVG so it
+     needs no canvas lifecycle and scales with the layout. It is the clearest
+     possible answer to "am I actually getting better". */
+  function sparkline(hist) {
+    var runs = hist.slice(-30);
+    if (runs.length < 6) return '';
+    var max = 0, i;
+    for (i = 0; i < runs.length; i++) max = Math.max(max, runs[i].t);
+    if (max <= 0) return '';
+    var W = 100, H = 30, bw = W / runs.length, bars = '', bestI = 0;
+    for (i = 0; i < runs.length; i++) if (runs[i].t > runs[bestI].t) bestI = i;
+    for (i = 0; i < runs.length; i++) {
+      var h = Math.max(0.8, (runs[i].t / max) * (H - 2));
+      bars += '<rect x="' + (i * bw + bw * 0.16).toFixed(2) + '" y="' + (H - h).toFixed(2) +
+              '" width="' + (bw * 0.68).toFixed(2) + '" height="' + h.toFixed(2) +
+              '" fill="' + (i === bestI ? '#e8eaf0' : 'rgba(232,234,240,0.34)') + '"/>';
+    }
+    return '<h3>LAST ' + runs.length + ' RUNS</h3>' +
+      '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" ' +
+      'style="width:100%;height:64px;display:block;margin:10px 0 4px" role="img" ' +
+      'aria-label="Bar chart of your last ' + runs.length + ' run times, longest run highlighted">' +
+      bars + '</svg>' +
+      '<p class="muted small" style="text-align:left;margin:0 0 6px">' +
+      'oldest on the left · longest run highlighted · peak ' + OM.fmtTime(max, 2) + '</p>';
+  }
   function fmtLong(sec) {
     var h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60;
     return (h ? h + 'h ' : '') + m + 'm ' + Math.floor(sec % 60) + 's';
@@ -2723,23 +3637,35 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
        which is the difference between a game that feels instant and one that
        feels like a web page. */
     function press(e) {
-      if (OM.ui.screen === 'result') {
-        // tap anywhere to go again — but not on a button, which has its own job
-        if (e.target && e.target.closest && e.target.closest('[data-act]')) return;
-        if (OM.game.run && OM.game.run.deadFor > 0.22) {
-          e.preventDefault();
-          OM.ui.startRun(OM.ui.lastMode);
-        }
-        return;
-      }
       if (OM.ui.screen !== null) return;      // a menu is open; let it have the tap
       e.preventDefault();
       OM.audio.unlock();
       OM.game.flip();
     }
-
     canvas.addEventListener('pointerdown', press);
-    doc.getElementById('s-result').addEventListener('pointerdown', press);
+
+    /* The results screen scrolls on a phone, so "tap anywhere to go again" has
+       to be a real tap: press and release in the same place, quickly. Firing on
+       pointerdown would restart the run every time somebody tried to scroll
+       down to read the death analysis. */
+    var resultEl = doc.getElementById('s-result');
+    var tap = null;
+    resultEl.addEventListener('pointerdown', function (e) {
+      if (e.target && e.target.closest && e.target.closest('[data-act], canvas')) { tap = null; return; }
+      tap = { x: e.clientX, y: e.clientY, t: performance.now() };
+    });
+    resultEl.addEventListener('pointerup', function (e) {
+      if (!tap) return;
+      var moved = Math.abs(e.clientX - tap.x) + Math.abs(e.clientY - tap.y);
+      var held = performance.now() - tap.t;
+      tap = null;
+      if (moved > 12 || held > 500) return;                 // that was a scroll or a hold
+      if (OM.ui.screen !== 'result') return;
+      if (!OM.game.run || OM.game.run.deadFor <= 0.22) return;
+      e.preventDefault();
+      OM.ui.startRun(OM.ui.lastMode);
+    });
+    resultEl.addEventListener('pointercancel', function () { tap = null; });
 
     doc.addEventListener('keydown', function (e) {
       if (e.repeat) return;

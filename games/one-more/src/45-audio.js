@@ -64,7 +64,21 @@
       noise(t, 0.055, 0.30, dir > 0 ? 1500 : 2100, 2.2, sfxBus, dir > 0 ? 700 : 3000);
       tone(dir > 0 ? 300 : 420, t, 0.09, 0.16, 'triangle', sfxBus, dir > 0 ? 170 : 250);
     },
-    land: function () { var t = now(); noise(t, 0.05, 0.11, 320, 1.1); },
+    /* Landing scales with impact: a short hop and a full ceiling-to-floor drop
+       must not sound the same, or the character stops feeling like it has mass. */
+    land: function (f) {
+      f = f == null ? 0.5 : f;
+      var t = now();
+      noise(t, 0.035 + f * 0.055, 0.05 + f * 0.20, 240 + f * 320, 1.2, sfxBus, 90);
+      tone(170 - f * 45, t, 0.09 + f * 0.07, 0.05 + f * 0.13, 'sine', sfxBus, 55);
+    },
+    /* Mechanical cue for a piston committing near you — the threat announces
+       itself before it is visible in your peripheral vision. */
+    piston: function (near) {
+      var t = now(), v = 0.05 + (near || 0) * 0.13;
+      noise(t, 0.09, v, 520, 1.6, sfxBus, 160);
+      tone(96, t, 0.13, v * 0.8, 'square', sfxBus, 62);
+    },
     near: function () {
       var t = now();
       tone(1760, t, 0.09, 0.075, 'sine', sfxBus, 2400);
@@ -79,6 +93,7 @@
       noise(t, 0.42, 0.55, 900, 0.6, sfxBus, 60);
       tone(180, t, 0.5, 0.32, 'sawtooth', sfxBus, 32);
       tone(90, t, 0.65, 0.22, 'sine', sfxBus, 26);
+      tone(46, t + 0.02, 0.9, 0.26, 'sine', sfxBus, 24);   // the floor going out from under it
     },
     record: function () {
       var t = now();

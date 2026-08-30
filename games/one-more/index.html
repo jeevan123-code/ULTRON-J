@@ -20,8 +20,10 @@
       <div class="stack">
         <button class="btn primary" data-act="play">PLAY</button>
         <button class="btn" data-act="daily">DAILY CHALLENGE<em id="daily-badge"></em></button>
+        <button class="btn" id="menu-trial" data-act="trial" hidden>TRIAL<em></em></button>
+        <button class="btn" id="menu-nightmare" data-act="nightmare" hidden>NIGHTMARE<em></em></button>
         <div class="row">
-          <button class="btn small" data-act="records">RECORDS</button>
+          <button class="btn small" data-act="records">PROFILE</button>
           <button class="btn small" data-act="garage">GARAGE</button>
           <button class="btn small" data-act="settings">SETTINGS</button>
         </div>
@@ -36,11 +38,17 @@
       <p class="kicker" id="r-kicker">YOU SURVIVED</p>
       <div class="bigtime" id="r-time">00:00.00</div>
       <p class="delta" id="r-delta"></p>
+      <!-- The restart button sits directly under the time so it is above the
+           fold on every screen. Everything below it is optional detail; the one
+           thing that must never require a scroll is going again. -->
+      <button class="btn primary huge" data-act="again">ONE MORE</button>
+      <div class="replay"><canvas id="r-replay"></canvas></div>
       <div class="stats" id="r-stats"></div>
+      <div class="read" id="r-read"></div>
       <div class="xpbar"><i id="r-xpfill"></i><span id="r-xplabel"></span></div>
       <div id="r-unlocks" class="unlocks"></div>
-      <button class="btn primary huge" data-act="again">ONE MORE</button>
-      <div class="row">
+      <div class="row" id="r-actions">
+        <button class="btn small" data-act="trial" hidden>TRIAL</button>
         <button class="btn small" data-act="share">SHARE</button>
         <button class="btn small" data-act="menu">MENU</button>
       </div>
@@ -113,6 +121,7 @@
 <script src="src/20-patterns.js"></script>
 <script src="src/25-generator.js"></script>
 <script src="src/30-mutations.js"></script>
+<script src="src/32-analysis.js"></script>
 <script src="src/35-progress.js"></script>
 <script src="src/40-ghost.js"></script>
 <script src="src/45-audio.js"></script>
@@ -120,6 +129,7 @@
 <script src="src/55-fx.js"></script>
 <script src="src/60-render.js"></script>
 <script src="src/70-game.js"></script>
+<script src="src/72-replay.js"></script>
 <script src="src/80-ui.js"></script>
 <script src="src/99-boot.js"></script>
 </body>

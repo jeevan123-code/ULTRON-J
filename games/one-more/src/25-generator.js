@@ -38,9 +38,25 @@
       return 1;
     }
 
+    /* An optional restricted pool powers Trial runs. It narrows WHICH proven
+       patterns can appear — never how they are built — so a Trial is exactly as
+       fair as the main game, just pointed at your weakness. */
+    var poolByTier = null;
+    if (opts.pool && opts.pool.length) {
+      poolByTier = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+      for (var q = 0; q < opts.pool.length; q++) poolByTier[opts.pool[q].tier].push(opts.pool[q]);
+    }
+
     function pickPattern(tier) {
-      var pool = PAT.byTier[tier];
-      if (!pool || !pool.length) pool = PAT.byTier[1];
+      var pool = poolByTier ? poolByTier[tier] : PAT.byTier[tier];
+      if (poolByTier && (!pool || !pool.length)) {
+        // the weakness has no pattern at this tier: take the nearest tier that does
+        for (var d = 1; d <= 4 && (!pool || !pool.length); d++) {
+          pool = poolByTier[Math.max(1, tier - d)];
+          if (!pool || !pool.length) pool = poolByTier[Math.min(5, tier + d)];
+        }
+      }
+      if (!pool || !pool.length) pool = PAT.byTier[tier] || PAT.byTier[1];
       // Up to 6 tries to avoid something we just showed — repetition is what
       // makes a procedural runner feel cheap.
       for (var a = 0; a < 6; a++) {

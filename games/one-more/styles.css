@@ -38,6 +38,10 @@ html, body {
 #s-menu { background: linear-gradient(180deg, rgba(8,9,12,.94) 0%, rgba(8,9,12,.72) 40%, rgba(8,9,12,.94) 100%); backdrop-filter: none; -webkit-backdrop-filter: none; }
 @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .wrap { width: min(460px, 100%); text-align: center; }
+/* The results screen carries a replay and an analysis now, so it scrolls on a
+   phone. Tap-to-restart is a real tap detector in boot.js precisely because of
+   this — firing on pointerdown would restart the run on every scroll. */
+.wrap.result { max-height: 100%; overflow-y: auto; touch-action: pan-y; padding: 2px; }
 .wrap.scrolly { max-height: 100%; overflow-y: auto; touch-action: pan-y; padding: 4px; }
 
 /* ---------- type ---------- */
@@ -69,7 +73,7 @@ html, body {
 .btn:active { transform: scale(.978); }
 .btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .btn.primary:hover { background: #fff; }
-.btn.huge { font-size: 19px; padding: 22px; margin-top: 20px; letter-spacing: .2em; }
+.btn.huge { font-size: 19px; padding: 22px; margin: 4px 0 18px; letter-spacing: .2em; }
 .btn.small { width: auto; flex: 1 1 auto; padding: 12px 16px; font-size: 12px; }
 .btn em { font-style: normal; display: block; font-size: 10px; color: var(--faint); letter-spacing: .1em; margin-top: 4px; }
 .btn.primary em { color: rgba(8, 9, 12, .6); }
@@ -80,17 +84,32 @@ html, body {
   letter-spacing: -.02em; line-height: 1; margin: 4px 0 8px;
   font-variant-numeric: tabular-nums;
 }
-.delta { font-family: var(--mono); font-size: 13px; color: var(--dim); margin: 0 0 22px; min-height: 18px; }
+.delta { font-family: var(--mono); font-size: 13px; color: var(--dim); margin: 0 0 14px; min-height: 18px; }
 .delta.record { color: var(--ink); letter-spacing: .18em; font-weight: 600; }
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); margin-bottom: 18px; }
 .stats div { background: var(--bg); padding: 12px 4px; }
 .stats .n { font-family: var(--mono); font-size: 17px; display: block; }
 .stats .k { font-size: 9px; letter-spacing: .14em; color: var(--faint); display: block; margin-top: 4px; }
+/* Death replay: a wide, cinematic strip. Fixed aspect so the layout never
+   jumps when it loads, and it sits directly under the time because "what
+   killed me" is the first question anyone has. */
+.replay { position: relative; width: 100%; aspect-ratio: 20 / 9; border: 1px solid var(--line); margin-bottom: 16px; background: var(--bg); overflow: hidden; }
+.replay canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.replay.off { display: none; }
+
+/* The read: the game's one honest observation about how you play. */
+.read { border-left: 2px solid var(--ink); padding: 10px 0 10px 14px; margin: 0 0 16px; text-align: left; }
+.read b { display: block; font-size: 11px; letter-spacing: .22em; margin-bottom: 5px; }
+.read span { display: block; font-size: 12px; color: var(--dim); line-height: 1.5; }
+.read i { display: block; font-style: normal; font-size: 11px; color: var(--faint); margin-top: 5px; }
+.read.quiet { border-left-color: var(--line); }
+
 .xpbar { position: relative; height: 22px; border: 1px solid var(--line); margin-bottom: 6px; }
 .xpbar i { position: absolute; inset: 0 auto 0 0; background: rgba(232, 234, 240, .16); transition: width .5s ease; }
 .xpbar span { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--mono); font-size: 10px; letter-spacing: .16em; }
 .unlocks { min-height: 0; }
 .unlocks p { font-size: 11px; letter-spacing: .16em; margin: 8px 0 0; animation: fade .3s ease-out; }
+.result .row { margin-top: 16px; }
 
 /* ---------- cards / lists ---------- */
 .card { border: 1px solid var(--line); padding: 26px 20px; margin-bottom: 16px; }

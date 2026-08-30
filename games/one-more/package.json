@@ -7,8 +7,9 @@
     "build": "node tools/build.js",
     "test": "node tools/test.js",
     "validate": "node tools/validate.js",
+    "e2e": "node tools/build.js && node tools/e2e.js",
     "playtest": "node tools/build.js && node tools/playtest.js",
-    "check": "node tools/test.js && node tools/validate.js",
+    "check": "node tools/test.js && node tools/validate.js && npm run e2e",
     "serve": "node tools/build.js && npx --yes http-server . -p 8080 -c-1"
   },
   "license": "UNLICENSED"
