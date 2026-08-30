@@ -8,7 +8,7 @@
  *   dist/artifact.html   same game as body-content only, for publishing
  */
 'use strict';
-var fs = require('fs'), path = require('path');
+var fs = require('fs'), path = require('path'), crypto = require('crypto');
 var ROOT = path.join(__dirname, '..');
 
 function read(p) { return fs.readFileSync(path.join(ROOT, p), 'utf8'); }
@@ -31,10 +31,15 @@ var body = html
   .replace(/<script src="[^"]+"><\/script>\s*/g, '');
 
 var inner = body.match(/<body>([\s\S]*)<\/body>/)[1].trim();
-var built = Date.now();
+
+/* Stamp the build with a hash of its own sources, not the wall clock. A
+   timestamp changes on every rebuild, so the committed bundle showed up as
+   modified even when nothing about the game had changed — noise in every diff,
+   and a stop-hook complaint for a build that produced identical output. */
+var stamp = crypto.createHash('sha256').update(css + code).digest('hex').slice(0, 12);
 
 var standalone = body
-  .replace('</head>', '<style>\n' + css + '\n</style>\n<!-- built ' + new Date(built).toISOString() + ' -->\n</head>')
+  .replace('</head>', '<style>\n' + css + '\n</style>\n<!-- build ' + stamp + ' -->\n</head>')
   .replace('</body>', '<script>\n' + safe(code) + '\n</script>\n</body>');
 
 // The artifact host supplies <!doctype>, <head> and <body>, so ship content only.
@@ -46,5 +51,5 @@ fs.writeFileSync(path.join(ROOT, 'dist/one-more.html'), standalone);
 fs.writeFileSync(path.join(ROOT, 'dist/artifact.html'), artifact);
 
 function kb(s) { return (Buffer.byteLength(s) / 1024).toFixed(1) + ' KB'; }
-console.log('  dist/one-more.html  ' + kb(standalone) + '   (' + scripts.length + ' modules inlined)');
+console.log('  dist/one-more.html  ' + kb(standalone) + '   (' + scripts.length + ' modules inlined, build ' + stamp + ')');
 console.log('  dist/artifact.html  ' + kb(artifact));
