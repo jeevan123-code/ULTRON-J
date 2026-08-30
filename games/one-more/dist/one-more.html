@@ -1,0 +1,2808 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#08090c">
+<meta name="description" content="One input. Tap to flip gravity. Survive one more time.">
+<title>ONE MORE</title>
+
+<style>
+/* ONE MORE — design system.
+   Black ground, white geometry, grey for anything that is not the game. One
+   typeface family, two weights, and numbers in monospace so a timer never
+   reflows mid-run. No colour anywhere: the whole identity is contrast. */
+:root {
+  --bg: #08090c;
+  --ink: #e8eaf0;
+  --dim: rgba(232, 234, 240, 0.56);
+  --faint: rgba(232, 234, 240, 0.30);
+  --line: rgba(232, 234, 240, 0.14);
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, "Roboto Mono", monospace;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  margin: 0; height: 100%; overflow: hidden;
+  background: var(--bg); color: var(--ink);
+  font-family: var(--sans);
+  overscroll-behavior: none;
+  -webkit-user-select: none; user-select: none;
+  touch-action: none;
+}
+#app { position: fixed; inset: 0; }
+#stage { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+/* ---------- screens ---------- */
+.screen {
+  position: absolute; inset: 0;
+  display: none; align-items: center; justify-content: center;
+  padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
+  background: rgba(8, 9, 12, 0.86);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  animation: fade .16s ease-out;
+}
+.screen.on { display: flex; }
+/* The menu sits over a live attract loop, so it stays lighter and unblurred —
+   the point is that you can see the game teaching itself behind the buttons. */
+#s-menu { background: linear-gradient(180deg, rgba(8,9,12,.94) 0%, rgba(8,9,12,.72) 40%, rgba(8,9,12,.94) 100%); backdrop-filter: none; -webkit-backdrop-filter: none; }
+@keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.wrap { width: min(460px, 100%); text-align: center; }
+.wrap.scrolly { max-height: 100%; overflow-y: auto; touch-action: pan-y; padding: 4px; }
+
+/* ---------- type ---------- */
+.logo {
+  font-size: clamp(38px, 11vw, 60px); font-weight: 700;
+  letter-spacing: .16em; margin: 0 0 6px; line-height: 1;
+}
+.logo .o { position: relative; display: inline-block; animation: orbit 3.4s ease-in-out infinite; }
+@keyframes orbit { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-.12em); } }
+.tag { color: var(--dim); font-size: 13px; margin: 0 0 34px; letter-spacing: .05em; }
+.kicker { font-size: 11px; letter-spacing: .28em; color: var(--faint); margin: 0 0 10px; }
+.muted { color: var(--dim); }
+.small { font-size: 12px; }
+.hint { color: var(--faint); font-size: 11px; letter-spacing: .12em; margin-top: 14px; }
+.foot { margin-top: 30px; font-family: var(--mono); font-size: 12px; color: var(--faint); }
+.foot .dot { margin: 0 10px; }
+
+/* ---------- buttons ---------- */
+.stack { display: flex; flex-direction: column; gap: 10px; }
+.row { display: flex; gap: 10px; justify-content: center; margin-top: 10px; flex-wrap: wrap; }
+.btn {
+  font-family: var(--sans); font-size: 14px; font-weight: 600; letter-spacing: .16em;
+  color: var(--ink); background: transparent;
+  border: 1px solid var(--line); border-radius: 2px;
+  padding: 15px 22px; cursor: pointer; width: 100%;
+  transition: transform .09s ease, background .14s ease, border-color .14s ease;
+}
+.btn:hover { background: rgba(232, 234, 240, .06); border-color: rgba(232, 234, 240, .3); }
+.btn:active { transform: scale(.978); }
+.btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn.primary:hover { background: #fff; }
+.btn.huge { font-size: 19px; padding: 22px; margin-top: 20px; letter-spacing: .2em; }
+.btn.small { width: auto; flex: 1 1 auto; padding: 12px 16px; font-size: 12px; }
+.btn em { font-style: normal; display: block; font-size: 10px; color: var(--faint); letter-spacing: .1em; margin-top: 4px; }
+.btn.primary em { color: rgba(8, 9, 12, .6); }
+
+/* ---------- results ---------- */
+.bigtime {
+  font-family: var(--mono); font-size: clamp(46px, 15vw, 74px); font-weight: 600;
+  letter-spacing: -.02em; line-height: 1; margin: 4px 0 8px;
+  font-variant-numeric: tabular-nums;
+}
+.delta { font-family: var(--mono); font-size: 13px; color: var(--dim); margin: 0 0 22px; min-height: 18px; }
+.delta.record { color: var(--ink); letter-spacing: .18em; font-weight: 600; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); margin-bottom: 18px; }
+.stats div { background: var(--bg); padding: 12px 4px; }
+.stats .n { font-family: var(--mono); font-size: 17px; display: block; }
+.stats .k { font-size: 9px; letter-spacing: .14em; color: var(--faint); display: block; margin-top: 4px; }
+.xpbar { position: relative; height: 22px; border: 1px solid var(--line); margin-bottom: 6px; }
+.xpbar i { position: absolute; inset: 0 auto 0 0; background: rgba(232, 234, 240, .16); transition: width .5s ease; }
+.xpbar span { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--mono); font-size: 10px; letter-spacing: .16em; }
+.unlocks { min-height: 0; }
+.unlocks p { font-size: 11px; letter-spacing: .16em; margin: 8px 0 0; animation: fade .3s ease-out; }
+
+/* ---------- cards / lists ---------- */
+.card { border: 1px solid var(--line); padding: 26px 20px; margin-bottom: 16px; }
+.day { font-family: var(--mono); font-size: 34px; font-weight: 600; margin: 4px 0; }
+.split { display: flex; gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 20px 0 14px; }
+.split div { flex: 1; background: var(--bg); padding: 12px 6px; }
+.lbl { display: block; font-size: 9px; letter-spacing: .16em; color: var(--faint); }
+.val { display: block; font-family: var(--mono); font-size: 19px; margin-top: 5px; }
+
+.list { border-top: 1px solid var(--line); margin: 14px 0; }
+.list .item { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 2px; border-bottom: 1px solid var(--line); font-size: 12px; text-align: left; }
+.list .item b { font-weight: 600; letter-spacing: .1em; }
+.list .item span { font-family: var(--mono); color: var(--dim); }
+.list .item.locked { opacity: .38; }
+.list .item i { font-style: normal; color: var(--faint); font-size: 10px; letter-spacing: .12em; display: block; margin-top: 3px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 22px; }
+.chip {
+  border: 1px solid var(--line); background: transparent; color: var(--ink);
+  font-family: var(--sans); font-size: 11px; letter-spacing: .14em; font-weight: 600;
+  padding: 10px 13px; cursor: pointer; border-radius: 2px;
+}
+.chip.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.chip:disabled { opacity: .3; cursor: default; }
+.chip small { display: block; font-size: 9px; letter-spacing: .1em; opacity: .7; margin-top: 3px; font-weight: 400; }
+h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 600; margin: 22px 0 0; text-align: left; }
+
+.toggle { display: flex; justify-content: space-between; align-items: center; padding: 14px 2px; border-bottom: 1px solid var(--line); font-size: 13px; letter-spacing: .06em; }
+.toggle button { width: 52px; height: 26px; border: 1px solid var(--line); background: transparent; border-radius: 2px; cursor: pointer; position: relative; }
+.toggle button::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; background: var(--faint); transition: transform .16s ease, background .16s ease; }
+.toggle button[aria-pressed="true"]::after { transform: translateX(24px); background: var(--ink); }
+
+/* ---------- chrome ---------- */
+#pause-btn {
+  position: absolute; top: max(12px, env(safe-area-inset-top)); right: 14px;
+  width: 38px; height: 38px; display: none; place-items: center;
+  background: transparent; border: 1px solid var(--line); color: var(--dim);
+  font-family: var(--mono); font-size: 11px; letter-spacing: .1em; cursor: pointer; border-radius: 2px;
+}
+#pause-btn.on { display: grid; }
+#toast {
+  position: absolute; left: 50%; bottom: 26px; transform: translate(-50%, 14px);
+  font-size: 11px; letter-spacing: .16em; color: var(--dim);
+  border: 1px solid var(--line); background: rgba(8, 9, 12, .92);
+  padding: 10px 16px; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s;
+}
+#toast.on { opacity: 1; transform: translate(-50%, 0); }
+
+@media (prefers-reduced-motion: reduce) {
+  .screen, .unlocks p { animation: none; }
+  .logo .o { animation: none; }
+}
+
+</style>
+<!-- built 2026-08-30T07:56:26.860Z -->
+</head>
+<body>
+<div id="app">
+  <canvas id="stage" aria-label="ONE MORE game" role="img"></canvas>
+
+  <!-- ===== MENU ===== -->
+  <section class="screen" id="s-menu" data-screen="menu">
+    <div class="wrap">
+      <h1 class="logo">ONE M<span class="o">O</span>RE</h1>
+      <p class="tag">Tap to flip gravity. Survive one more time.</p>
+      <div class="stack">
+        <button class="btn primary" data-act="play">PLAY</button>
+        <button class="btn" data-act="daily">DAILY CHALLENGE<em id="daily-badge"></em></button>
+        <div class="row">
+          <button class="btn small" data-act="records">RECORDS</button>
+          <button class="btn small" data-act="garage">GARAGE</button>
+          <button class="btn small" data-act="settings">SETTINGS</button>
+        </div>
+      </div>
+      <p class="foot"><span id="menu-best">—</span><span class="dot">·</span><span id="menu-level">LEVEL 1</span></p>
+    </div>
+  </section>
+
+  <!-- ===== RESULTS ===== -->
+  <section class="screen" id="s-result" data-screen="result">
+    <div class="wrap result">
+      <p class="kicker" id="r-kicker">YOU SURVIVED</p>
+      <div class="bigtime" id="r-time">00:00.00</div>
+      <p class="delta" id="r-delta"></p>
+      <div class="stats" id="r-stats"></div>
+      <div class="xpbar"><i id="r-xpfill"></i><span id="r-xplabel"></span></div>
+      <div id="r-unlocks" class="unlocks"></div>
+      <button class="btn primary huge" data-act="again">ONE MORE</button>
+      <div class="row">
+        <button class="btn small" data-act="share">SHARE</button>
+        <button class="btn small" data-act="menu">MENU</button>
+      </div>
+      <p class="hint">tap anywhere to go again</p>
+    </div>
+  </section>
+
+  <!-- ===== DAILY ===== -->
+  <section class="screen" id="s-daily" data-screen="daily">
+    <div class="wrap">
+      <div class="card">
+        <p class="kicker">DAILY CHALLENGE</p>
+        <div class="day" id="d-day">DAY 1</div>
+        <p class="muted" id="d-date"></p>
+        <div class="split">
+          <div><span class="lbl">YOUR BEST</span><span class="val" id="d-best">—</span></div>
+          <div><span class="lbl">STREAK</span><span class="val" id="d-streak">0</span></div>
+        </div>
+        <p class="muted small" id="d-note">Everyone in the world gets this exact layout today.</p>
+        <p class="muted small" id="d-reset"></p>
+      </div>
+      <button class="btn primary" data-act="play-daily">PLAY TODAY</button>
+      <button class="btn small" data-act="menu">BACK</button>
+    </div>
+  </section>
+
+  <!-- ===== RECORDS ===== -->
+  <section class="screen" id="s-records" data-screen="records">
+    <div class="wrap scrolly">
+      <p class="kicker">RECORDS</p>
+      <div id="rec-body"></div>
+      <button class="btn small" data-act="menu">BACK</button>
+    </div>
+  </section>
+
+  <!-- ===== GARAGE ===== -->
+  <section class="screen" id="s-garage" data-screen="garage">
+    <div class="wrap scrolly">
+      <p class="kicker">GARAGE</p>
+      <p class="muted small">Cosmetic only. Every player has the same game.</p>
+      <div id="gar-body"></div>
+      <button class="btn small" data-act="menu">BACK</button>
+    </div>
+  </section>
+
+  <!-- ===== SETTINGS ===== -->
+  <section class="screen" id="s-settings" data-screen="settings">
+    <div class="wrap scrolly">
+      <p class="kicker">SETTINGS</p>
+      <div id="set-body"></div>
+      <button class="btn small" data-act="menu">BACK</button>
+    </div>
+  </section>
+
+  <!-- ===== PAUSE ===== -->
+  <section class="screen" id="s-pause" data-screen="pause">
+    <div class="wrap">
+      <p class="kicker">PAUSED</p>
+      <button class="btn primary" data-act="resume">RESUME</button>
+      <button class="btn small" data-act="quit">END RUN</button>
+    </div>
+  </section>
+
+  <button id="pause-btn" aria-label="Pause">II</button>
+  <div id="toast" role="status" aria-live="polite"></div>
+</div>
+
+<script>
+/* ==== src/00-core.js ==== */
+/* ONE MORE — core utilities, deterministic RNG, storage, formatting.
+   Every file attaches to the global OM namespace and is wrapped in an IIFE so
+   the dev <script> tags and the single-file bundle behave identically. */
+(function (root) {
+  'use strict';
+  var OM = root.OM || (root.OM = {});
+
+  /* ---------- math ---------- */
+  var M = OM.math = {
+    clamp: function (v, a, b) { return v < a ? a : (v > b ? b : v); },
+    lerp: function (a, b, t) { return a + (b - a) * t; },
+    // frame-rate independent exponential approach
+    approach: function (a, b, rate, dt) { return b + (a - b) * Math.exp(-rate * dt); },
+    smooth: function (t) { return t * t * (3 - 2 * t); },
+    sign: function (v) { return v < 0 ? -1 : 1; },
+    rand: function (a, b) { return a + Math.random() * (b - a); }
+  };
+
+  /* ---------- deterministic RNG (mulberry32) ----------
+     Used for the Daily Challenge so every player on a given day gets a
+     byte-identical world. */
+  OM.rng = function (seed) {
+    var a = (seed >>> 0) || 1;
+    function next() {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    }
+    return {
+      next: next,
+      range: function (lo, hi) { return lo + next() * (hi - lo); },
+      int: function (lo, hi) { return Math.floor(lo + next() * (hi - lo + 1)); },
+      pick: function (arr) { return arr[Math.floor(next() * arr.length)]; },
+      chance: function (p) { return next() < p; }
+    };
+  };
+
+  /* String -> 32bit seed, so "2026-08-30" maps to a stable world. */
+  OM.hashSeed = function (str) {
+    var h = 2166136261 >>> 0;
+    for (var i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    return h >>> 0;
+  };
+
+  /* ---------- time ---------- */
+  // 107.283 -> "01:47.28"
+  OM.fmtTime = function (sec, decimals) {
+    if (!isFinite(sec) || sec < 0) sec = 0;
+    var d = decimals == null ? 2 : decimals;
+    var m = Math.floor(sec / 60);
+    var s = sec - m * 60;
+    var ss = s.toFixed(d);
+    if (s < 10) ss = '0' + ss;
+    return (m < 10 ? '0' + m : '' + m) + ':' + ss;
+  };
+
+  OM.fmtDelta = function (sec) {
+    var s = Math.abs(sec);
+    return (s < 10 ? s.toFixed(2) : s.toFixed(1)) + 's';
+  };
+
+  // UTC day index — the daily challenge rolls over at 00:00 UTC worldwide.
+  OM.dayIndex = function (date) {
+    var d = date || new Date();
+    return Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) / 86400000);
+  };
+  OM.dayKey = function (idx) {
+    var ms = idx * 86400000;
+    var d = new Date(ms);
+    var p = function (n) { return n < 10 ? '0' + n : '' + n; };
+    return d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate());
+  };
+  OM.msUntilNextDay = function () {
+    var now = Date.now();
+    return (Math.floor(now / 86400000) + 1) * 86400000 - now;
+  };
+
+  /* ---------- storage (never throws; private mode / blocked cookies are fine) ---------- */
+  OM.store = {
+    get: function (key, fallback) {
+      try {
+        var raw = root.localStorage.getItem(key);
+        if (raw == null) return fallback;
+        return JSON.parse(raw);
+      } catch (e) { return fallback; }
+    },
+    set: function (key, value) {
+      try { root.localStorage.setItem(key, JSON.stringify(value)); return true; }
+      catch (e) { return false; }
+    },
+    del: function (key) {
+      try { root.localStorage.removeItem(key); return true; } catch (e) { return false; }
+    }
+  };
+
+  /* ---------- tiny event bus ---------- */
+  OM.bus = (function () {
+    var map = {};
+    return {
+      on: function (name, fn) { (map[name] || (map[name] = [])).push(fn); return fn; },
+      off: function (name, fn) {
+        var l = map[name]; if (!l) return;
+        var i = l.indexOf(fn); if (i >= 0) l.splice(i, 1);
+      },
+      emit: function (name, payload) {
+        var l = map[name]; if (!l) return;
+        for (var i = 0; i < l.length; i++) { try { l[i](payload); } catch (e) { /* a listener must never kill the loop */ } }
+      }
+    };
+  })();
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ==== src/10-physics.js ==== */
+/* ONE MORE — physics + difficulty director.
+   Pure functions and constants only: no canvas, no DOM. This file is loaded by
+   the browser AND by tools/validate.js + tools/test.js under node, so the
+   fairness validator proves things about the exact code that ships. */
+(function (root) {
+  'use strict';
+  var OM = root.OM || (root.OM = {});
+  var clamp = OM.math.clamp;
+
+  var P = OM.phys = {
+    /* Logical space. The canvas letterboxes to this; H is fixed, W varies with
+       the device aspect so phones and desktops see the same vertical challenge. */
+    H: 720,
+    CEIL: 96,          // inner surface of the ceiling
+    FLOOR: 672,        // inner surface of the floor
+    R: 16,             // collision radius (visual radius is slightly larger — forgiving)
+    R_VIS: 18,
+
+    BASE_SPEED: 430,   // px/s at t=0
+    BASE_G: 3300,      // px/s^2 at BASE_SPEED
+
+    PLAYER_X_FRAC: 0.27,
+    VOID_DEATH: 260,   // px past a surface line before a fall through a hole kills
+
+    NEAR_MISS_DIST: 15,   // px of clearance that counts as a near miss
+    PERFECT_WINDOW: 0.34  // s after a flip during which a near miss reads as PERFECT
+  };
+
+  P.TUNNEL = P.FLOOR - P.CEIL;                 // 576
+  /* Horizontal distance covered by one full surface-to-surface flip. Because
+     g scales with speed^2 this is constant at every speed — the single most
+     important decision in the whole game: every hand-authored pattern stays
+     exactly as fair at 900px/s as it was at 430px/s. */
+  P.TRANSIT_H = P.TUNNEL - 2 * P.R;            // 544
+  P.TRANSIT_T = Math.sqrt(2 * P.TRANSIT_H / P.BASE_G);
+  P.TRANSIT_X = P.TRANSIT_T * P.BASE_SPEED;    // ~247px
+
+  /* Speed curve: fast early ramp so the first 20s already feels alive, then a
+     slow linear creep that never stops. Reaches ~1000px/s around 5 minutes. */
+  P.speedAt = function (t) {
+    var ramp = 320 * (1 - Math.exp(-t / 42));
+    return P.BASE_SPEED + ramp + Math.min(t, 400) * 0.62;
+  };
+
+  P.gravityFor = function (speed, mult) {
+    var s = speed / P.BASE_SPEED;
+    return P.BASE_G * s * s * (mult == null ? 1 : mult);
+  };
+
+  /* ---------- difficulty director ----------
+     Returns the shape of the world at time t: which pattern tiers may spawn,
+     how much breathing room between them, and how far ahead obstacles read. */
+  var TIERS = [
+    // [untilSeconds, weights per tier 1..5, spacing multiplier]
+    [14, [1, 0, 0, 0, 0], 1.75],
+    [34, [3, 1, 0, 0, 0], 1.35],
+    [62, [3, 4, 1, 0, 0], 1.15],
+    [96, [1, 4, 3, 1, 0], 1.02],
+    [140, [0, 3, 4, 2, 1], 0.94],
+    [200, [0, 1, 4, 4, 2], 0.88],
+    [Infinity, [0, 0, 3, 4, 4], 0.82]
+  ];
+
+  P.directorAt = function (t) {
+    for (var i = 0; i < TIERS.length; i++) {
+      if (t < TIERS[i][0]) return { weights: TIERS[i][1], spacing: TIERS[i][2], band: i };
+    }
+    var last = TIERS[TIERS.length - 1];
+    return { weights: last[1], spacing: last[2], band: TIERS.length - 1 };
+  };
+
+  /* ---------- worlds ----------
+     Not menu choices — you arrive by surviving. */
+  P.WORLDS = [
+    { at: 0, id: 'origin', name: 'ORIGIN', line: 'Clean geometry. Learn the rule.' },
+    { at: 48, id: 'pulse', name: 'PULSE', line: 'The world starts breathing.' },
+    { at: 108, id: 'void', name: 'VOID', line: 'Most of it stops being visible.' },
+    { at: 168, id: 'collapse', name: 'COLLAPSE', line: 'Reality is no longer stable.' },
+    { at: 240, id: 'nightmare', name: 'NIGHTMARE', line: 'No warnings from here.' }
+  ];
+  P.worldAt = function (t) {
+    var w = P.WORLDS[0];
+    for (var i = 0; i < P.WORLDS.length; i++) if (t >= P.WORLDS[i].at) w = P.WORLDS[i];
+    return w;
+  };
+
+  /* Corruption 0..1 — drives UI instability, visual noise and audio bed.
+     Starts at 90s so a normal run never sees it; long runs feel dangerous. */
+  P.corruptionAt = function (t) {
+    return clamp((t - 90) / 150, 0, 1);
+  };
+
+  /* ---------- surface queries ----------
+     `holes` is a sorted array of {x, w, side}. A surface simply stops existing
+     across a hole, so the player falls out of the world instead of being killed
+     by an invisible wall. */
+  function hasSurface(holes, x, side) {
+    for (var i = 0; i < holes.length; i++) {
+      var h = holes[i];
+      if (h.side === side && x > h.x && x < h.x + h.w) return false;
+    }
+    return true;
+  }
+  P.hasSurface = hasSurface;
+
+  /* ---------- integration ----------
+     Fixed sub-stepping keeps the arc identical regardless of frame rate, which
+     matters both for ghost replays and for the validator's guarantees.
+     st: {y, vy, grav(+1 down/-1 up), grounded}
+     Returns 'void' if the player has fallen out of the world. */
+  P.stepPlayer = function (st, dt, g, x, holes) {
+    st.vy += st.grav * g * dt;
+    st.y += st.vy * dt;
+    st.grounded = false;
+    if (st.grav > 0) {
+      var f = P.FLOOR - P.R;
+      if (st.y >= f) {
+        if (hasSurface(holes, x, 'floor')) { st.y = f; st.vy = 0; st.grounded = true; }
+        else if (st.y > P.FLOOR + P.VOID_DEATH) return 'void';
+      }
+    } else {
+      var c = P.CEIL + P.R;
+      if (st.y <= c) {
+        if (hasSurface(holes, x, 'ceil')) { st.y = c; st.vy = 0; st.grounded = true; }
+        else if (st.y < P.CEIL - P.VOID_DEATH) return 'void';
+      }
+    }
+    return null;
+  };
+
+  /* Squared distance from the player circle to an axis-aligned rect.
+     0 means overlap. Used for both collision and near-miss scoring. */
+  P.circleRectDist2 = function (cx, cy, r, rx, ry, rw, rh) {
+    var dx = cx < rx ? rx - cx : (cx > rx + rw ? cx - (rx + rw) : 0);
+    var dy = cy < ry ? ry - cy : (cy > ry + rh ? cy - (ry + rh) : 0);
+    return dx * dx + dy * dy;
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ==== src/20-patterns.js ==== */
+/* ONE MORE — obstacle pattern library.
+   Hand-authored, tiered 1..5. Nothing here is random: randomness picks WHICH
+   pattern and how much space follows it, never what a pattern contains. That is
+   the whole difference between "hard" and "unfair".
+   Every pattern in this file is proven survivable by tools/validate.js. */
+(function (root) {
+  'use strict';
+  var OM = root.OM || (root.OM = {});
+  var P = OM.phys;
+  var CEIL = P.CEIL, FLOOR = P.FLOOR;
+
+  /* item constructors ------------------------------------------------------ */
+  function spike(side, dx, w, h) { return { t: 'spike', side: side, dx: dx, w: w, h: h }; }
+  function block(side, dx, w, h) { return { t: 'block', side: side, dx: dx, w: w, h: h }; }
+  function bar(dx, w, y0, y1) { return { t: 'bar', dx: dx, w: w, y0: y0, y1: y1 }; }
+  function hole(side, dx, w) { return { t: 'hole', side: side, dx: dx, w: w }; }
+  function mover(dx, w, h, cy, amp, rate, phase) {
+    return { t: 'mover', dx: dx, w: w, h: h, cy: cy, amp: amp, rate: rate, phase: phase || 0 };
+  }
+  /* A laser covers ONE half of the tunnel and blinks on a slow, readable cycle.
+     It deliberately does not span the full height: the player cannot choose when
+     they arrive, so a full-height blocker would be a coin flip rather than a
+     decision. Half height turns it into "the bottom is lit — be on top". */
+  var LASER_H = Math.round((FLOOR - CEIL) * 0.56);
+  function laser(side, dx, w, rate, duty, phase) {
+    return { t: 'laser', side: side, dx: dx, w: w, rate: rate, duty: duty, phase: phase || 0, h: LASER_H };
+  }
+  function pat(id, tier, len, items) { return { id: id, tier: tier, len: len, items: items }; }
+
+  /* A "needle" is the signature moment: floor and ceiling both close in at the
+     same x, leaving only a window in the middle. The only way through is to be
+     mid-flip exactly there. Every PERFECT SWITCH callout comes from one of these.
+     Gates are deliberately NARROW: the player crosses the middle of the tunnel at
+     maximum vertical speed, so the width of the gate — how long they must hold
+     that band — costs far more timing slack than the height of the gap does. */
+  function needle(dx, w, halfGap) {
+    var mid = (CEIL + FLOOR) / 2;
+    return [
+      block('ceil', dx, w, (mid - halfGap) - CEIL),
+      block('floor', dx, w, FLOOR - (mid + halfGap))
+    ];
+  }
+
+  var L = [];
+
+  /* ---- TIER 1 — teaches the rule ---- */
+  L.push(pat('t1_floor', 1, 600, [spike('floor', 130, 190, 118)]));
+  L.push(pat('t1_ceil', 1, 600, [spike('ceil', 130, 190, 118)]));
+  L.push(pat('t1_pair', 1, 1020, [spike('floor', 110, 170, 112), spike('ceil', 620, 170, 112)]));
+  L.push(pat('t1_hole', 1, 640, [hole('floor', 150, 210)]));
+  L.push(pat('t1_block', 1, 620, [block('floor', 140, 230, 150)]));
+  L.push(pat('t1_hole_ceil', 1, 640, [hole('ceil', 150, 210)]));
+
+  /* ---- TIER 2 — rhythm ---- */
+  L.push(pat('t2_zig', 2, 1180, [
+    spike('floor', 100, 165, 115), spike('ceil', 440, 165, 115), spike('floor', 780, 165, 115)
+  ]));
+  L.push(pat('t2_bar', 2, 700, [bar(180, 190, CEIL + 150, FLOOR - 150)]));
+  L.push(pat('t2_holes', 2, 1080, [hole('floor', 120, 220), hole('ceil', 560, 220)]));
+  L.push(pat('t2_wide', 2, 780, [spike('floor', 120, 350, 125)]));
+  L.push(pat('t2_pinch', 2, 900, [spike('floor', 110, 200, 120), spike('ceil', 420, 200, 120)]));
+  L.push(pat('t2_step', 2, 900, [block('ceil', 110, 180, 150), block('floor', 430, 180, 200)]));
+  L.push(pat('t2_mover', 2, 820, [mover(200, 120, 150, (CEIL + FLOOR) / 2, 130, 0.55, 0)]));
+  L.push(pat('t2_bar_low', 2, 760, [bar(180, 170, CEIL + 250, FLOOR - 90)]));
+
+  /* ---- TIER 3 — combination ---- */
+  L.push(pat('t3_gauntlet', 3, 1500, [
+    spike('floor', 90, 145, 115), spike('ceil', 460, 145, 115),
+    spike('floor', 830, 145, 115), spike('ceil', 1200, 145, 115)
+  ]));
+  L.push(pat('t3_bar_zig', 3, 1120, [
+    spike('floor', 90, 170, 118), bar(430, 170, CEIL + 160, FLOOR - 160), spike('ceil', 800, 170, 118)
+  ]));
+  L.push(pat('t3_hole_spike', 3, 1080, [hole('floor', 120, 400), spike('ceil', 560, 190, 120)]));
+  L.push(pat('t3_laser', 3, 980, [laser('floor', 300, 90, 0.42, 0.5, 0)]));
+  L.push(pat('t3_double_bar', 3, 1120, [
+    bar(140, 170, CEIL + 140, FLOOR - 210), bar(520, 170, CEIL + 210, FLOOR - 140)
+  ]));
+  L.push(pat('t3_comb', 3, 1500, [
+    spike('floor', 80, 115, 110), spike('ceil', 430, 115, 110),
+    spike('floor', 780, 115, 110), spike('ceil', 1130, 115, 110)
+  ]));
+  L.push(pat('t3_mover_pair', 3, 1180, [
+    mover(180, 110, 160, CEIL + 200, 110, 0.62, 0),
+    mover(660, 110, 160, FLOOR - 200, 110, 0.62, Math.PI)
+  ]));
+  L.push(pat('t3_stagger_soft', 3, 1060, [spike('floor', 110, 200, 115), spike('ceil', 480, 200, 115)]));
+  L.push(pat('t3_hole_bar', 3, 1120, [hole('floor', 110, 300), bar(600, 170, CEIL + 170, FLOOR - 170)]));
+
+  /* ---- TIER 4 — precision ---- */
+  L.push(pat('t4_needle_wide', 4, 1040, needle(400, 40, 215)));
+  L.push(pat('t4_needle_tight', 4, 1060, needle(400, 40, 200)));
+  L.push(pat('t4_storm', 4, 1840, [
+    spike('floor', 80, 130, 118), spike('ceil', 420, 130, 118), spike('floor', 760, 130, 118),
+    spike('ceil', 1100, 130, 118), spike('floor', 1440, 130, 118)
+  ]));
+  L.push(pat('t4_stagger', 4, 1040, [spike('floor', 110, 220, 118), spike('ceil', 355, 220, 118)]));
+  L.push(pat('t4_laser_zig', 4, 1380, [
+    spike('floor', 100, 160, 118), laser('ceil', 520, 90, 0.42, 0.5, 0.5), spike('ceil', 980, 160, 118)
+  ]));
+  L.push(pat('t4_mover_gate', 4, 1120, [
+    mover(240, 130, 210, (CEIL + FLOOR) / 2, 150, 0.72, 0), spike('floor', 760, 180, 120)
+  ]));
+  L.push(pat('t4_hole_run', 4, 1300, [
+    hole('floor', 100, 520), spike('ceil', 300, 150, 105), hole('ceil', 780, 240)
+  ]));
+  L.push(pat('t4_needle_after', 4, 2000, [spike('floor', 90, 170, 115)].concat(needle(1240, 40, 210))));
+  L.push(pat('t4_bar_comb', 4, 1360, [
+    bar(120, 160, CEIL + 130, FLOOR - 230), spike('floor', 480, 150, 118),
+    bar(800, 160, CEIL + 230, FLOOR - 130)
+  ]));
+
+  /* ---- TIER 5 — the part people post clips of ---- */
+  L.push(pat('t5_needle_pair', 5, 2440, needle(380, 44, 185).concat(needle(1780, 44, 185))));
+  L.push(pat('t5_chaos', 5, 2600, [
+    spike('floor', 70, 100, 110), spike('ceil', 430, 100, 110), spike('floor', 790, 100, 110),
+    spike('ceil', 1150, 100, 110), spike('floor', 1510, 100, 110), spike('ceil', 1870, 100, 110)
+  ]));
+  L.push(pat('t5_laser_needle', 5, 1680, [laser('floor', 240, 90, 0.42, 0.5, 0)].concat(needle(1040, 44, 185))));
+  L.push(pat('t5_mover_storm', 5, 1620, [
+    mover(180, 110, 190, CEIL + 190, 130, 0.8, 0),
+    mover(640, 110, 190, FLOOR - 190, 130, 0.8, Math.PI * 0.5),
+    mover(1100, 110, 190, (CEIL + FLOOR) / 2, 170, 0.8, Math.PI)
+  ]));
+  /* Ride the ceiling over the first gap, drop onto the island to duck the
+     ceiling spike, then get back up before the floor runs out again. */
+  /* The floor is simply gone, and the ceiling you were riding has a tooth in it.
+     Duck under it and climb back out before the drop takes you. */
+  L.push(pat('t5_void_dip', 5, 1500, [
+    hole('floor', 90, 520), spike('ceil', 300, 90, 70)
+  ]));
+  L.push(pat('t5_gauntlet_bars', 5, 1720, [
+    bar(100, 150, CEIL + 120, FLOOR - 240), spike('floor', 420, 150, 118),
+    bar(720, 150, CEIL + 240, FLOOR - 120), spike('ceil', 1040, 150, 118),
+    bar(1340, 150, CEIL + 180, FLOOR - 180)
+  ]));
+
+  /* ---- collision geometry -------------------------------------------------
+     Everything reduces to axis-aligned rects. Spikes get a generous inset so a
+     death always looks like a death — nothing is ever killed by a pixel of a
+     tooth it visibly cleared. */
+  var SPIKE_IN_X = 6, SPIKE_IN_Y = 10;
+
+  function rectsOf(o, t, out) {
+    out = out || [];
+    switch (o.t) {
+      case 'spike':
+        if (o.side === 'floor') out.push({ x: o.x + SPIKE_IN_X, y: FLOOR - o.h + SPIKE_IN_Y, w: o.w - SPIKE_IN_X * 2, h: o.h - SPIKE_IN_Y, o: o });
+        else out.push({ x: o.x + SPIKE_IN_X, y: CEIL, w: o.w - SPIKE_IN_X * 2, h: o.h - SPIKE_IN_Y, o: o });
+        break;
+      case 'block':
+        if (o.side === 'floor') out.push({ x: o.x, y: FLOOR - o.h, w: o.w, h: o.h, o: o });
+        else out.push({ x: o.x, y: CEIL, w: o.w, h: o.h, o: o });
+        break;
+      case 'bar':
+        out.push({ x: o.x, y: o.y0, w: o.w, h: o.y1 - o.y0, o: o });
+        break;
+      case 'mover':
+        out.push({ x: o.x, y: moverY(o, t) - o.h / 2, w: o.w, h: o.h, o: o });
+        break;
+      case 'laser':
+        if (laserOn(o, t)) {
+          out.push({ x: o.x, y: o.side === 'ceil' ? CEIL : FLOOR - o.h, w: o.w, h: o.h, o: o });
+        }
+        break;
+      // 'hole' has no solid geometry — it removes a surface instead.
+    }
+    return out;
+  }
+
+  function moverY(o, t) {
+    var y = o.cy + Math.sin(o.phase + t * o.rate * Math.PI * 2) * o.amp;
+    var half = o.h / 2;
+    return Math.max(CEIL + half, Math.min(FLOOR - half, y));
+  }
+  function laserPhase(o, t) { return (o.phase + t * o.rate) % 1; }
+  function laserOn(o, t) { var p = laserPhase(o, t); return p >= 0 && p < o.duty; }
+
+  OM.patterns = {
+    list: L,
+    byTier: (function () {
+      var m = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+      for (var i = 0; i < L.length; i++) m[L[i].tier].push(L[i]);
+      return m;
+    })(),
+    rectsOf: rectsOf,
+    moverY: moverY,
+    laserOn: laserOn,
+    laserPhase: laserPhase,
+    needle: needle
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ==== src/25-generator.js ==== */
+/* ONE MORE — procedural world generator.
+   Randomness chooses which authored pattern comes next and how much room
+   follows it. It never invents geometry. Seeded by the daily key for the Daily
+   Challenge, so every player in the world runs the identical layout. */
+(function (root) {
+  'use strict';
+  var OM = root.OM || (root.OM = {});
+  var P = OM.phys, PAT = OM.patterns;
+
+  OM.Generator = function (rng, opts) {
+    opts = opts || {};
+    var self = {
+      obstacles: [],   // absolute-x, sorted by x
+      holes: [],       // absolute-x, sorted by x
+      cursor: opts.startX == null ? 900 : opts.startX,  // calm opening runway
+      recent: [],
+      spawned: 0
+    };
+
+    function place(p, x0) {
+      for (var i = 0; i < p.items.length; i++) {
+        var it = p.items[i];
+        var o = {};
+        for (var k in it) if (Object.prototype.hasOwnProperty.call(it, k)) o[k] = it[k];
+        o.x = x0 + it.dx;
+        o.pat = p.id;
+        if (o.t === 'hole') self.holes.push(o); else self.obstacles.push(o);
+      }
+      self.spawned++;
+    }
+
+    function pickTier(weights) {
+      var total = 0, i;
+      for (i = 0; i < 5; i++) total += weights[i];
+      if (total <= 0) return 1;
+      var r = rng.next() * total, acc = 0;
+      for (i = 0; i < 5; i++) { acc += weights[i]; if (r < acc) return i + 1; }
+      return 1;
+    }
+
+    function pickPattern(tier) {
+      var pool = PAT.byTier[tier];
+      if (!pool || !pool.length) pool = PAT.byTier[1];
+      // Up to 6 tries to avoid something we just showed — repetition is what
+      // makes a procedural runner feel cheap.
+      for (var a = 0; a < 6; a++) {
+        var p = pool[Math.floor(rng.next() * pool.length)];
+        if (self.recent.indexOf(p.id) < 0) return p;
+      }
+      return pool[Math.floor(rng.next() * pool.length)];
+    }
+
+    /* Fill the world out to `untilX`. `t` is the run time used by the director,
+       `spacingMul` lets mutations (RUSH) squeeze the breathing room. */
+    self.ensure = function (untilX, t, spacingMul) {
+      var guard = 0;
+      while (self.cursor < untilX && guard++ < 64) {
+        var dir = P.directorAt(t);
+        var tier = pickTier(dir.weights);
+        var p = pickPattern(tier);
+        place(p, self.cursor);
+        self.recent.push(p.id);
+        if (self.recent.length > 3) self.recent.shift();
+
+        // Rest proportional to what just happened: harder patterns get a beat
+        // of silence after them so the run breathes instead of grinding.
+        var rest = (P.TRANSIT_X * 0.62 + p.tier * 34) * dir.spacing * (spacingMul || 1);
+        rest *= rng.range(0.9, 1.22);
+        self.cursor += p.len + rest;
+      }
+    };
+
+    /* Drop everything behind the camera. Called every frame; keeps a long run
+       at a flat memory profile. */
+    self.prune = function (x) {
+      var i = 0;
+      while (i < self.obstacles.length && self.obstacles[i].x + (self.obstacles[i].w || 0) < x) i++;
+      if (i) self.obstacles.splice(0, i);
+      i = 0;
+      while (i < self.holes.length && self.holes[i].x + self.holes[i].w < x) i++;
+      if (i) self.holes.splice(0, i);
+    };
+
+    return self;
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ==== src/30-mutations.js ==== */
+/* ONE MORE — mutations. Every ten to twenty seconds the game changes one rule.
+ *
+ * HARD CONSTRAINT: a mutation may change how fast the world moves, how much of
+ * it you can see, or which way is up. It may NEVER change the shape of the flip
+ * arc. Every pattern in the library is proven survivable against one specific
+ * arc (tools/validate.js); a mutation that scaled gravity would silently void
+ * that proof and start killing people in places the game promised were fair.
+ *
+ * Pure speed changes are safe for free: gravity is derived from speed as
+ * g = G*(v/V)^2, so the horizontal span of a flip is identical at any speed.
+ * That is why SURGE and DRAG exist and why HEAVY and FLOAT do not.
+ */
+(function (root) {
+  'use strict';
+  var OM = root.OM || (root.OM = {});
+
+  var M = [
+    { id: 'surge',   name: 'SURGE',   line: 'Everything accelerates.',   speed: 1.22, weight: 3 },
+    { id: 'drag',    name: 'DRAG',    line: 'The world thickens.',       speed: 0.84, weight: 2 },
+    { id: 'rush',    name: 'RUSH',    line: 'No more room to breathe.',  spacing: 0.66, weight: 3 },
+    { id: 'mirror',  name: 'MIRROR',  line: 'Up is down.',               mirror: true, weight: 3 },
+    { id: 'dark',    name: 'DARK',    line: 'Only what is close.',       vision: 330, weight: 2 },
+    { id: 'phase',   name: 'PHASE',   line: 'It arrives late.',          fade: true, weight: 2 },
+    { id: 'drift',   name: 'DRIFT',   line: 'The frame is loose.',       drift: 0.045, weight: 2 },
+    { id: 'strobe',  name: 'STROBE',  line: 'Intermittent reality.',     strobe: true, weight: 1 },
+    { id: 'silence', name: 'SILENCE', line: 'No numbers.',               silence: true, weight: 2 }
+  ];
+
+  var BY_ID = {};
+  for (var i = 0; i < M.length; i++) BY_ID[M[i].id] = M[i];
+
+  /* The schedule is generated up front from the run's RNG, so a Daily Challenge
+     hands every player in the world the same mutations at the same instants. */
+  function schedule(rng, count) {
+    var out = [], t = 20 + rng.range(0, 6), last = null;
+    for (var n = 0; n < (count || 40); n++) {
+      var pick = weighted(rng, last);
+      var dur = rng.range(9, 13.5);
+      out.push({ at: t, until: t + dur, m: pick });
+      last = pick.id;
+      t += dur + rng.range(7, 15) * Math.max(0.45, 1 - n * 0.045); // they crowd in later
+    }
+    return out;
+  }
+
+  function weighted(rng, exclude) {
+    var pool = [], i, j;
+    for (i = 0; i < M.length; i++) {
+      if (M[i].id === exclude) continue;
+      for (j = 0; j < M[i].weight; j++) pool.push(M[i]);
+    }
+    return pool[Math.floor(rng.next() * pool.length)];
+  }
+
+  /* Collapse the schedule into the modifier set active at time t. */
+  function activeAt(sched, t) {
+    var mods = { speed: 1, spacing: 1, mirror: false, vision: 0, fade: false,
+                 drift: 0, strobe: false, silence: false, list: [], ending: 0 };
+    for (var i = 0; i < sched.length; i++) {
+      var s = sched[i];
+      if (t < s.at) break;
+      if (t >= s.until) continue;
+      var m = s.m;
+      if (m.speed) mods.speed *= m.speed;
+      if (m.spacing) mods.spacing *= m.spacing;
+      if (m.mirror) mods.mirror = true;
+      if (m.vision) mods.vision = mods.vision ? Math.min(mods.vision, m.vision) : m.vision;
+      if (m.fade) mods.fade = true;
+      if (m.drift) mods.drift += m.drift;
+      if (m.strobe) mods.strobe = true;
+      if (m.silence) mods.silence = true;
+      mods.list.push(s);
+      mods.ending = Math.max(mods.ending, s.until - t);
+    }
+    return mods;
+  }
+
+  OM.mutations = { list: M, byId: BY_ID, schedule: schedule, activeAt: activeAt };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ==== src/35-progress.js ==== */
+/* ONE MORE — save data, XP, unlocks, records, statistics.
+   Everything is local. There is no server, so there is nothing here that
+   claims to be a global leaderboard: the only opponents are your own past runs,
+   and the UI says exactly that. */
+(function (root) {
+  'use strict';
+  var OM = root.OM || (root.OM = {});
+  var KEY = 'onemore.save.v1';
+
+  var DEFAULT = {
+    v: 1, xp: 0, runs: 0, totalTime: 0,
+    best: 0, bestAt: 0,
+    daily: {},            // dayKey -> best seconds
+    dailyDone: [],        // dayKeys played, for the streak
+    nearMiss: 0, perfect: 0, flips: 0, deaths: {},
+    cosmetics: { core: 'auto', trail: 'line', death: 'shatter' },
+    achievements: [],
+    seen: { tutorial: false },
+    settings: { sound: true, music: true, shake: true, haptics: true, reduced: false },
+    ghost: null,          // best endless run, for racing your own record
+    ghostTime: 0,
+    dailyGhost: null      // {key, data} — only today's, so storage stays flat
+  };
+
+  function load() {
+    var s = OM.store.get(KEY, null);
+    if (!s || s.v !== 1) s = JSON.parse(JSON.stringify(DEFAULT));
+    for (var k in DEFAULT) if (!(k in s)) s[k] = JSON.parse(JSON.stringify(DEFAULT[k]));
+    for (var k2 in DEFAULT.settings) if (!(k2 in s.settings)) s.settings[k2] = DEFAULT.settings[k2];
+    for (var k3 in DEFAULT.cosmetics) if (!(k3 in s.cosmetics)) s.cosmetics[k3] = DEFAULT.cosmetics[k3];
+    return s;
+  }
+
+  var save = load();
+  var dirty = false;
+  function flush() { if (dirty) { OM.store.set(KEY, save); dirty = false; } }
+  function touch() { dirty = true; }
+  setInterval(flush, 4000);
+  if (root.addEventListener) {
+    root.addEventListener('pagehide', flush);
+    root.addEventListener('visibilitychange', function () { if (root.document && root.document.hidden) flush(); });
+  }
+
+  /* ---- levels ---- */
+  function needFor(level) { return Math.round(70 + 46 * Math.pow(level - 1, 1.32)); }
+  function levelInfo(xp) {
+    var lv = 1, rem = xp, need = needFor(1);
+    while (rem >= need && lv < 99) { rem -= need; lv++; need = needFor(lv); }
+    return { level: lv, into: rem, need: need, frac: rem / need };
+  }
+
+  /* ---- cosmetics ----
+     Purely visual, unlocked by playing. Nothing here touches the physics: two
+     players at level 3 and level 50 have exactly the same game. */
+  var CORES = [
+    { id: 'core', name: 'CORE', at: 1, line: 'The beginning.' },
+    { id: 'pulse', name: 'PULSE', at: 8, line: 'It has a heartbeat now.' },
+    { id: 'phase', name: 'PHASE', at: 16, line: 'The shell stops being solid.' },
+    { id: 'void', name: 'VOID', at: 26, line: 'Something is missing from it.' },
+    { id: 'glitch', name: 'GLITCH', at: 36, line: 'It does not render correctly.' },
+    { id: 'singularity', name: 'SINGULARITY', at: 50, line: 'It stopped being a shape.' }
+  ];
+  var TRAILS = [
+    { id: 'line', name: 'LINE', at: 1 },
+    { id: 'particle', name: 'PARTICLE', at: 4 },
+    { id: 'wave', name: 'WAVE', at: 11 },
+    { id: 'shatter', name: 'SHATTER', at: 19 },
+    { id: 'void', name: 'VOID', at: 30 }
+  ];
+  var DEATHS = [
+    { id: 'shatter', name: 'GLASS SHATTER', at: 1 },
+    { id: 'explode', name: 'EXPLOSION', at: 3 },
+    { id: 'implode', name: 'IMPLOSION', at: 9 },
+    { id: 'pixel', name: 'PIXEL DISSOLVE', at: 15 },
+    { id: 'collapse', name: 'GRAVITY COLLAPSE', at: 23 },
+    { id: 'wipe', name: 'ENERGY WIPE', at: 33 }
+  ];
+
+  function unlockedIn(list, level) {
+    var out = [];
+    for (var i = 0; i < list.length; i++) if (level >= list[i].at) out.push(list[i]);
+    return out;
+  }
+  // "auto" tracks your level, so the Nanogon visibly evolves without a menu visit
+  function coreFor(level) {
+    var pick = CORES[0];
+    for (var i = 0; i < CORES.length; i++) if (level >= CORES[i].at) pick = CORES[i];
+    return pick.id;
+  }
+  function activeCore() {
+    var lv = levelInfo(save.xp).level;
+    return save.cosmetics.core === 'auto' ? coreFor(lv) : save.cosmetics.core;
+  }
+
+  /* ---- achievements ---- */
+  var ACH = [
+    { id: 'first', name: 'FIRST CONTACT', line: 'Finish a run.', test: function (s) { return s.runs >= 1; } },
+    { id: 's30', name: 'THIRTY', line: 'Survive 30 seconds.', test: function (s) { return s.best >= 30; } },
+    { id: 's60', name: 'ONE MINUTE', line: 'Survive 60 seconds.', test: function (s) { return s.best >= 60; } },
+    { id: 's120', name: 'TWO MINUTES', line: 'Survive 120 seconds.', test: function (s) { return s.best >= 120; } },
+    { id: 's180', name: 'COLLAPSE', line: 'Reach the fourth world.', test: function (s) { return s.best >= 168; } },
+    { id: 's240', name: 'NIGHTMARE', line: 'Reach 240 seconds.', test: function (s) { return s.best >= 240; } },
+    { id: 'r25', name: 'ONE MORE', line: 'Play 25 runs.', test: function (s) { return s.runs >= 25; } },
+    { id: 'r100', name: 'ONE HUNDRED MORE', line: 'Play 100 runs.', test: function (s) { return s.runs >= 100; } },
+    { id: 'p10', name: 'PRECISION', line: '10 perfect switches.', test: function (s) { return s.perfect >= 10; } },
+    { id: 'p100', name: 'SURGEON', line: '100 perfect switches.', test: function (s) { return s.perfect >= 100; } },
+    { id: 'n250', name: 'CLOSE', line: '250 near misses.', test: function (s) { return s.nearMiss >= 250; } },
+    { id: 'd1', name: 'TODAY', line: 'Play a Daily Challenge.', test: function (s) { return s.dailyDone.length >= 1; } },
+    { id: 'd7', name: 'SEVEN DAYS', line: 'Play 7 Daily Challenges.', test: function (s) { return s.dailyDone.length >= 7; } },
+    { id: 'lv10', name: 'PULSE', line: 'Reach level 10.', test: function (s) { return levelInfo(s.xp).level >= 10; } },
+    { id: 'lv25', name: 'PHASE', line: 'Reach level 25.', test: function (s) { return levelInfo(s.xp).level >= 25; } },
+    { id: 'hour', name: 'AN HOUR OF THIS', line: 'One hour of total survival.', test: function (s) { return s.totalTime >= 3600; } }
+  ];
+
+  function checkAchievements() {
+    var got = [];
+    for (var i = 0; i < ACH.length; i++) {
+      var a = ACH[i];
+      if (save.achievements.indexOf(a.id) >= 0) continue;
+      if (a.test(save)) { save.achievements.push(a.id); got.push(a); touch(); }
+    }
+    return got;
+  }
+
+  /* ---- recording a run ---- */
+  function commitRun(r) {
+    var beforeLevel = levelInfo(save.xp).level;
+    save.runs++;
+    save.totalTime += r.time;
+    save.nearMiss += r.nearMiss;
+    save.perfect += r.perfect;
+    save.flips += r.flips;
+    save.deaths[r.cause] = (save.deaths[r.cause] || 0) + 1;
+
+    // XP: time carries it, style tops it up, a record is worth chasing.
+    var xp = Math.round(r.time * 2.2 + r.nearMiss * 3 + r.perfect * 7);
+    var record = false;
+    if (r.mode === 'endless') {
+      if (r.time > save.best) { save.best = r.time; save.bestAt = Date.now(); record = true; xp += 60; }
+      if (r.ghost && r.time > save.ghostTime) { save.ghost = r.ghost; save.ghostTime = r.time; }
+    } else if (r.mode === 'daily') {
+      var k = OM.dayKey(r.day);
+      if (save.dailyDone.indexOf(k) < 0) { save.dailyDone.push(k); xp += 25; }
+      if (!save.daily[k] || r.time > save.daily[k]) {
+        save.daily[k] = r.time;
+        record = true;
+        if (r.ghost) save.dailyGhost = { key: k, data: r.ghost };
+      }
+    }
+    save.xp += xp;
+    touch();
+    var got = checkAchievements();
+    flush();
+    return { xp: xp, record: record, achievements: got,
+             levelUp: levelInfo(save.xp).level > beforeLevel, level: levelInfo(save.xp).level };
+  }
+
+  /* Consecutive-day streak over the Daily Challenge, counted backwards from
+     today so that missing yesterday does not silently erase the whole thing
+     until you actually miss it. */
+  function dailyStreak() {
+    var today = OM.dayIndex(), n = 0;
+    for (var i = 0; i < 400; i++) {
+      if (save.dailyDone.indexOf(OM.dayKey(today - i)) >= 0) n++;
+      else if (i > 0) break;                 // today not yet played is fine
+    }
+    return n;
+  }
+
+  OM.progress = {
+    data: save,
+    flush: flush, touch: touch,
+    levelInfo: function () { return levelInfo(save.xp); },
+    needFor: needFor,
+    commitRun: commitRun,
+    dailyStreak: dailyStreak,
+    achievements: ACH,
+    cores: CORES, trails: TRAILS, deaths: DEATHS,
+    unlockedCores: function () { return unlockedIn(CORES, levelInfo(save.xp).level); },
+    unlockedTrails: function () { return unlockedIn(TRAILS, levelInfo(save.xp).level); },
+    unlockedDeaths: function () { return unlockedIn(DEATHS, levelInfo(save.xp).level); },
+    activeCore: activeCore,
+    coreFor: coreFor,
+    reset: function () { OM.store.del(KEY); save = load(); OM.progress.data = save; }
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ==== src/40-ghost.js ==== */
+/* ONE MORE — ghost recording and playback.
+   A ghost is not a video. It is world-x, y and gravity sampled at a fixed rate,
+   delta-encoded, a couple of bytes per frame. That is what makes racing your own
+   record cost nothing and what would make sharing one over a wire cheap later.
+   x is recorded as well as y, so the ghost occupies a real position in the world
+   and you can watch your record run pull ahead of you or fall behind. */
+(function (root) {
+  'use strict';
+  var OM = root.OM || (root.OM = {});
+  var RATE = 24;
+  var MAX = RATE * 420;          // seven minutes, then recording simply stops
+
+  OM.GhostRecorder = function () {
+    var xs = [], ys = [], gs = [], acc = 0, n = 0, lastX = 0, x0 = null;
+    return {
+      sample: function (dt, x, y, grav) {
+        acc += dt;
+        while (acc >= 1 / RATE && n < MAX) {
+          acc -= 1 / RATE;
+          if (x0 === null) { x0 = Math.round(x); lastX = x0; }
+          var xi = Math.round(x);
+          xs.push(xi - lastX);            // deltas stay two digits
+          lastX = xi;
+          ys.push(Math.round(y));
+          gs.push(grav > 0 ? 1 : 0);
+          n++;
+        }
+      },
+      finish: function () { return n > RATE ? { r: RATE, x0: x0, dx: xs, y: ys, g: gs } : null; }
+    };
+  };
+
+  OM.GhostPlayer = function (data) {
+    if (!data || !data.y || !data.y.length) return null;
+    var rate = data.r || RATE, len = data.y.length;
+    var xs = new Float64Array(len), acc = data.x0 || 0;
+    for (var i = 0; i < len; i++) { acc += data.dx[i]; xs[i] = acc; }
+    return {
+      duration: len / rate,
+      at: function (t) {
+        var f = t * rate;
+        if (f < 0) f = 0;
+        var i = Math.floor(f);
+        if (i >= len - 1) {
+          return { x: xs[len - 1], y: data.y[len - 1], grav: data.g[len - 1] ? 1 : -1, done: true };
+        }
+        var m = f - i;
+        return {
+          x: xs[i] + (xs[i + 1] - xs[i]) * m,
+          y: data.y[i] + (data.y[i + 1] - data.y[i]) * m,
+          grav: data.g[i] ? 1 : -1,
+          done: false
+        };
+      }
+    };
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ==== src/45-audio.js ==== */
+/* ONE MORE — procedural audio. No files: every sound is synthesised, so the
+   whole game stays a single document and still has a soundtrack that reacts.
+   The music is a step sequencer whose layers arrive as you survive; near a
+   personal record it strips back to almost nothing, which is the loudest thing
+   it can do at that moment. */
+(function (root) {
+  'use strict';
+  var OM = root.OM || (root.OM = {});
+  var ctx = null, master = null, musicBus = null, sfxBus = null, noiseBuf = null;
+  var started = false, muted = false, musicOn = true;
+  var seq = { next: 0, step: 0, bpm: 108, intensity: 0, quiet: false };
+
+  function ensure() {
+    if (ctx) return ctx;
+    var AC = root.AudioContext || root.webkitAudioContext;
+    if (!AC) return null;
+    try { ctx = new AC(); } catch (e) { return null; }
+    master = ctx.createGain(); master.gain.value = 0.9; master.connect(ctx.destination);
+    musicBus = ctx.createGain(); musicBus.gain.value = 0.34; musicBus.connect(master);
+    sfxBus = ctx.createGain(); sfxBus.gain.value = 0.85; sfxBus.connect(master);
+    // one second of white noise, reused for every percussive//textural sound
+    noiseBuf = ctx.createBuffer(1, 44100, 44100);
+    var d = noiseBuf.getChannelData(0);
+    for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    return ctx;
+  }
+
+  function now() { return ctx ? ctx.currentTime : 0; }
+
+  function env(node, t, a, d, peak) {
+    var g = node.gain;
+    g.setValueAtTime(0.0001, t);
+    g.exponentialRampToValueAtTime(Math.max(0.0002, peak), t + a);
+    g.exponentialRampToValueAtTime(0.0001, t + a + d);
+  }
+
+  function tone(freq, t, dur, peak, type, bus, slideTo) {
+    if (!ctx) return;
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(freq, t);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), t + dur);
+    env(g, t, Math.min(0.012, dur * 0.2), dur, peak);
+    o.connect(g); g.connect(bus || sfxBus);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+
+  function noise(t, dur, peak, filterHz, q, bus, sweepTo) {
+    if (!ctx) return;
+    var s = ctx.createBufferSource(); s.buffer = noiseBuf;
+    var f = ctx.createBiquadFilter();
+    f.type = 'bandpass'; f.frequency.setValueAtTime(filterHz, t); f.Q.value = q || 1;
+    if (sweepTo) f.frequency.exponentialRampToValueAtTime(Math.max(40, sweepTo), t + dur);
+    var g = ctx.createGain();
+    env(g, t, 0.004, dur, peak);
+    s.connect(f); f.connect(g); g.connect(bus || sfxBus);
+    s.start(t); s.stop(t + dur + 0.05);
+  }
+
+  /* ---------- sfx ---------- */
+  var SFX = {
+    flip: function (dir) {
+      var t = now();
+      noise(t, 0.055, 0.30, dir > 0 ? 1500 : 2100, 2.2, sfxBus, dir > 0 ? 700 : 3000);
+      tone(dir > 0 ? 300 : 420, t, 0.09, 0.16, 'triangle', sfxBus, dir > 0 ? 170 : 250);
+    },
+    land: function () { var t = now(); noise(t, 0.05, 0.11, 320, 1.1); },
+    near: function () {
+      var t = now();
+      tone(1760, t, 0.09, 0.075, 'sine', sfxBus, 2400);
+      noise(t, 0.05, 0.05, 5200, 5);
+    },
+    perfect: function () {
+      var t = now();
+      [1318, 1975, 2637].forEach(function (f, i) { tone(f, t + i * 0.022, 0.2, 0.10, 'sine'); });
+    },
+    death: function () {
+      var t = now();
+      noise(t, 0.42, 0.55, 900, 0.6, sfxBus, 60);
+      tone(180, t, 0.5, 0.32, 'sawtooth', sfxBus, 32);
+      tone(90, t, 0.65, 0.22, 'sine', sfxBus, 26);
+    },
+    record: function () {
+      var t = now();
+      [523, 659, 784, 1046, 1318].forEach(function (f, i) {
+        tone(f, t + i * 0.07, 0.42, 0.15, 'triangle');
+      });
+    },
+    mutation: function () {
+      var t = now();
+      tone(70, t, 0.75, 0.28, 'sawtooth', sfxBus, 190);
+      noise(t, 0.6, 0.11, 400, 0.7, sfxBus, 2600);
+    },
+    world: function () {
+      var t = now();
+      [196, 294, 392].forEach(function (f, i) { tone(f, t + i * 0.09, 0.7, 0.11, 'sine'); });
+    },
+    ui: function () { var t = now(); tone(880, t, 0.035, 0.05, 'square'); },
+    level: function () {
+      var t = now();
+      [440, 554, 659, 880].forEach(function (f, i) { tone(f, t + i * 0.06, 0.35, 0.12, 'triangle'); });
+    }
+  };
+
+  /* ---------- adaptive music ----------
+     Layers arrive with survival time. `quiet` is the record-approach state: it
+     mutes everything except a heartbeat, which makes the last few seconds of a
+     personal best feel like the room went silent. */
+  function step(t) {
+    var i = seq.intensity, s = seq.step;
+    var root0 = 55;
+
+    if (seq.quiet) {
+      if (s % 8 === 0) tone(root0, t, 0.34, 0.5, 'sine', musicBus, root0 * 0.75);
+      if (s % 8 === 3) tone(root0 * 0.99, t, 0.22, 0.28, 'sine', musicBus);
+      return;
+    }
+    // drone
+    if (s % 16 === 0) tone(root0, t, 2.4, 0.30, 'sine', musicBus);
+    // kick
+    if (i > 0.12 && s % 4 === 0) {
+      tone(120, t, 0.19, 0.60, 'sine', musicBus, 42);
+      noise(t, 0.05, 0.13, 180, 0.8, musicBus);
+    }
+    // hat
+    if (i > 0.34 && s % 2 === 1) noise(t, 0.035, 0.05 + i * 0.05, 8200, 3, musicBus);
+    // bass figure
+    if (i > 0.5) {
+      var pat = [0, 0, 7, 0, 5, 0, 3, 0];
+      var n = pat[s % 8];
+      if (n || s % 8 === 0) tone(root0 * 2 * Math.pow(2, n / 12), t, 0.16, 0.22, 'square', musicBus);
+    }
+    // tension pad
+    if (i > 0.72 && s % 16 === 8) {
+      tone(root0 * 3, t, 1.9, 0.10, 'sawtooth', musicBus);
+      tone(root0 * 3 * 1.005, t, 1.9, 0.08, 'sawtooth', musicBus);
+    }
+    if (i > 0.9 && s % 8 === 6) noise(t, 0.3, 0.05, 300, 0.5, musicBus, 3000);
+  }
+
+  function pump() {
+    if (!ctx || !musicOn || muted) return;
+    var spb = 60 / (seq.bpm + seq.intensity * 26) / 2;   // eighth notes
+    var t = now();
+    while (seq.next < t + 0.12) {
+      if (seq.next < t) seq.next = t + 0.01;
+      step(seq.next);
+      seq.next += spb;
+      seq.step = (seq.step + 1) % 64;
+    }
+  }
+
+  OM.audio = {
+    unlock: function () {
+      if (!ensure()) return;
+      if (ctx.state === 'suspended') ctx.resume();
+      if (!started) { started = true; seq.next = now() + 0.05; }
+    },
+    setMuted: function (m) { muted = m; if (master) master.gain.value = m ? 0 : 0.9; },
+    setMusic: function (on) {
+      musicOn = on;
+      if (musicBus) musicBus.gain.value = on ? 0.34 : 0;
+    },
+    play: function (name, arg) {
+      if (muted || !ctx) return;
+      var f = SFX[name]; if (f) { try { f(arg); } catch (e) {} }
+    },
+    music: function (intensity, quiet) {
+      seq.intensity = intensity;
+      seq.quiet = !!quiet;
+      pump();
+    },
+    stopMusic: function () { seq.intensity = 0; seq.quiet = false; },
+    ready: function () { return !!ctx; }
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ==== src/50-nanogon.js ==== */
+/* ONE MORE — the Nanogon.
+   Drawn entirely from geometry: no sprites, no atlas, no resolution to be wrong
+   at. Nine sides, one bright core, and six evolutions that arrive with your
+   level. Everything is white on black; the only expressive channels are size,
+   brightness, break-up and motion, which is exactly the constraint that makes
+   it readable at thumbnail size. */
+(function (root) {
+  'use strict';
+  var OM = root.OM || (root.OM = {});
+  var SIDES = 9;
+
+  function poly(g, cx, cy, r, rot, jitter, rng) {
+    g.beginPath();
+    for (var i = 0; i <= SIDES; i++) {
+      var a = rot + (i / SIDES) * Math.PI * 2;
+      var rr = r + (jitter ? (Math.sin(i * 12.9898 + rng) * 43758.5453 % 1) * jitter : 0);
+      var x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr;
+      if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+    }
+    g.closePath();
+  }
+
+  /* Draws one arc-segment ring with gaps — the shared language of the later
+     evolutions, where the shell progressively stops being a solid object. */
+  function brokenRing(g, cx, cy, r, rot, segs, gapFrac) {
+    var span = (Math.PI * 2) / segs;
+    for (var i = 0; i < segs; i++) {
+      var a0 = rot + i * span, a1 = a0 + span * (1 - gapFrac);
+      g.beginPath();
+      g.arc(cx, cy, r, a0, a1);
+      g.stroke();
+    }
+  }
+
+  var N = OM.nanogon = {
+    /* st: {x,y,r,rot,grav,vy,speed,evo,mood,t,glow,corrupt,alpha,scale} */
+    draw: function (g, st) {
+      var r = st.r * (st.scale == null ? 1 : st.scale);
+      var evo = st.evo || 'core';
+      var mood = st.mood || 'neutral';
+      var t = st.t || 0;
+      var alpha = st.alpha == null ? 1 : st.alpha;
+      var corrupt = st.corrupt || 0;
+
+      // mood drives core brightness, size and how much the shell trembles
+      var coreScale = 0.30, glow = st.glow || 0, tremble = 0;
+      if (mood === 'focused') { coreScale = 0.25; }
+      else if (mood === 'alert') { coreScale = 0.30 + Math.sin(t * 22) * 0.03; tremble = 0.5; }
+      else if (mood === 'near') { coreScale = 0.40; glow = Math.max(glow, 0.9); tremble = 1.6; }
+      else if (mood === 'success') { coreScale = 0.42; glow = Math.max(glow, 1); }
+      else if (mood === 'hurt') { coreScale = 0.22; tremble = 3; }
+      var pulse = 1 + Math.sin(t * 3.4) * 0.035;
+
+      g.save();
+      g.globalAlpha = alpha;
+      g.translate(st.x + (tremble ? (Math.random() - 0.5) * tremble : 0),
+                  st.y + (tremble ? (Math.random() - 0.5) * tremble : 0));
+      g.rotate(st.rot || 0);
+
+      // outer glow — a couple of cheap wide strokes rather than a shadow blur,
+      // which is the single most expensive thing you can ask a 2D canvas for
+      if (glow > 0.01) {
+        g.strokeStyle = 'rgba(255,255,255,' + (0.10 * glow).toFixed(3) + ')';
+        g.lineWidth = 9 + glow * 8;
+        poly(g, 0, 0, r * 1.06 * pulse, 0);
+        g.stroke();
+      }
+
+      g.lineJoin = 'round';
+      g.strokeStyle = '#ffffff';
+      g.fillStyle = '#ffffff';
+
+      if (evo === 'core') {
+        g.lineWidth = 2.4;
+        poly(g, 0, 0, r * pulse, 0); g.stroke();
+
+      } else if (evo === 'pulse') {
+        g.lineWidth = 2.4;
+        poly(g, 0, 0, r * pulse, 0); g.stroke();
+        var pr = r * (1.25 + (Math.sin(t * 3.1) * 0.5 + 0.5) * 0.5);
+        g.globalAlpha = alpha * (0.5 - (pr / r - 1.25) * 0.7);
+        g.lineWidth = 1.4;
+        poly(g, 0, 0, pr, 0); g.stroke();
+        g.globalAlpha = alpha;
+
+      } else if (evo === 'phase') {
+        g.lineWidth = 2.4;
+        g.setLineDash([r * 0.5, r * 0.34]);
+        g.lineDashOffset = -t * 26;
+        poly(g, 0, 0, r * pulse, 0); g.stroke();
+        g.setLineDash([]);
+
+      } else if (evo === 'void') {
+        g.lineWidth = 2.6;
+        brokenRing(g, 0, 0, r * pulse, t * 0.5, 5, 0.42);
+        for (var i = 0; i < 5; i++) {                     // shed fragments in orbit
+          var a = t * 1.1 + i * 1.257, rr = r * (1.5 + Math.sin(t * 2 + i) * 0.16);
+          g.globalAlpha = alpha * 0.55;
+          g.fillRect(Math.cos(a) * rr - 1.5, Math.sin(a) * rr - 1.5, 3, 3);
+        }
+        g.globalAlpha = alpha;
+
+      } else if (evo === 'glitch') {
+        g.lineWidth = 2.2;
+        poly(g, 0, 0, r * pulse, 0, r * 0.16, t * 40); g.stroke();
+        for (var s = 0; s < 3; s++) {                     // torn horizontal slices
+          var off = (Math.random() - 0.5) * r * 0.9;
+          var yy = -r + Math.random() * r * 2;
+          g.globalAlpha = alpha * 0.5;
+          g.fillRect(off - r * 0.5, yy, r, 1.6);
+        }
+        g.globalAlpha = alpha;
+
+      } else if (evo === 'singularity') {
+        for (var k = 0; k < SIDES; k++) {                 // it stopped being a shape
+          var ang = t * 0.8 + (k / SIDES) * Math.PI * 2;
+          var len = r * (1.5 + Math.sin(t * 4 + k) * 0.35);
+          g.globalAlpha = alpha * 0.5;
+          g.lineWidth = 1.2;
+          g.beginPath();
+          g.moveTo(Math.cos(ang) * r * 0.85, Math.sin(ang) * r * 0.85);
+          g.lineTo(Math.cos(ang) * len, Math.sin(ang) * len);
+          g.stroke();
+        }
+        g.globalAlpha = alpha;
+        g.lineWidth = 2.6;
+        poly(g, 0, 0, r * 0.92 * pulse, 0); g.stroke();
+        coreScale = Math.max(coreScale, 0.55);
+      }
+
+      // corruption tears at the shell on very long runs
+      if (corrupt > 0.02 && Math.random() < corrupt * 0.5) {
+        g.globalAlpha = alpha * 0.8;
+        g.fillRect((Math.random() - 0.5) * r * 2, (Math.random() - 0.5) * r * 2,
+                   r * (0.3 + Math.random() * 0.5), 1.4);
+        g.globalAlpha = alpha;
+      }
+
+      // the core
+      g.beginPath();
+      g.arc(0, 0, r * coreScale * pulse, 0, Math.PI * 2);
+      g.fill();
+      if (glow > 0.2) {
+        g.globalAlpha = alpha * 0.25 * glow;
+        g.beginPath();
+        g.arc(0, 0, r * coreScale * 2.1, 0, Math.PI * 2);
+        g.fill();
+      }
+      g.restore();
+    },
+
+    /* Outline-only rendering for ghosts: same silhouette, no presence. */
+    drawGhost: function (g, x, y, r, rot, alpha) {
+      g.save();
+      g.globalAlpha = alpha;
+      g.translate(x, y); g.rotate(rot || 0);
+      g.strokeStyle = '#ffffff'; g.lineWidth = 1.3;
+      g.setLineDash([4, 5]);
+      poly(g, 0, 0, r, 0); g.stroke();
+      g.setLineDash([]);
+      g.beginPath(); g.arc(0, 0, r * 0.2, 0, Math.PI * 2); g.fill();
+      g.restore();
+    },
+
+    /* Mood from the current run state — used by the HUD-less feedback language.
+       The character IS the feedback: there is no health bar to look at. */
+    moodFor: function (run) {
+      if (run.dead) return 'hurt';
+      if (run.sinceNear < 0.35) return 'near';
+      if (run.sinceRecord < 1.2) return 'success';
+      if (run.threat > 0.6) return 'alert';
+      if (run.speedFrac > 0.5) return 'focused';
+      return 'neutral';
+    }
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ==== src/55-fx.js ==== */
+/* ONE MORE — trails, particles, death effects and screen response.
+   All of it is pooled and all of it is monochrome. The rule from the art
+   direction holds here: if removing 30% of an effect makes the frame read
+   better, it was decoration, not feedback. */
+(function (root) {
+  'use strict';
+  var OM = root.OM || (root.OM = {});
+  var clamp = OM.math.clamp;
+
+  /* ---------- particle pool ---------- */
+  function Pool(n) {
+    var P = new Array(n), i;
+    for (i = 0; i < n; i++) P[i] = { life: 0 };
+    var head = 0;
+    return {
+      all: P,
+      spawn: function (x, y, vx, vy, life, size, kind, spin) {
+        var p = P[head]; head = (head + 1) % n;
+        p.x = x; p.y = y; p.vx = vx; p.vy = vy;
+        p.life = life; p.max = life; p.size = size; p.kind = kind || 0;
+        p.rot = Math.random() * 6.28; p.spin = spin || 0;
+        return p;
+      },
+      update: function (dt, drift) {
+        for (var i = 0; i < n; i++) {
+          var p = P[i];
+          if (p.life <= 0) continue;
+          p.life -= dt;
+          p.x += (p.vx - (drift || 0)) * dt;
+          p.y += p.vy * dt;
+          p.vy += (p.kind === 2 ? 900 : 0) * dt;
+          p.vx *= 0.995; p.rot += p.spin * dt;
+        }
+      },
+      draw: function (g) {
+        g.save();
+        g.fillStyle = '#fff'; g.strokeStyle = '#fff';
+        for (var i = 0; i < n; i++) {
+          var p = P[i];
+          if (p.life <= 0) continue;
+          var a = clamp(p.life / p.max, 0, 1);
+          g.globalAlpha = a * a;
+          if (p.kind === 1) {                 // shard
+            g.save(); g.translate(p.x, p.y); g.rotate(p.rot);
+            g.fillRect(-p.size, -p.size * 0.34, p.size * 2, p.size * 0.68);
+            g.restore();
+          } else if (p.kind === 3) {          // ring
+            g.globalAlpha = a * 0.5; g.lineWidth = 1.4;
+            g.beginPath(); g.arc(p.x, p.y, p.size * (1 + (1 - a) * 6), 0, 6.2832); g.stroke();
+          } else {
+            g.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+          }
+        }
+        g.restore();
+      },
+      clear: function () { for (var i = 0; i < n; i++) P[i].life = 0; }
+    };
+  }
+
+  /* ---------- trails ----------
+     The trail is not decoration: its length reads speed and its break-up reads
+     danger, which is how the player senses the difficulty curve without a HUD. */
+  function Trail(style) {
+    var pts = [], MAXP = 46;
+    return {
+      style: style,
+      push: function (x, y, t) {
+        pts.push({ x: x, y: y, t: t });
+        if (pts.length > MAXP) pts.shift();
+      },
+      shift: function (dx) { for (var i = 0; i < pts.length; i++) pts[i].x -= dx; },
+      clear: function () { pts.length = 0; },
+      draw: function (g, style, intensity, corrupt) {
+        if (pts.length < 3) return;
+        var i, a, p;
+        g.save();
+        g.strokeStyle = '#fff'; g.fillStyle = '#fff'; g.lineCap = 'round';
+        if (style === 'particle') {
+          for (i = 0; i < pts.length; i += 2) {
+            a = i / pts.length; p = pts[i];
+            g.globalAlpha = a * a * 0.7;
+            var s = 1 + a * 2.4;
+            g.fillRect(p.x - s / 2, p.y - s / 2, s, s);
+          }
+        } else if (style === 'wave') {
+          g.lineWidth = 1.6;
+          for (var k = -1; k <= 1; k += 2) {
+            g.beginPath();
+            for (i = 0; i < pts.length; i++) {
+              p = pts[i]; a = i / pts.length;
+              var off = Math.sin(i * 0.55 + p.t * 7) * (1 - a) * 9 * k;
+              if (i === 0) g.moveTo(p.x, p.y + off); else g.lineTo(p.x, p.y + off);
+            }
+            g.globalAlpha = 0.42;
+            g.stroke();
+          }
+        } else if (style === 'shatter') {
+          for (i = 1; i < pts.length; i += 2) {
+            a = i / pts.length; p = pts[i];
+            g.globalAlpha = a * 0.55;
+            var w = (1 - a) * 12 + 3;
+            g.fillRect(p.x - w / 2, p.y - 1, w, 2);
+          }
+        } else if (style === 'void') {
+          g.lineWidth = 2.2;
+          g.beginPath();
+          for (i = 0; i < pts.length; i++) { p = pts[i]; if (i === 0) g.moveTo(p.x, p.y); else g.lineTo(p.x, p.y); }
+          g.globalAlpha = 0.22; g.stroke();
+          for (i = 0; i < pts.length; i += 3) {
+            a = i / pts.length; p = pts[i];
+            g.globalAlpha = a * 0.8;
+            g.beginPath(); g.arc(p.x, p.y, (1 - a) * 5 + 1, 0, 6.2832); g.stroke();
+          }
+        } else {                                     // line
+          g.lineWidth = 2.6;
+          g.beginPath();
+          for (i = 0; i < pts.length; i++) { p = pts[i]; if (i === 0) g.moveTo(p.x, p.y); else g.lineTo(p.x, p.y); }
+          var grad = 0.26 + intensity * 0.5;
+          g.globalAlpha = grad;
+          g.stroke();
+          g.lineWidth = 1.2; g.globalAlpha = grad * 1.6;
+          g.stroke();
+        }
+        if (corrupt > 0.3) {
+          for (i = 0; i < pts.length; i += 5) {
+            if (Math.random() > corrupt * 0.4) continue;
+            p = pts[i];
+            g.globalAlpha = 0.6;
+            g.fillRect(p.x + (Math.random() - 0.5) * 24, p.y, 6, 1.4);
+          }
+        }
+        g.restore();
+      }
+    };
+  }
+
+  /* ---------- death effects ---------- */
+  function death(pool, style, x, y, r) {
+    var i, a, sp;
+    if (style === 'explode') {
+      for (i = 0; i < 46; i++) {
+        a = Math.random() * 6.2832; sp = 130 + Math.random() * 560;
+        pool.spawn(x, y, Math.cos(a) * sp, Math.sin(a) * sp, 0.5 + Math.random() * 0.5,
+                   1.5 + Math.random() * 3, 0);
+      }
+      pool.spawn(x, y, 0, 0, 0.5, r, 3);
+    } else if (style === 'implode') {
+      for (i = 0; i < 40; i++) {
+        a = Math.random() * 6.2832; var d = 90 + Math.random() * 200;
+        var p = pool.spawn(x + Math.cos(a) * d, y + Math.sin(a) * d,
+                           -Math.cos(a) * d * 2.4, -Math.sin(a) * d * 2.4, 0.42, 2.4, 0);
+        p.vy += 0;
+      }
+    } else if (style === 'pixel') {
+      for (i = 0; i < 64; i++) {
+        pool.spawn(x + (Math.random() - 0.5) * r * 2.4, y + (Math.random() - 0.5) * r * 2.4,
+                   (Math.random() - 0.5) * 90, (Math.random() - 0.5) * 90,
+                   0.55 + Math.random() * 0.7, 2 + Math.random() * 2, 0);
+      }
+    } else if (style === 'collapse') {
+      for (i = 0; i < 54; i++) {
+        a = Math.random() * 6.2832; var dd = 30 + Math.random() * 220;
+        var q = pool.spawn(x + Math.cos(a) * dd, y + Math.sin(a) * dd, -Math.sin(a) * 340, Math.cos(a) * 340,
+                           0.8 + Math.random() * 0.5, 1.6, 0);
+        q.vx += -Math.cos(a) * 150; q.vy += -Math.sin(a) * 150;
+      }
+      pool.spawn(x, y, 0, 0, 0.9, r * 0.4, 3);
+    } else if (style === 'wipe') {
+      for (i = 0; i < 40; i++) {
+        pool.spawn(x, y + (Math.random() - 0.5) * r * 2, 260 + Math.random() * 900,
+                   (Math.random() - 0.5) * 60, 0.5 + Math.random() * 0.4, 2 + Math.random() * 4, 1, 0);
+      }
+    } else {                                    // glass shatter (default)
+      for (i = 0; i < 26; i++) {
+        a = Math.random() * 6.2832; sp = 110 + Math.random() * 380;
+        pool.spawn(x, y, Math.cos(a) * sp, Math.sin(a) * sp - 80, 0.75 + Math.random() * 0.6,
+                   3 + Math.random() * 5, 1, (Math.random() - 0.5) * 14);
+      }
+      pool.spawn(x, y, 0, 0, 0.45, r * 0.7, 3);
+    }
+  }
+
+  /* ---------- screen response ---------- */
+  function Screen() {
+    var s = { shake: 0, flash: 0, hitstop: 0, slow: 1, rot: 0 };
+    s.kick = function (mag) { if (mag > s.shake) s.shake = mag; };
+    s.update = function (dt, enabled) {
+      s.shake = Math.max(0, s.shake - dt * (s.shake * 6 + 1.5));
+      s.flash = Math.max(0, s.flash - dt * 4.5);
+      s.hitstop = Math.max(0, s.hitstop - dt);
+      s.slow = OM.math.approach(s.slow, 1, 3.5, dt);
+      if (!enabled) s.shake = 0;
+    };
+    s.apply = function (g) {
+      if (s.shake > 0.01) {
+        g.translate((Math.random() - 0.5) * s.shake, (Math.random() - 0.5) * s.shake);
+      }
+    };
+    return s;
+  }
+
+  OM.fx = { Pool: Pool, Trail: Trail, death: death, Screen: Screen };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ==== src/60-render.js ==== */
+/* ONE MORE — world rendering.
+   Black ground, white geometry, grey for anything that is not gameplay. The
+   backdrop changes with the world you have survived into; the obstacles never
+   change their visual language, because the moment a spike stops looking like a
+   spike the game has lied to you. */
+(function (root) {
+  'use strict';
+  var OM = root.OM || (root.OM = {});
+  var P = OM.phys, PAT = OM.patterns;
+  var CEIL = P.CEIL, FLOOR = P.FLOOR;
+
+  function surfaceSegments(holes, side, x0, x1) {
+    var segs = [], cur = x0;
+    for (var i = 0; i < holes.length; i++) {
+      var h = holes[i];
+      if (h.side !== side) continue;
+      if (h.x + h.w < x0 || h.x > x1) continue;
+      if (h.x > cur) segs.push([cur, Math.min(h.x, x1)]);
+      cur = Math.max(cur, h.x + h.w);
+    }
+    if (cur < x1) segs.push([cur, x1]);
+    return segs;
+  }
+
+  var R = OM.render = {
+    /* ---- backdrop ---- */
+    backdrop: function (g, W, H, world, t, corrupt, speedFrac) {
+      g.fillStyle = '#08090c';
+      g.fillRect(0, 0, W, H);
+
+      if (world === 'origin') {
+        g.strokeStyle = 'rgba(255,255,255,0.035)';
+        g.lineWidth = 1;
+        for (var i = 0; i < 5; i++) {
+          var y = CEIL + ((FLOOR - CEIL) / 4) * i;
+          g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke();
+        }
+      } else if (world === 'pulse') {
+        var sp = (t * 90) % 160;
+        g.fillStyle = 'rgba(255,255,255,0.028)';
+        for (var b = -160; b < W + 160; b += 160) g.fillRect(b - sp, CEIL, 54, FLOOR - CEIL);
+      } else if (world === 'void') {
+        g.fillStyle = 'rgba(255,255,255,0.02)';
+        for (var k = 0; k < 26; k++) {
+          var px = ((k * 977 + t * 30) % (W + 60)) - 30;
+          var py = CEIL + ((k * 613) % (FLOOR - CEIL));
+          g.fillRect(px, py, 2, 2);
+        }
+      } else if (world === 'collapse' || world === 'nightmare') {
+        g.fillStyle = 'rgba(255,255,255,0.03)';
+        for (var s = 0; s < 8; s++) {
+          var sy = ((s * 211 + t * 42) % (FLOOR - CEIL)) + CEIL;
+          var sw = 60 + ((s * 97) % 220);
+          g.fillRect(((s * 383 + t * 130) % (W + sw)) - sw, sy, sw, 1.5);
+        }
+        if (world === 'nightmare') {
+          g.fillStyle = 'rgba(255,255,255,' + (0.02 + Math.sin(t * 7) * 0.012).toFixed(3) + ')';
+          g.fillRect(0, CEIL, W, FLOOR - CEIL);
+        }
+      }
+
+      // corruption: torn bands across the whole frame on very long runs
+      if (corrupt > 0.02) {
+        for (var c = 0; c < 3; c++) {
+          if (Math.random() > corrupt * 0.55) continue;
+          var cy = CEIL + Math.random() * (FLOOR - CEIL);
+          g.fillStyle = 'rgba(255,255,255,' + (0.03 + Math.random() * 0.07).toFixed(3) + ')';
+          g.fillRect(0, cy, W, 1 + Math.random() * 3);
+        }
+      }
+    },
+
+    /* ---- floor and ceiling ---- */
+    surfaces: function (g, W, camX, holes, t, speedFrac) {
+      var x0 = camX - 40, x1 = camX + W + 40;
+      g.save();
+      g.lineCap = 'butt';
+
+      ['ceil', 'floor'].forEach(function (side) {
+        var y = side === 'floor' ? FLOOR : CEIL;
+        var segs = surfaceSegments(holes, side, x0, x1);
+        for (var i = 0; i < segs.length; i++) {
+          var a = segs[i][0] - camX, b = segs[i][1] - camX;
+          g.fillStyle = '#ffffff';
+          g.fillRect(a, side === 'floor' ? y : y - 3, b - a, 3);
+          // Solid mass behind the surface so a hole reads as an absence. It
+          // runs well past the tunnel because on a portrait screen the visible
+          // area extends far above and below it.
+          g.fillStyle = 'rgba(255,255,255,0.055)';
+          g.fillRect(a, side === 'floor' ? y + 3 : y - 3 - 1400, b - a, 1400);
+          // speed ticks
+          g.fillStyle = 'rgba(255,255,255,0.16)';
+          var step = 68;
+          var start = Math.ceil(segs[i][0] / step) * step;
+          for (var xx = start; xx < segs[i][1]; xx += step) {
+            g.fillRect(xx - camX, side === 'floor' ? y + 8 : y - 16, 2, 8);
+          }
+        }
+        // hole edges get a lip so the gap is legible at speed
+        for (var h = 0; h < holes.length; h++) {
+          var ho = holes[h];
+          if (ho.side !== side || ho.x + ho.w < x0 || ho.x > x1) continue;
+          g.fillStyle = '#ffffff';
+          var ey = side === 'floor' ? y : y - 14;
+          g.fillRect(ho.x - camX - 3, ey, 3, 14);
+          g.fillRect(ho.x + ho.w - camX, ey, 3, 14);
+        }
+      });
+      g.restore();
+    },
+
+    /* ---- obstacles ---- */
+    obstacles: function (g, W, camX, list, t, opts) {
+      opts = opts || {};
+      var fade = opts.fade, strobe = opts.strobe, px = opts.playerX, vision = opts.vision;
+      g.save();
+      for (var i = 0; i < list.length; i++) {
+        var o = list[i];
+        var sx = o.x - camX;
+        if (sx > W + 80 || sx + (o.w || 0) < -80) continue;
+
+        var alpha = 1;
+        if (fade) {                       // PHASE: it arrives late
+          alpha = OM.math.clamp(1.25 - (sx - px) / (W * 0.5), 0.06, 1);
+        }
+        if (vision) {                     // DARK: only what is close
+          var d = Math.abs(sx + (o.w || 0) / 2 - px);
+          alpha *= OM.math.clamp(1.35 - d / vision, 0.03, 1);
+        }
+        if (strobe) alpha *= (Math.sin(t * 19 + i) > -0.35 ? 1 : 0.12);
+        if (alpha < 0.03) continue;
+        g.globalAlpha = alpha;
+        drawObstacle(g, o, sx, t);
+      }
+      g.restore();
+    },
+
+    /* Danger telegraph: the nearest thing in front of you, as a thin marker on
+       the edge of the screen. Reads as pressure, costs almost no pixels. */
+    threatOf: function (list, camX, playerX, W) {
+      var best = 0;
+      for (var i = 0; i < list.length; i++) {
+        var sx = list[i].x - camX;
+        if (sx < playerX - 10 || sx > playerX + W * 0.55) continue;
+        var f = 1 - (sx - playerX) / (W * 0.55);
+        if (f > best) best = f;
+      }
+      return best;
+    }
+  };
+
+  /* A solid mass: white frame, dimmed interior, sparse diagonal hatch. Filling
+     these solid white makes them shout louder than the player; slicing them into
+     stripes made them read as ladders you could climb. A frame reads as "solid,
+     do not touch" at a glance and stays quiet in the frame. */
+  function mass(g, x, y, w, h) {
+    g.fillStyle = 'rgba(255,255,255,0.13)';
+    g.fillRect(x, y, w, h);
+    g.save();
+    g.beginPath(); g.rect(x, y, w, h); g.clip();
+    g.strokeStyle = 'rgba(255,255,255,0.22)';
+    g.lineWidth = 1.5;
+    for (var d = -h; d < w; d += 15) {
+      g.beginPath(); g.moveTo(x + d, y + h); g.lineTo(x + d + h, y); g.stroke();
+    }
+    g.restore();
+    g.strokeStyle = '#fff';
+    g.lineWidth = 3;
+    g.strokeRect(x + 1.5, y + 1.5, w - 3, h - 3);
+  }
+
+  function drawObstacle(g, o, sx, t) {
+    g.fillStyle = '#ffffff';
+    g.strokeStyle = '#ffffff';
+    switch (o.t) {
+      case 'spike': {
+        var teeth = Math.max(2, Math.round(o.w / 34));
+        var tw = o.w / teeth;
+        g.beginPath();
+        for (var i = 0; i < teeth; i++) {
+          var x0 = sx + i * tw;
+          if (o.side === 'floor') {
+            g.moveTo(x0, FLOOR); g.lineTo(x0 + tw / 2, FLOOR - o.h); g.lineTo(x0 + tw, FLOOR);
+          } else {
+            g.moveTo(x0, CEIL); g.lineTo(x0 + tw / 2, CEIL + o.h); g.lineTo(x0 + tw, CEIL);
+          }
+        }
+        g.closePath(); g.fill();
+        break;
+      }
+      case 'block': {
+        var by = o.side === 'floor' ? FLOOR - o.h : CEIL;
+        mass(g, sx, by, o.w, o.h);
+        // the killing edge, emphasised: the face you actually have to clear
+        g.fillStyle = '#fff';
+        g.fillRect(sx, o.side === 'floor' ? by : CEIL + o.h - 4, o.w, 4);
+        break;
+      }
+      case 'bar': {
+        mass(g, sx, o.y0, o.w, o.y1 - o.y0);
+        g.fillStyle = '#fff';
+        g.fillRect(sx, o.y0, o.w, 4);
+        g.fillRect(sx, o.y1 - 4, o.w, 4);
+        break;
+      }
+      case 'mover': {
+        var my = PAT.moverY(o, t) - o.h / 2;
+        mass(g, sx, my, o.w, o.h);
+        g.fillStyle = '#fff';
+        g.fillRect(sx + o.w / 2 - 1, my + 8, 2, o.h - 16);
+        // travel guides, so the motion is predictable rather than surprising
+        g.globalAlpha *= 0.25;
+        g.fillRect(sx + o.w / 2 - 1, o.cy - o.amp - o.h / 2, 2, o.amp * 2 + o.h);
+        g.globalAlpha /= 0.25;
+        break;
+      }
+      case 'laser': {
+        var ly = o.side === 'ceil' ? CEIL : FLOOR - o.h;
+        var ph = PAT.laserPhase(o, t), on = ph < o.duty;
+        // emitter
+        g.fillRect(sx, o.side === 'ceil' ? CEIL : FLOOR - 8, o.w, 8);
+        if (on) {
+          g.fillRect(sx + 4, ly, o.w - 8, o.h);
+          g.globalAlpha *= 0.35;
+          g.fillRect(sx, ly, o.w, o.h);
+          g.globalAlpha /= 0.35;
+        } else {
+          // charge tell: a thin line that thickens as it is about to fire
+          var toOn = (1 - ph) / (1 - o.duty);
+          g.globalAlpha *= 0.18 + (1 - toOn) * 0.5;
+          g.fillRect(sx + o.w / 2 - 1, ly, 2, o.h);
+          g.globalAlpha /= (0.18 + (1 - toOn) * 0.5);
+        }
+        break;
+      }
+    }
+  }
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ==== src/70-game.js ==== */
+/* ONE MORE — the game.
+   One input. Tap flips gravity. Everything else is consequence. */
+(function (root) {
+  'use strict';
+  var OM = root.OM || (root.OM = {});
+  var P = OM.phys, PAT = OM.patterns, MUT = OM.mutations, prog = OM.progress;
+  var clamp = OM.math.clamp;
+
+  var STEP = 1 / 240;            // fixed physics step: the arc must not depend on frame rate
+  var DEAD_LOCKOUT = 0.22;       // s before a tap can restart, so a death tap is not a restart
+
+  var G = OM.game = {
+    canvas: null, ctx: null,
+    W: 1280, H: P.H, dpr: 1,
+    run: null, state: 'idle',    // idle | playing | dead
+    pool: null, trail: null, screen: null,
+    hint: 0
+  };
+
+  /* ---------- setup ---------- */
+  G.attach = function (canvas) {
+    G.canvas = canvas;
+    G.ctx = canvas.getContext('2d', { alpha: false });
+    G.pool = OM.fx.Pool(340);
+    G.trail = OM.fx.Trail('line');
+    G.screen = OM.fx.Screen();
+    G.resize();
+    root.addEventListener('resize', G.resize);
+    if (root.visualViewport) root.visualViewport.addEventListener('resize', G.resize);
+  };
+
+  G.resize = function () {
+    var c = G.canvas; if (!c) return;
+    var rect = c.getBoundingClientRect();
+    var cw = Math.max(1, rect.width), ch = Math.max(1, rect.height);
+    G.dpr = Math.min(root.devicePixelRatio || 1, 2.5);
+    c.width = Math.round(cw * G.dpr);
+    c.height = Math.round(ch * G.dpr);
+    var pxW = c.width, pxH = c.height;
+
+    /* The tunnel is a fixed 720 logical units tall on every device, so the
+       vertical challenge is identical everywhere. Only the horizontal view
+       varies — how far ahead you can read — and it is clamped at both ends so a
+       phone is playable and an ultrawide monitor is not an advantage.
+       Fit by width, then never let the tunnel crop vertically. On a portrait
+       phone that leaves the tunnel as a band in the middle of the screen, which
+       is the correct answer: cropping it would put the player off-screen. */
+    G.W = clamp(Math.round(P.H * (cw / ch)), 640, 1500);
+    G.scale = pxW / G.W;
+    if (G.scale * P.H > pxH) G.scale = pxH / P.H;
+    G.offX = (pxW - G.W * G.scale) / 2;
+    G.offY = (pxH - P.H * G.scale) / 2;
+    G.viewTop = -G.offY / G.scale;
+    G.viewBottom = (pxH - G.offY) / G.scale;
+
+    /* Lookahead fairness. The player reads the world in the space in front of
+       them, which is (1 - x) * W. On a wide screen 0.27 leaves a full second of
+       warning at top speed; on a narrow one that same fraction would leave under
+       half a second, so the character shifts left to buy the distance back.
+       Nobody should be worse at this game for holding their phone upright. */
+    G.playerXFrac = G.W < 900 ? 0.18 : P.PLAYER_X_FRAC;
+    G.portrait = cw < ch;
+  };
+
+  /* ---------- run lifecycle ---------- */
+  G.start = function (mode, opts) {
+    opts = opts || {};
+    var day = mode === 'daily' ? (opts.day == null ? OM.dayIndex() : opts.day) : 0;
+    var seed = mode === 'daily' ? OM.hashSeed('onemore-' + OM.dayKey(day))
+                                : (Math.random() * 0xffffffff) >>> 0;
+    var rng = OM.rng(seed);
+
+    var ghostData = null;
+    if (mode === 'endless') ghostData = prog.data.ghost;
+    else if (prog.data.dailyGhost && prog.data.dailyGhost.key === OM.dayKey(day)) {
+      ghostData = prog.data.dailyGhost.data;
+    }
+
+    var target = mode === 'endless' ? prog.data.best : (prog.data.daily[OM.dayKey(day)] || 0);
+
+    G.run = {
+      mode: mode, day: day, seed: seed, rng: rng,
+      gen: OM.Generator(OM.rng(seed ^ 0x9e3779b9)),
+      sched: MUT.schedule(OM.rng(seed ^ 0x85ebca6b)),
+      t: 0, px: 0, speed: P.speedAt(0),
+      y: P.FLOOR - P.R, vy: 0, grav: 1, grounded: true,
+      rot: 0, rotTarget: 0,
+      flips: 0, nearMiss: 0, perfect: 0,
+      sinceFlip: 99, sinceNear: 99, sinceRecord: 99, deadFor: 0,
+      dead: false, cause: null, threat: 0,
+      world: P.WORLDS[0], worldFlash: 0, mutFlash: 0, mutLabel: null,
+      target: target, beat: false,
+      rec: OM.GhostRecorder(),
+      ghost: OM.GhostPlayer(ghostData),
+      mods: MUT.activeAt([], 0)
+    };
+    G.trail.clear();
+    G.pool.clear();
+    G.screen.shake = 0; G.screen.flash = 0; G.screen.slow = 1;
+    G.trail.style = prog.data.cosmetics.trail;
+    G.state = 'playing';
+    G.hint = prog.data.seen.tutorial ? 0 : 3.2;
+    OM.audio.unlock();
+    OM.bus.emit('run:start', G.run);
+  };
+
+  G.flip = function () {
+    if (G.state === 'playing') {
+      var r = G.run;
+      if (r.dead) return;
+      r.grav = -r.grav;
+      r.grounded = false;
+      r.flips++;
+      r.sinceFlip = 0;
+      r.rotTarget += Math.PI;
+      G.screen.kick(3);
+      OM.audio.play('flip', r.grav);
+      if (prog.data.settings.haptics && root.navigator && root.navigator.vibrate) {
+        try { root.navigator.vibrate(8); } catch (e) {}
+      }
+      if (!prog.data.seen.tutorial) { prog.data.seen.tutorial = true; prog.touch(); G.hint = 0; }
+      return true;
+    }
+    if (G.state === 'dead' && G.run.deadFor > DEAD_LOCKOUT) {
+      OM.bus.emit('run:again', G.run.mode);
+      return true;
+    }
+    return false;
+  };
+
+  function die(cause) {
+    var r = G.run;
+    if (r.dead) return;
+    r.dead = true; r.cause = cause; r.deadFor = 0;
+    G.state = 'dead';
+    G.screen.kick(24);
+    G.screen.flash = 1;
+    G.screen.hitstop = 0.11;
+    OM.audio.play('death');
+    OM.audio.stopMusic();
+    if (prog.data.settings.haptics && root.navigator && root.navigator.vibrate) {
+      try { root.navigator.vibrate([12, 40, 26]); } catch (e) {}
+    }
+    OM.fx.death(G.pool, prog.data.cosmetics.death, G.playerScreenX(), r.y, P.R_VIS);
+
+    var summary = {
+      mode: r.mode, day: r.day, time: r.t, cause: cause,
+      nearMiss: r.nearMiss, perfect: r.perfect, flips: r.flips,
+      world: r.world, ghost: r.rec.finish(), seed: r.seed
+    };
+    summary.result = prog.commitRun(summary);
+    r.summary = summary;
+    if (summary.result.record) OM.audio.play('record');
+    OM.bus.emit('run:end', summary);
+  }
+
+  G.playerScreenX = function () { return G.W * (G.playerXFrac || P.PLAYER_X_FRAC); };
+
+  /* Advances the simulation with no rendering. tools/playtest.js drives an
+     automated player through this, so hours of game can be measured in seconds
+     and the difficulty curve is a number rather than an opinion. */
+  G.stepHeadless = function (dt) { if (G.state === 'playing') simulate(dt); };
+
+  /* ---------- simulation ---------- */
+  function simulate(dt) {
+    var r = G.run;
+
+    // mutations first: they set speed and density for this instant
+    var mods = MUT.activeAt(r.sched, r.t);
+    if (mods.list.length !== r.mods.list.length) {
+      if (mods.list.length > r.mods.list.length) {
+        var fresh = mods.list[mods.list.length - 1];
+        r.mutFlash = 1.6; r.mutLabel = fresh.m;
+        OM.audio.play('mutation');
+        G.screen.kick(9);
+      }
+    }
+    r.mods = mods;
+
+    r.t += dt;
+    r.speed = P.speedAt(r.t) * mods.speed;
+    var g = P.gravityFor(r.speed, 1);
+
+    var world = P.worldAt(r.t);
+    if (world.id !== r.world.id) {
+      r.world = world; r.worldFlash = 2.4;
+      OM.audio.play('world');
+      G.screen.kick(12);
+    }
+
+    r.sinceFlip += dt; r.sinceNear += dt; r.sinceRecord += dt;
+
+    // the record-approach moment: strip the music, tell the player nothing but
+    // the gap. This is the whole "five seconds. I can beat that." loop.
+    if (!r.beat && r.target > 8 && r.t > r.target) {
+      r.beat = true; r.sinceRecord = 0;
+      OM.audio.play('record');
+      G.screen.flash = 0.55;
+      OM.bus.emit('run:passed-best', r);
+    }
+
+    // integrate in fixed sub-steps
+    var remaining = dt;
+    while (remaining > 0) {
+      var h = Math.min(STEP, remaining);
+      remaining -= h;
+      r.px += r.speed * h;
+      var out = P.stepPlayer(r, h, g, r.px, r.gen.holes);
+      if (out === 'void') { die('void'); return; }
+      if (r.grounded && r.vy === 0 && r.sinceFlip < 0.05) OM.audio.play('land');
+    }
+
+    r.gen.ensure(r.px + G.W + 700, r.t, mods.spacing);
+    r.gen.prune(r.px - G.W * 0.6);
+
+    // collision + near miss
+    var px = r.px, py = r.y, R = P.R, R2 = R * R;
+    var nearD = P.NEAR_MISS_DIST, nearD2 = (R + nearD) * (R + nearD);
+    var list = r.gen.obstacles, scratch = [];
+    for (var i = 0; i < list.length; i++) {
+      var o = list[i];
+      if (o.x > px + 90 || o.x + (o.w || 0) < px - 90) continue;
+      scratch.length = 0;
+      var rects = PAT.rectsOf(o, r.t, scratch);
+      for (var j = 0; j < rects.length; j++) {
+        var q = rects[j];
+        var d2 = P.circleRectDist2(px, py, R, q.x, q.y, q.w, q.h);
+        if (d2 <= R2) { die(o.t); return; }
+        if (d2 < nearD2 && !o._nm) {
+          o._nm = true;
+          r.nearMiss++;
+          r.sinceNear = 0;
+          var perfect = r.sinceFlip < P.PERFECT_WINDOW;
+          if (perfect) { r.perfect++; OM.audio.play('perfect'); G.screen.slow = 0.55; }
+          else OM.audio.play('near');
+          G.screen.kick(perfect ? 7 : 3);
+          OM.bus.emit('run:near', { perfect: perfect, clear: Math.sqrt(d2) - R });
+        }
+      }
+    }
+
+    r.threat = OM.render.threatOf(list, r.px - G.playerScreenX(), G.playerScreenX(), G.W);
+    r.rec.sample(dt, r.px, r.y, r.grav);
+
+    // rotation eases toward the flip target — instant response, visible follow-through
+    r.rot = OM.math.approach(r.rot, r.rotTarget, 17, dt);
+
+    // adaptive music: intensity from survival, silence when a record is in reach
+    var closeToBest = r.target > 12 && !r.beat && (r.target - r.t) < 6 && (r.target - r.t) > 0;
+    OM.audio.music(clamp(r.t / 170, 0, 1), closeToBest);
+  }
+
+  /* ---------- frame ---------- */
+  G.tick = function (dt) {
+    var r = G.run;
+    G.screen.update(dt, prog.data.settings.shake && !prog.data.settings.reduced);
+    if (!r) return;
+
+    if (G.state === 'playing') {
+      var sdt = dt * G.screen.slow;
+      if (G.screen.hitstop > 0) sdt = 0;
+      if (sdt > 0) simulate(Math.min(sdt, 0.05));
+      // The trail lives in screen space but the world scrolls under it, so old
+      // points have to drift left at world speed. Without this the trail is a
+      // vertical wire hanging off the character instead of a path behind it.
+      G.trail.shift(r.speed * sdt);
+      G.trail.push(G.playerScreenX(), r.y, r.t);
+    } else if (G.state === 'dead') {
+      r.deadFor += dt;
+    }
+    G.pool.update(dt, G.state === 'dead' ? 0 : r.speed * 0.35);
+    if (r.worldFlash > 0) r.worldFlash -= dt;
+    if (r.mutFlash > 0) r.mutFlash -= dt;
+    if (G.hint > 0) G.hint -= dt;
+    G.draw();
+  };
+
+  G.draw = function () {
+    var g = G.ctx, r = G.run;
+    if (!g) return;
+    var corrupt = r ? P.corruptionAt(r.t) : 0;
+    var mods = r ? r.mods : { mirror: false, drift: 0, vision: 0, fade: false, strobe: false, silence: false };
+
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.fillStyle = '#08090c';
+    g.fillRect(0, 0, G.canvas.width, G.canvas.height);
+    g.setTransform(G.scale, 0, 0, G.scale, G.offX, G.offY);
+
+    if (!r) { drawIdle(g); return; }
+
+    var camX = r.px - G.playerScreenX();
+
+    g.save();
+    G.screen.apply(g);
+    if (mods.drift) {                          // DRIFT: the frame comes loose
+      g.translate(G.W / 2, P.H / 2);
+      g.rotate(Math.sin(r.t * 1.1) * mods.drift);
+      g.translate(-G.W / 2, -P.H / 2);
+    }
+    if (mods.mirror) {                         // MIRROR: up is down
+      g.translate(0, P.CEIL + P.FLOOR);
+      g.scale(1, -1);
+    }
+
+    OM.render.backdrop(g, G.W, P.H, r.world.id, r.t, corrupt, clamp(r.t / 200, 0, 1));
+    OM.render.surfaces(g, G.W, camX, r.gen.holes, r.t, clamp(r.t / 200, 0, 1));
+    OM.render.obstacles(g, G.W, camX, r.gen.obstacles, r.t, {
+      fade: mods.fade, strobe: mods.strobe, vision: mods.vision, playerX: G.playerScreenX()
+    });
+
+    drawGhost(g, r, camX);
+
+    G.trail.draw(g, prog.data.cosmetics.trail, clamp(r.t / 150, 0, 1), corrupt);
+    G.pool.draw(g);
+
+    if (!r.dead) {
+      OM.nanogon.draw(g, {
+        x: G.playerScreenX(), y: r.y, r: P.R_VIS, rot: r.rot,
+        evo: prog.activeCore(),
+        mood: OM.nanogon.moodFor({
+          dead: false, sinceNear: r.sinceNear, sinceRecord: r.sinceRecord,
+          threat: r.threat, speedFrac: clamp((r.speed - P.BASE_SPEED) / 500, 0, 1)
+        }),
+        t: r.t, glow: clamp(0.2 + r.threat * 0.5 + (r.sinceNear < 0.3 ? 0.8 : 0), 0, 1.4),
+        corrupt: corrupt
+      });
+    }
+    g.restore();
+
+    // vignette for DARK, and the corruption bloom
+    if (mods.vision) {
+      var grd = g.createRadialGradient(G.playerScreenX(), r.y, mods.vision * 0.35,
+                                       G.playerScreenX(), r.y, mods.vision * 1.5);
+      grd.addColorStop(0, 'rgba(8,9,12,0)');
+      grd.addColorStop(1, 'rgba(8,9,12,0.97)');
+      g.fillStyle = grd;
+      g.fillRect(0, G.viewTop, G.W, G.viewBottom - G.viewTop);
+    }
+    if (G.screen.flash > 0.01) {
+      g.fillStyle = 'rgba(255,255,255,' + (G.screen.flash * 0.5).toFixed(3) + ')';
+      g.fillRect(0, G.viewTop, G.W, G.viewBottom - G.viewTop);
+    }
+
+    drawHud(g, r, corrupt, mods);
+  };
+
+  function drawGhost(g, r, camX) {
+    if (!r.ghost) return;
+    var s = r.ghost.at(r.t);
+    if (s.done) return;
+    var gx = s.x - camX;
+    if (gx > -60 && gx < G.W + 60) {
+      OM.nanogon.drawGhost(g, gx, s.y, P.R_VIS, 0, 0.30);
+    } else {
+      // off-screen: show the gap as an edge marker, because "0.8s behind" is
+      // the entire point of racing yourself
+      var right = gx > 0;
+      var x = right ? G.W - 16 : 16;
+      g.save();
+      g.globalAlpha = 0.34;
+      g.fillStyle = '#fff';
+      g.beginPath();
+      g.moveTo(x + (right ? 10 : -10), s.y);
+      g.lineTo(x, s.y - 9); g.lineTo(x, s.y + 9);
+      g.closePath(); g.fill();
+      g.restore();
+    }
+  }
+
+  function jitterText(str, corrupt) {
+    if (corrupt < 0.25 || Math.random() > corrupt * 0.09) return str;
+    var i = Math.floor(Math.random() * str.length);
+    var glyphs = '0123456789:.#/\\';
+    return str.slice(0, i) + glyphs[Math.floor(Math.random() * glyphs.length)] + str.slice(i + 1);
+  }
+
+  function drawHud(g, r, corrupt, mods) {
+    g.save();
+    g.textAlign = 'center';
+    g.fillStyle = '#fff';
+
+    if (!mods.silence) {
+      var label = jitterText(OM.fmtTime(r.t, 2), corrupt);
+      var jy = corrupt > 0.4 && Math.random() < corrupt * 0.1 ? (Math.random() - 0.5) * 6 : 0;
+      g.globalAlpha = r.dead ? 0.35 : 0.95;
+      g.font = '600 42px ui-monospace, SFMono-Regular, Menlo, monospace';
+      g.fillText(label, G.W / 2, 58 + jy);
+
+      // the gap to your record — the number that produces "one more"
+      if (r.target > 8 && !r.dead) {
+        g.font = '500 15px ui-monospace, Menlo, monospace';
+        g.globalAlpha = 0.55;
+        if (r.beat) g.fillText('BEST BEATEN  +' + OM.fmtDelta(r.t - r.target), G.W / 2, 80);
+        else g.fillText(OM.fmtDelta(r.target - r.t) + ' TO BEAT', G.W / 2, 80);
+      }
+    }
+
+    if (r.worldFlash > 0) {
+      g.globalAlpha = clamp(r.worldFlash, 0, 1) * 0.9;
+      g.font = '600 22px ui-sans-serif, system-ui, sans-serif';
+      g.fillText(r.world.name, G.W / 2, P.H / 2 - 26);
+      g.font = '400 13px ui-sans-serif, system-ui, sans-serif';
+      g.globalAlpha *= 0.6;
+      g.fillText(r.world.line, G.W / 2, P.H / 2 - 4);
+    }
+
+    // Announcements sit below the world flash and never at the height the
+    // player actually travels at; the persistent label lives under the floor
+    // line, outside the tunnel entirely.
+    if (r.mutFlash > 0 && r.mutLabel) {
+      g.globalAlpha = clamp(r.mutFlash, 0, 1) * 0.95;
+      g.font = '600 26px ui-sans-serif, system-ui, sans-serif';
+      g.fillText(r.mutLabel.name, G.W / 2, P.H / 2 + 74);
+      g.font = '400 13px ui-sans-serif, system-ui, sans-serif';
+      g.globalAlpha *= 0.6;
+      g.fillText(r.mutLabel.line, G.W / 2, P.H / 2 + 96);
+    }
+    if (mods.list.length && !mods.silence) {
+      g.globalAlpha = 0.45;
+      g.font = '500 12px ui-monospace, Menlo, monospace';
+      var names = mods.list.map(function (s) { return s.m.name; }).join('   ');
+      g.fillText(names, G.W / 2, P.H - 10);
+    }
+
+    if (G.hint > 0 && !r.dead) {
+      g.globalAlpha = clamp(G.hint / 3.2, 0, 1) * (0.55 + Math.sin(r.t * 5) * 0.25);
+      g.font = '600 20px ui-sans-serif, system-ui, sans-serif';
+      g.fillText('TAP TO FLIP GRAVITY', G.W / 2, r.y + (r.grav > 0 ? -60 : 66));
+    }
+    g.restore();
+  }
+
+  function drawIdle(g) {
+    OM.render.backdrop(g, G.W, P.H, 'origin', performance.now() / 1000, 0, 0);
+  }
+
+  /* Attract mode. Rather than pose the character next to a logo, the menu
+     quietly plays the game: an empty tunnel, and a Nanogon flipping between the
+     surfaces on a slow rhythm. Anyone watching for two seconds has already been
+     taught the entire control scheme. */
+  var attract = null;
+  G.drawMenuNanogon = function (t) {
+    var g = G.ctx;
+    if (!g) return;
+    if (!attract) {
+      attract = { y: P.FLOOR - P.R, vy: 0, grav: 1, grounded: true, rot: 0, rotT: 0,
+                  next: 1.2, last: t, x: 0, trail: OM.fx.Trail('line') };
+    }
+    var dt = Math.min(0.05, Math.max(0, t - attract.last));
+    attract.last = t;
+    var speed = P.BASE_SPEED * 0.8, gg = P.gravityFor(speed, 1);
+    attract.x += speed * dt;
+    attract.next -= dt;
+    if (attract.next <= 0) {
+      attract.grav = -attract.grav;
+      attract.grounded = false;
+      attract.rotT += Math.PI;
+      attract.next = 1.15 + Math.random() * 0.7;
+    }
+    var left = dt;
+    while (left > 0) { var h = Math.min(1 / 240, left); left -= h; P.stepPlayer(attract, h, gg, 0, []); }
+    attract.rot = OM.math.approach(attract.rot, attract.rotT, 15, dt);
+
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.fillStyle = '#08090c';
+    g.fillRect(0, 0, G.canvas.width, G.canvas.height);
+    g.setTransform(G.scale, 0, 0, G.scale, G.offX, G.offY);
+    OM.render.backdrop(g, G.W, P.H, 'origin', t, 0, 0);
+    OM.render.surfaces(g, G.W, attract.x, [], t, 0.2);
+    var px = G.W * 0.72;                 // clear of the title
+    attract.trail.shift(speed * dt);
+    attract.trail.push(px, attract.y, t);
+    attract.trail.draw(g, prog.data.cosmetics.trail, 0.25, 0);
+    OM.nanogon.draw(g, {
+      x: px, y: attract.y, r: P.R_VIS * 1.5, rot: attract.rot,
+      evo: prog.activeCore(), mood: 'neutral', t: t, glow: 0.45, corrupt: 0
+    });
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ==== src/80-ui.js ==== */
+/* ONE MORE — screens.
+   The only rule that matters here: from death to playing again must be one tap
+   and no waiting. Everything else is arranged around not getting in the way of
+   that. */
+(function (root) {
+  'use strict';
+  var OM = root.OM || (root.OM = {});
+  var prog = OM.progress, P = OM.phys;
+  var doc = root.document;
+
+  var UI = OM.ui = { screen: null, lastMode: 'endless' };
+  var $ = function (id) { return doc.getElementById(id); };
+  var screens = {};
+
+  UI.init = function () {
+    var nodes = doc.querySelectorAll('[data-screen]');
+    for (var i = 0; i < nodes.length; i++) screens[nodes[i].getAttribute('data-screen')] = nodes[i];
+
+    doc.addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('[data-act]') : null;
+      if (!b) return;
+      e.stopPropagation();
+      OM.audio.unlock();
+      OM.audio.play('ui');
+      act(b.getAttribute('data-act'));
+    });
+
+    $('pause-btn').addEventListener('click', function (e) { e.stopPropagation(); UI.pause(); });
+
+    OM.bus.on('run:end', function (s) { setTimeout(function () { UI.showResult(s); }, 620); });
+    OM.bus.on('run:again', function (mode) { UI.startRun(mode); });
+    OM.bus.on('run:passed-best', function () { UI.toast('BEST BEATEN'); });
+
+    UI.show('menu');
+  };
+
+  function act(a) {
+    switch (a) {
+      case 'play': UI.startRun('endless'); break;
+      case 'daily': UI.showDaily(); break;
+      case 'play-daily': UI.startRun('daily'); break;
+      case 'again': UI.startRun(UI.lastMode); break;
+      case 'menu': UI.show('menu'); OM.game.state = 'idle'; OM.game.run = null; OM.audio.stopMusic(); break;
+      case 'records': UI.showRecords(); break;
+      case 'garage': UI.showGarage(); break;
+      case 'settings': UI.showSettings(); break;
+      case 'resume': UI.resume(); break;
+      case 'quit': UI.show('menu'); OM.game.state = 'idle'; OM.game.run = null; OM.audio.stopMusic(); break;
+      case 'share': UI.share(); break;
+    }
+  }
+
+  UI.show = function (name) {
+    for (var k in screens) screens[k].classList.toggle('on', k === name);
+    UI.screen = name;
+    $('pause-btn').classList.toggle('on', name === null);
+    if (name === 'menu') refreshMenu();
+  };
+
+  UI.hideAll = function () {
+    for (var k in screens) screens[k].classList.remove('on');
+    UI.screen = null;
+    $('pause-btn').classList.add('on');
+  };
+
+  UI.startRun = function (mode) {
+    UI.lastMode = mode;
+    UI.hideAll();
+    OM.game.start(mode, {});
+  };
+
+  UI.pause = function () {
+    if (OM.game.state !== 'playing') return;
+    OM.game.state = 'paused';
+    OM.audio.stopMusic();
+    UI.show('pause');
+    $('pause-btn').classList.remove('on');
+  };
+  UI.resume = function () {
+    if (OM.game.state !== 'paused') return;
+    OM.game.state = 'playing';
+    UI.hideAll();
+  };
+
+  /* ---------- menu ---------- */
+  function refreshMenu() {
+    var d = prog.data, li = prog.levelInfo();
+    $('menu-best').textContent = d.best > 0 ? 'BEST ' + OM.fmtTime(d.best, 2) : 'NO RUNS YET';
+    $('menu-level').textContent = 'LEVEL ' + li.level;
+    var tagEl = doc.querySelector('#s-menu .tag');
+    if (tagEl) {
+      tagEl.textContent = OM.game.portrait
+        ? 'Tap to flip gravity. Turn your phone sideways for a wider view.'
+        : 'Tap to flip gravity. Survive one more time.';
+    }
+    var key = OM.dayKey(OM.dayIndex());
+    var done = d.daily[key];
+    $('daily-badge').textContent = done ? 'today: ' + OM.fmtTime(done, 2) : 'not played today';
+  }
+
+  /* ---------- daily ---------- */
+  UI.showDaily = function () {
+    var idx = OM.dayIndex(), key = OM.dayKey(idx);
+    $('d-day').textContent = 'DAY ' + (idx - 20000);
+    $('d-date').textContent = key + ' · UTC';
+    $('d-best').textContent = prog.data.daily[key] ? OM.fmtTime(prog.data.daily[key], 2) : '—';
+    $('d-streak').textContent = prog.dailyStreak() + 'd';
+    var ms = OM.msUntilNextDay();
+    var h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60;
+    $('d-reset').textContent = 'New challenge in ' + h + 'h ' + m + 'm.';
+    UI.show('daily');
+  };
+
+  /* ---------- results ---------- */
+  UI.showResult = function (s) {
+    var d = prog.data;
+    var best = s.mode === 'endless' ? d.best : (d.daily[OM.dayKey(s.day)] || 0);
+    var res = s.result;
+
+    $('r-kicker').textContent = res.record ? 'NEW RECORD' : 'YOU SURVIVED';
+    $('r-time').textContent = OM.fmtTime(s.time, 2);
+
+    var dEl = $('r-delta');
+    dEl.classList.toggle('record', !!res.record);
+    if (res.record) {
+      dEl.textContent = s.mode === 'daily' ? 'BEST TODAY' : 'PERSONAL BEST';
+    } else if (best > 0) {
+      // The number that creates "one more": how close you were, not how far.
+      dEl.textContent = OM.fmtDelta(best - s.time) + ' FROM YOUR BEST · ' + OM.fmtTime(best, 2);
+    } else dEl.textContent = '';
+
+    $('r-stats').innerHTML =
+      stat(s.nearMiss, 'NEAR MISS') + stat(s.perfect, 'PERFECT') +
+      stat(s.flips, 'FLIPS') + stat(s.world.name, 'REACHED');
+
+    var li = prog.levelInfo();
+    $('r-xpfill').style.width = (li.frac * 100).toFixed(1) + '%';
+    $('r-xplabel').textContent = 'LEVEL ' + li.level + '  +' + res.xp + ' XP';
+
+    var un = [];
+    if (res.levelUp) un.push('LEVEL ' + res.level + ' REACHED');
+    for (var i = 0; i < res.achievements.length; i++) un.push('UNLOCKED · ' + res.achievements[i].name);
+    var newCore = prog.cores.filter(function (c) { return c.at === res.level; })[0];
+    if (res.levelUp && newCore) un.push('EVOLUTION · ' + newCore.name);
+    $('r-unlocks').innerHTML = un.map(function (t) { return '<p>' + t + '</p>'; }).join('');
+    if (res.levelUp) OM.audio.play('level');
+
+    UI.show('result');
+  };
+
+  function stat(v, k) {
+    return '<div><span class="n">' + v + '</span><span class="k">' + k + '</span></div>';
+  }
+
+  /* ---------- records ---------- */
+  UI.showRecords = function () {
+    var d = prog.data, li = prog.levelInfo();
+    var causes = Object.keys(d.deaths).sort(function (a, b) { return d.deaths[b] - d.deaths[a]; });
+    var CAUSE = { spike: 'Spikes', block: 'Blocks', bar: 'Bars', mover: 'Movers', laser: 'Lasers', void: 'The void' };
+
+    var days = [], today = OM.dayIndex();
+    for (var i = 0; i < 7; i++) {
+      var k = OM.dayKey(today - i);
+      days.push(row(k + (i === 0 ? ' · today' : ''), d.daily[k] ? OM.fmtTime(d.daily[k], 2) : '—'));
+    }
+
+    $('rec-body').innerHTML =
+      '<div class="split"><div><span class="lbl">BEST RUN</span><span class="val">' +
+        (d.best ? OM.fmtTime(d.best, 2) : '—') + '</span></div>' +
+      '<div><span class="lbl">LEVEL</span><span class="val">' + li.level + '</span></div>' +
+      '<div><span class="lbl">RUNS</span><span class="val">' + d.runs + '</span></div></div>' +
+
+      '<h3>TOTALS</h3><div class="list">' +
+        row('Time survived', fmtLong(d.totalTime)) +
+        row('Near misses', d.nearMiss) +
+        row('Perfect switches', d.perfect) +
+        row('Gravity flips', d.flips) +
+        row('Daily challenges', d.dailyDone.length + ' · streak ' + prog.dailyStreak() + 'd') +
+      '</div>' +
+
+      '<h3>WHAT KILLS YOU</h3><div class="list">' +
+        (causes.length ? causes.map(function (c) {
+          return row(CAUSE[c] || c, d.deaths[c] + ' × ' + Math.round(d.deaths[c] / d.runs * 100) + '%');
+        }).join('') : row('Nothing yet', '—')) +
+      '</div>' +
+
+      '<h3>DAILY · LAST 7</h3><div class="list">' + days.join('') + '</div>' +
+
+      '<h3>ACHIEVEMENTS</h3><div class="list">' +
+        prog.achievements.map(function (a) {
+          var got = d.achievements.indexOf(a.id) >= 0;
+          return '<div class="item' + (got ? '' : ' locked') + '"><b>' + a.name +
+                 '<i>' + a.line + '</i></b><span>' + (got ? '✓' : '') + '</span></div>';
+        }).join('') +
+      '</div>' +
+      '<p class="muted small">Records are stored on this device only. There is no server yet, so nothing here is a global leaderboard.</p>';
+    UI.show('records');
+  };
+
+  function row(k, v) { return '<div class="item"><b>' + k + '</b><span>' + v + '</span></div>'; }
+  function fmtLong(sec) {
+    var h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60;
+    return (h ? h + 'h ' : '') + m + 'm ' + Math.floor(sec % 60) + 's';
+  }
+
+  /* ---------- garage ---------- */
+  UI.showGarage = function () {
+    var lv = prog.levelInfo().level, c = prog.data.cosmetics;
+    function group(title, list, kind, current, extra) {
+      return '<h3>' + title + '</h3><div class="chips">' + (extra || '') + list.map(function (it) {
+        var open = lv >= it.at;
+        return '<button class="chip' + (current === it.id ? ' on' : '') + '"' +
+               (open ? '' : ' disabled') + ' data-kind="' + kind + '" data-id="' + it.id + '">' +
+               it.name + '<small>' + (open ? (it.line || 'unlocked') : 'LEVEL ' + it.at) + '</small></button>';
+      }).join('') + '</div>';
+    }
+    var autoChip = '<button class="chip' + (c.core === 'auto' ? ' on' : '') +
+      '" data-kind="core" data-id="auto">AUTO<small>follows your level</small></button>';
+    $('gar-body').innerHTML =
+      group('CORE', prog.cores, 'core', c.core, autoChip) +
+      group('TRAIL', prog.trails, 'trail', c.trail) +
+      group('DEATH', prog.deaths, 'death', c.death) +
+      '<p class="muted small">Level ' + lv + '. Next evolution at level ' +
+        (prog.cores.filter(function (x) { return x.at > lv; })[0] || { at: '—' }).at + '.</p>';
+
+    var chips = $('gar-body').querySelectorAll('.chip');
+    for (var i = 0; i < chips.length; i++) {
+      chips[i].addEventListener('click', function (e) {
+        var kind = this.getAttribute('data-kind');
+        prog.data.cosmetics[kind] = this.getAttribute('data-id');
+        prog.touch(); prog.flush();
+        OM.audio.play('ui');
+        UI.showGarage();
+      });
+    }
+    UI.show('garage');
+  };
+
+  /* ---------- settings ---------- */
+  UI.showSettings = function () {
+    var s = prog.data.settings;
+    var items = [
+      ['sound', 'Sound effects'], ['music', 'Music'],
+      ['shake', 'Screen shake'], ['haptics', 'Haptics'], ['reduced', 'Reduced motion']
+    ];
+    $('set-body').innerHTML = items.map(function (it) {
+      return '<div class="toggle"><span>' + it[1] + '</span>' +
+             '<button data-set="' + it[0] + '" aria-pressed="' + !!s[it[0]] + '"></button></div>';
+    }).join('') +
+    '<p class="muted small" style="margin-top:22px">ONE MORE stores your records in this browser. Nothing is uploaded.</p>' +
+    '<button class="btn small" id="wipe" style="margin-top:8px">ERASE ALL DATA</button>';
+
+    var btns = $('set-body').querySelectorAll('[data-set]');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].addEventListener('click', function () {
+        var k = this.getAttribute('data-set');
+        s[k] = !s[k];
+        this.setAttribute('aria-pressed', String(s[k]));
+        prog.touch(); prog.flush();
+        OM.audio.setMuted(!s.sound);
+        OM.audio.setMusic(s.music && s.sound);
+        OM.audio.play('ui');
+      });
+    }
+    var wipe = $('wipe'), armed = false;
+    wipe.addEventListener('click', function () {
+      if (!armed) { armed = true; wipe.textContent = 'TAP AGAIN TO CONFIRM'; return; }
+      prog.reset();
+      UI.toast('DATA ERASED');
+      UI.show('menu');
+    });
+    UI.show('settings');
+  };
+
+  /* ---------- share ----------
+     No download link: the artifact sandbox blocks page-initiated downloads and
+     a dead button is worse than no button. Native share if the device has it,
+     clipboard otherwise. */
+  UI.share = function () {
+    var s = OM.game.run && OM.game.run.summary;
+    if (!s) return;
+    var text = 'ONE MORE — I survived ' + OM.fmtTime(s.time, 2) +
+      (s.mode === 'daily' ? ' on Daily ' + OM.dayKey(s.day) : '') +
+      ' · ' + s.perfect + ' perfect switches · reached ' + s.world.name + '. Can you beat it?';
+    if (root.navigator && root.navigator.share) {
+      root.navigator.share({ title: 'ONE MORE', text: text }).catch(function () {});
+      return;
+    }
+    if (root.navigator && root.navigator.clipboard) {
+      root.navigator.clipboard.writeText(text).then(
+        function () { UI.toast('RESULT COPIED'); },
+        function () { UI.toast('COULD NOT COPY'); }
+      );
+    } else UI.toast('SHARING UNAVAILABLE');
+  };
+
+  var toastT = 0;
+  UI.toast = function (msg) {
+    var el = $('toast');
+    el.textContent = msg;
+    el.classList.add('on');
+    clearTimeout(toastT);
+    toastT = setTimeout(function () { el.classList.remove('on'); }, 1700);
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ==== src/99-boot.js ==== */
+/* ONE MORE — boot: canvas, input, the frame loop. */
+(function (root) {
+  'use strict';
+  var OM = root.OM;
+  var doc = root.document;
+
+  function start() {
+    var canvas = doc.getElementById('stage');
+    OM.game.attach(canvas);
+    OM.ui.init();
+
+    var s = OM.progress.data.settings;
+    OM.audio.setMuted(!s.sound);
+    OM.audio.setMusic(s.music && s.sound);
+
+    /* ---------- input ----------
+       pointerdown, not click: it fires on touch-down rather than touch-up,
+       which is the difference between a game that feels instant and one that
+       feels like a web page. */
+    function press(e) {
+      if (OM.ui.screen === 'result') {
+        // tap anywhere to go again — but not on a button, which has its own job
+        if (e.target && e.target.closest && e.target.closest('[data-act]')) return;
+        if (OM.game.run && OM.game.run.deadFor > 0.22) {
+          e.preventDefault();
+          OM.ui.startRun(OM.ui.lastMode);
+        }
+        return;
+      }
+      if (OM.ui.screen !== null) return;      // a menu is open; let it have the tap
+      e.preventDefault();
+      OM.audio.unlock();
+      OM.game.flip();
+    }
+
+    canvas.addEventListener('pointerdown', press);
+    doc.getElementById('s-result').addEventListener('pointerdown', press);
+
+    doc.addEventListener('keydown', function (e) {
+      if (e.repeat) return;
+      var k = e.key;
+      if (k === ' ' || k === 'ArrowUp' || k === 'ArrowDown' || k === 'w' || k === 'W') {
+        e.preventDefault();
+        OM.audio.unlock();
+        if (OM.ui.screen === 'result') {
+          if (OM.game.run && OM.game.run.deadFor > 0.22) OM.ui.startRun(OM.ui.lastMode);
+        } else if (OM.ui.screen === 'menu') OM.ui.startRun('endless');
+        else if (OM.ui.screen === null) OM.game.flip();
+      } else if (k === 'Escape' || k === 'p' || k === 'P') {
+        if (OM.game.state === 'playing') OM.ui.pause();
+        else if (OM.game.state === 'paused') OM.ui.resume();
+      }
+    });
+
+    // Losing focus mid-run must pause, never kill: a notification should not
+    // cost somebody their record.
+    doc.addEventListener('visibilitychange', function () {
+      if (doc.hidden && OM.game.state === 'playing') OM.ui.pause();
+    });
+    root.addEventListener('blur', function () {
+      if (OM.game.state === 'playing') OM.ui.pause();
+    });
+
+    /* ---------- loop ---------- */
+    var last = performance.now();
+    function frame(now) {
+      var dt = (now - last) / 1000;
+      last = now;
+      // A long stall (tab switch, GC) must not teleport the player through a
+      // wall — clamp instead of integrating a two second step.
+      if (dt > 0.05) dt = 0.05;
+
+      if (OM.game.state === 'playing' || OM.game.state === 'dead') {
+        OM.game.tick(dt);
+      } else if (OM.game.state === 'paused') {
+        OM.game.draw();
+      } else {
+        OM.game.drawMenuNanogon(now / 1000);
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', start);
+  else start();
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+</script>
+</body>
+</html>

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#08090c">
+<meta name="description" content="One input. Tap to flip gravity. Survive one more time.">
+<title>ONE MORE</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="stage" aria-label="ONE MORE game" role="img"></canvas>
+
+  <!-- ===== MENU ===== -->
+  <section class="screen" id="s-menu" data-screen="menu">
+    <div class="wrap">
+      <h1 class="logo">ONE M<span class="o">O</span>RE</h1>
+      <p class="tag">Tap to flip gravity. Survive one more time.</p>
+      <div class="stack">
+        <button class="btn primary" data-act="play">PLAY</button>
+        <button class="btn" data-act="daily">DAILY CHALLENGE<em id="daily-badge"></em></button>
+        <div class="row">
+          <button class="btn small" data-act="records">RECORDS</button>
+          <button class="btn small" data-act="garage">GARAGE</button>
+          <button class="btn small" data-act="settings">SETTINGS</button>
+        </div>
+      </div>
+      <p class="foot"><span id="menu-best">—</span><span class="dot">·</span><span id="menu-level">LEVEL 1</span></p>
+    </div>
+  </section>
+
+  <!-- ===== RESULTS ===== -->
+  <section class="screen" id="s-result" data-screen="result">
+    <div class="wrap result">
+      <p class="kicker" id="r-kicker">YOU SURVIVED</p>
+      <div class="bigtime" id="r-time">00:00.00</div>
+      <p class="delta" id="r-delta"></p>
+      <div class="stats" id="r-stats"></div>
+      <div class="xpbar"><i id="r-xpfill"></i><span id="r-xplabel"></span></div>
+      <div id="r-unlocks" class="unlocks"></div>
+      <button class="btn primary huge" data-act="again">ONE MORE</button>
+      <div class="row">
+        <button class="btn small" data-act="share">SHARE</button>
+        <button class="btn small" data-act="menu">MENU</button>
+      </div>
+      <p class="hint">tap anywhere to go again</p>
+    </div>
+  </section>
+
+  <!-- ===== DAILY ===== -->
+  <section class="screen" id="s-daily" data-screen="daily">
+    <div class="wrap">
+      <div class="card">
+        <p class="kicker">DAILY CHALLENGE</p>
+        <div class="day" id="d-day">DAY 1</div>
+        <p class="muted" id="d-date"></p>
+        <div class="split">
+          <div><span class="lbl">YOUR BEST</span><span class="val" id="d-best">—</span></div>
+          <div><span class="lbl">STREAK</span><span class="val" id="d-streak">0</span></div>
+        </div>
+        <p class="muted small" id="d-note">Everyone in the world gets this exact layout today.</p>
+        <p class="muted small" id="d-reset"></p>
+      </div>
+      <button class="btn primary" data-act="play-daily">PLAY TODAY</button>
+      <button class="btn small" data-act="menu">BACK</button>
+    </div>
+  </section>
+
+  <!-- ===== RECORDS ===== -->
+  <section class="screen" id="s-records" data-screen="records">
+    <div class="wrap scrolly">
+      <p class="kicker">RECORDS</p>
+      <div id="rec-body"></div>
+      <button class="btn small" data-act="menu">BACK</button>
+    </div>
+  </section>
+
+  <!-- ===== GARAGE ===== -->
+  <section class="screen" id="s-garage" data-screen="garage">
+    <div class="wrap scrolly">
+      <p class="kicker">GARAGE</p>
+      <p class="muted small">Cosmetic only. Every player has the same game.</p>
+      <div id="gar-body"></div>
+      <button class="btn small" data-act="menu">BACK</button>
+    </div>
+  </section>
+
+  <!-- ===== SETTINGS ===== -->
+  <section class="screen" id="s-settings" data-screen="settings">
+    <div class="wrap scrolly">
+      <p class="kicker">SETTINGS</p>
+      <div id="set-body"></div>
+      <button class="btn small" data-act="menu">BACK</button>
+    </div>
+  </section>
+
+  <!-- ===== PAUSE ===== -->
+  <section class="screen" id="s-pause" data-screen="pause">
+    <div class="wrap">
+      <p class="kicker">PAUSED</p>
+      <button class="btn primary" data-act="resume">RESUME</button>
+      <button class="btn small" data-act="quit">END RUN</button>
+    </div>
+  </section>
+
+  <button id="pause-btn" aria-label="Pause">II</button>
+  <div id="toast" role="status" aria-live="polite"></div>
+</div>
+
+<script src="src/00-core.js"></script>
+<script src="src/10-physics.js"></script>
+<script src="src/20-patterns.js"></script>
+<script src="src/25-generator.js"></script>
+<script src="src/30-mutations.js"></script>
+<script src="src/35-progress.js"></script>
+<script src="src/40-ghost.js"></script>
+<script src="src/45-audio.js"></script>
+<script src="src/50-nanogon.js"></script>
+<script src="src/55-fx.js"></script>
+<script src="src/60-render.js"></script>
+<script src="src/70-game.js"></script>
+<script src="src/80-ui.js"></script>
+<script src="src/99-boot.js"></script>
+</body>
+</html>
