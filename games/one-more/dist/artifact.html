@@ -106,7 +106,7 @@ html, body {
 .read i { display: block; font-style: normal; font-size: 11px; color: var(--faint); margin-top: 5px; }
 .read.quiet { border-left-color: var(--line); }
 
-.xpbar { position: relative; height: 22px; border: 1px solid var(--line); margin-bottom: 6px; }
+.xpbar { position: relative; height: 22px; border: 1px solid var(--line); margin-bottom: 6px; overflow: hidden; }
 .xpbar i { position: absolute; inset: 0 auto 0 0; background: rgba(232, 234, 240, .16); transition: width .5s ease; }
 .xpbar span { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--mono); font-size: 10px; letter-spacing: .16em; }
 .unlocks { min-height: 0; }
@@ -957,48 +957,88 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
   'use strict';
   var OM = root.OM || (root.OM = {});
 
+  /* `cls` is what makes stacking safe. Two mutations may run at once only if
+     they belong to different classes — so the game can be fast AND dense, or
+     mirrored AND silent, but never dark AND phased AND strobing at the same
+     time. The fairness proof says nothing about whether you can SEE an
+     obstacle; stacking two visibility mutations would make a proven-fair
+     pattern unplayable without any of the tooling noticing. */
   var M = [
-    { id: 'surge',   name: 'SURGE',   line: 'Everything accelerates.',   speed: 1.22, weight: 3 },
-    { id: 'drag',    name: 'DRAG',    line: 'The world thickens.',       speed: 0.84, weight: 2 },
-    { id: 'rush',    name: 'RUSH',    line: 'No more room to breathe.',  spacing: 0.66, weight: 3 },
-    { id: 'mirror',  name: 'MIRROR',  line: 'Up is down.',               mirror: true, weight: 3 },
-    { id: 'dark',    name: 'DARK',    line: 'Only what is close.',       vision: 330, weight: 2 },
-    { id: 'phase',   name: 'PHASE',   line: 'It arrives late.',          fade: true, weight: 2 },
-    { id: 'drift',   name: 'DRIFT',   line: 'The frame is loose.',       drift: 0.045, weight: 2 },
-    { id: 'strobe',  name: 'STROBE',  line: 'Intermittent reality.',     strobe: true, weight: 1 },
-    { id: 'silence', name: 'SILENCE', line: 'No numbers.',               silence: true, weight: 2 }
+    { id: 'surge',   name: 'SURGE',   line: 'Everything accelerates.',   speed: 1.22, weight: 3, cls: 'pace' },
+    { id: 'drag',    name: 'DRAG',    line: 'The world thickens.',       speed: 0.84, weight: 2, cls: 'pace' },
+    { id: 'rush',    name: 'RUSH',    line: 'No more room to breathe.',  spacing: 0.66, weight: 3, cls: 'density' },
+    { id: 'mirror',  name: 'MIRROR',  line: 'Up is down.',               mirror: true, weight: 3, cls: 'frame' },
+    { id: 'dark',    name: 'DARK',    line: 'Only what is close.',       vision: 330, weight: 2, cls: 'vision' },
+    { id: 'phase',   name: 'PHASE',   line: 'It arrives late.',          fade: true, weight: 2, cls: 'vision' },
+    { id: 'drift',   name: 'DRIFT',   line: 'The frame is loose.',       drift: 0.045, weight: 2, cls: 'frame' },
+    { id: 'strobe',  name: 'STROBE',  line: 'Intermittent reality.',     strobe: true, weight: 1, cls: 'vision' },
+    { id: 'silence', name: 'SILENCE', line: 'No numbers.',               silence: true, weight: 2, cls: 'ui' }
   ];
+  var OVERLAY_FROM = 90;   // seconds before a second mutation may run at once
 
   var BY_ID = {};
   for (var i = 0; i < M.length; i++) BY_ID[M[i].id] = M[i];
 
   /* The schedule is generated up front from the run's RNG, so a Daily Challenge
-     hands every player in the world the same mutations at the same instants. */
+     hands every player in the world the same mutations at the same instants.
+
+     Two tracks. The PRIMARY track is the original one-at-a-time sequence and is
+     untouched, so the first ninety seconds play exactly as they were tuned. The
+     OVERLAY track starts at 90s and can run a second mutation alongside it,
+     always from a different class. That puts real compounding pressure into the
+     late game, which until now got harder only by going faster. */
   function schedule(rng, count) {
+    var primary = primaryTrack(rng, count || 40);
+    var merged = primary.concat(overlayTrack(rng, primary));
+    merged.sort(function (a, b) { return a.at - b.at; });
+    return merged;
+  }
+
+  function primaryTrack(rng, count) {
     var out = [], t = 20 + rng.range(0, 6), last = null;
-    for (var n = 0; n < (count || 40); n++) {
-      var pick = weighted(rng, last);
+    for (var n = 0; n < count; n++) {
+      var pick = weighted(rng, last, null);
       var dur = rng.range(9, 13.5);
-      out.push({ at: t, until: t + dur, m: pick });
+      out.push({ at: t, until: t + dur, m: pick, track: 'primary' });
       last = pick.id;
       t += dur + rng.range(7, 15) * Math.max(0.45, 1 - n * 0.045); // they crowd in later
     }
     return out;
   }
 
-  function weighted(rng, exclude) {
+  function overlayTrack(rng, primary) {
+    var out = [], t = OVERLAY_FROM + rng.range(0, 14);
+    for (var n = 0; n < 24; n++) {
+      var dur = rng.range(6.5, 10.5);
+      // never share a class with whatever the primary track is running here
+      var banned = {};
+      for (var i = 0; i < primary.length; i++) {
+        var p = primary[i];
+        if (p.until <= t || p.at >= t + dur) continue;
+        banned[p.m.cls] = 1;
+      }
+      var pick = weighted(rng, null, banned);
+      if (pick) out.push({ at: t, until: t + dur, m: pick, track: 'overlay' });
+      t += dur + rng.range(16, 30);
+    }
+    return out;
+  }
+
+  function weighted(rng, excludeId, bannedClasses) {
     var pool = [], i, j;
     for (i = 0; i < M.length; i++) {
-      if (M[i].id === exclude) continue;
+      if (M[i].id === excludeId) continue;
+      if (bannedClasses && bannedClasses[M[i].cls]) continue;
       for (j = 0; j < M[i].weight; j++) pool.push(M[i]);
     }
+    if (!pool.length) return null;
     return pool[Math.floor(rng.next() * pool.length)];
   }
 
   /* Collapse the schedule into the modifier set active at time t. */
   function activeAt(sched, t) {
     var mods = { speed: 1, spacing: 1, mirror: false, vision: 0, fade: false,
-                 drift: 0, strobe: false, silence: false, list: [], ending: 0 };
+                 drift: 0, strobe: false, silence: false, list: [] };
     for (var i = 0; i < sched.length; i++) {
       var s = sched[i];
       if (t < s.at) break;
@@ -1013,12 +1053,12 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       if (m.strobe) mods.strobe = true;
       if (m.silence) mods.silence = true;
       mods.list.push(s);
-      mods.ending = Math.max(mods.ending, s.until - t);
     }
     return mods;
   }
 
-  OM.mutations = { list: M, byId: BY_ID, schedule: schedule, activeAt: activeAt };
+  OM.mutations = { list: M, byId: BY_ID, schedule: schedule, activeAt: activeAt,
+                   overlayFrom: OVERLAY_FROM };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 
 /* ==== src/32-analysis.js ==== */
@@ -1047,7 +1087,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     log.push({
       t: Math.round(summary.time * 10) / 10,
       cause: summary.cause,
-      pat: c.tier || null,
+      pat: c.pat || null,
       air: c.airborne ? 1 : 0,
       sf: Math.round((c.sinceFlip || 0) * 100) / 100,
       muts: c.mutations || [],
@@ -1057,11 +1097,6 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     });
     while (log.length > CAP) log.shift();
     OM.store.set(KEY, log);
-  }
-
-  function tierOf(patId) {
-    for (var i = 0; i < PAT.list.length; i++) if (PAT.list[i].id === patId) return PAT.list[i].tier;
-    return null;
   }
 
   /* Group deaths by the family of thing that killed you. Individual pattern ids
@@ -1257,12 +1292,22 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     root.addEventListener('visibilitychange', function () { if (root.document && root.document.hidden) flush(); });
   }
 
-  /* ---- levels ---- */
-  function needFor(level) { return Math.round(70 + 46 * Math.pow(level - 1, 1.32)); }
+  /* ---- levels ----
+     The curve ends where the rewards end. It used to run to 99 while the last
+     cosmetic unlocked at 50, so 80% of the climb — 658,000 of 823,000 XP —
+     bought nothing at all. It is also re-weighted: the old curve put the final
+     evolution about 1,430 runs away, which is not a long tail, it is a wall.
+     It is now roughly 600 runs: still a real chase, actually reachable.
+     `frac` is clamped at the cap. It previously kept accumulating remainder
+     after the level stopped advancing, so the XP bar fill grew without bound —
+     43x the bar width at twice the cap — and the label read past 100%. */
+  var MAX_LEVEL = 50;
+  function needFor(level) { return Math.round(60 + 19 * Math.pow(level - 1, 1.32)); }
   function levelInfo(xp) {
     var lv = 1, rem = xp, need = needFor(1);
-    while (rem >= need && lv < 99) { rem -= need; lv++; need = needFor(lv); }
-    return { level: lv, into: rem, need: need, frac: rem / need };
+    while (rem >= need && lv < MAX_LEVEL) { rem -= need; lv++; need = needFor(lv); }
+    if (lv >= MAX_LEVEL) return { level: MAX_LEVEL, into: need, need: need, frac: 1, capped: true };
+    return { level: lv, into: rem, need: need, frac: rem / need, capped: false };
   }
 
   /* ---- cosmetics ----
@@ -1402,6 +1447,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     flush: flush, touch: touch,
     levelInfo: function () { return levelInfo(save.xp); },
     needFor: needFor,
+    maxLevel: MAX_LEVEL,
     commitRun: commitRun,
     dailyStreak: dailyStreak,
     nightmareUnlocked: function () { return save.best >= 120; },
@@ -2529,6 +2575,39 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     return false;
   };
 
+  /* One collision and near-miss pass at a single instant. Returns the cause of
+     death, or null.
+     Near misses fire once per obstacle through the _nm flag, so running this at
+     240Hz does not inflate the count — it only makes the moment of detection
+     accurate, and that moment is what PERFECT is judged against. */
+  var SCAN = [];
+  function scanObstacles(r, near, t) {
+    var px = r.px, py = r.y, R = P.R, R2 = R * R;
+    var nearD2 = (R + P.NEAR_MISS_DIST) * (R + P.NEAR_MISS_DIST);
+    for (var i = 0; i < near.length; i++) {
+      var o = near[i];
+      SCAN.length = 0;
+      var rects = PAT.rectsOf(o, t, SCAN);
+      for (var j = 0; j < rects.length; j++) {
+        var q = rects[j];
+        var d2 = P.circleRectDist2(px, py, R, q.x, q.y, q.w, q.h);
+        if (d2 <= R2) return o.t;
+        if (d2 < nearD2 && !o._nm) {
+          o._nm = true;
+          o._flash = 1;
+          r.nearMiss++;
+          r.sinceNear = 0;
+          var perfect = r.sinceFlip < P.PERFECT_WINDOW;
+          if (perfect) { r.perfect++; OM.audio.play('perfect'); G.screen.slow = 0.55; }
+          else OM.audio.play('near');
+          G.screen.kick(perfect ? 7 : 3);
+          OM.bus.emit('run:near', { perfect: perfect, clear: Math.sqrt(d2) - R });
+        }
+      }
+    }
+    return null;
+  }
+
   /* Arrival matters as much as departure. A flip that ends in a soundless,
      motionless stop reads as the character being teleported onto the surface;
      the compression, the dust and the mark on the floor are what make it read
@@ -2576,7 +2655,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       /* Context for the death analysis: what killed you is far less useful than
          what you were doing when it did. */
       context: {
-        tier: patternTierAt(r),
+        pat: patternIdAt(r),
         speed: r.speed,
         airborne: !r.grounded,
         sinceFlip: r.sinceFlip,
@@ -2594,8 +2673,10 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
   G.playerScreenX = function () { return G.W * (G.playerXFrac || P.PLAYER_X_FRAC); };
 
   /* Which authored pattern was the player inside when it ended? This is the
-     single most useful fact for telling somebody what they are bad at. */
-  function patternTierAt(r) {
+     single most useful fact for telling somebody what they are bad at.
+     It returns a pattern ID. It was called patternTierAt and its result was
+     stored as context.tier, which is what the next person would have believed. */
+  function patternIdAt(r) {
     var best = null, bestD = 1e9;
     for (var i = 0; i < r.gen.obstacles.length; i++) {
       var o = r.gen.obstacles[i];
@@ -2615,11 +2696,13 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     var r = G.run;
 
     // mutations first: they set speed and density for this instant
+    /* Mutations can now overlap, so "the newest one is last in the list" is no
+       longer true — the list is ordered by start time, not by recency. Announce
+       whichever entry was not active last frame. */
     var mods = MUT.activeAt(r.sched, r.t);
-    if (mods.list.length !== r.mods.list.length) {
-      if (mods.list.length > r.mods.list.length) {
-        var fresh = mods.list[mods.list.length - 1];
-        r.mutFlash = 1.6; r.mutLabel = fresh.m;
+    for (var mi = 0; mi < mods.list.length; mi++) {
+      if (r.mods.list.indexOf(mods.list[mi]) < 0) {
+        r.mutFlash = 1.6; r.mutLabel = mods.list[mi].m;
         OM.audio.play('mutation');
         G.screen.kick(9);
       }
@@ -2648,49 +2731,48 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       OM.bus.emit('run:passed-best', r);
     }
 
+    /* Obstacles are tested INSIDE the substep loop, at 240Hz, alongside the
+       surfaces. Testing them once per frame against the post-frame position let
+       a fast player cross a floating obstacle entirely between samples, and let
+       anyone clip a corner unnoticed — which also made the outcome depend on
+       frame rate. Measured before this change: a 196px bar at 1218px/s with a
+       50ms frame was passed through 72 times out of 72.
+
+       The candidate list is filtered once per frame rather than per substep: the
+       player advances at most speed*dt in x, so widening the window by that much
+       covers every substep without rescanning the whole world twelve times. */
+    r.gen.ensure(r.px + G.W + 700, r.t + r.tBias, mods.spacing);
+    r.gen.prune(r.px - G.W * 0.6);
+    var list = r.gen.obstacles;
+    var reach = r.speed * dt + 90;
+    var near = [];
+    for (var ni = 0; ni < list.length; ni++) {
+      var no = list[ni];
+      if (no.x > r.px + reach || no.x + (no.w || 0) < r.px - reach) continue;
+      near.push(no);
+    }
+
     // integrate in fixed sub-steps
     var remaining = dt, landedAt = 0;
+    var tSub = r.t - dt;                  // r.t advanced above; walk it back
     while (remaining > 0) {
       var h = Math.min(STEP, remaining);
       remaining -= h;
       r.px += r.speed * h;
+      tSub += h;                          // moving geometry sampled where it IS
       var vBefore = r.vy;
       var out = P.stepPlayer(r, h, g, r.px, r.gen.holes);
-      if (out === 'void') { die('void'); return; }
+      /* Report the substep the run actually ended on, not the end of the frame
+         that contained it. r.t is advanced once per frame, so without this a
+         player at 30fps banks up to 33ms of survival they did not earn, and the
+         same death scores differently on different hardware. */
+      if (out === 'void') { r.t = tSub; die('void'); return; }
       if (r.grounded && !r.wasGrounded) landedAt = Math.abs(vBefore);
       r.wasGrounded = r.grounded;
+      var cause = scanObstacles(r, near, tSub);
+      if (cause) { r.t = tSub; die(cause); return; }
     }
     if (landedAt > 240) land(r, landedAt);
-
-    r.gen.ensure(r.px + G.W + 700, r.t + r.tBias, mods.spacing);
-    r.gen.prune(r.px - G.W * 0.6);
-
-    // collision + near miss
-    var px = r.px, py = r.y, R = P.R, R2 = R * R;
-    var nearD = P.NEAR_MISS_DIST, nearD2 = (R + nearD) * (R + nearD);
-    var list = r.gen.obstacles, scratch = [];
-    for (var i = 0; i < list.length; i++) {
-      var o = list[i];
-      if (o.x > px + 90 || o.x + (o.w || 0) < px - 90) continue;
-      scratch.length = 0;
-      var rects = PAT.rectsOf(o, r.t, scratch);
-      for (var j = 0; j < rects.length; j++) {
-        var q = rects[j];
-        var d2 = P.circleRectDist2(px, py, R, q.x, q.y, q.w, q.h);
-        if (d2 <= R2) { die(o.t); return; }
-        if (d2 < nearD2 && !o._nm) {
-          o._nm = true;
-          o._flash = 1;
-          r.nearMiss++;
-          r.sinceNear = 0;
-          var perfect = r.sinceFlip < P.PERFECT_WINDOW;
-          if (perfect) { r.perfect++; OM.audio.play('perfect'); G.screen.slow = 0.55; }
-          else OM.audio.play('near');
-          G.screen.kick(perfect ? 7 : 3);
-          OM.bus.emit('run:near', { perfect: perfect, clear: Math.sqrt(d2) - R });
-        }
-      }
-    }
 
     // audible tell for pistons about to fire near you
     for (var pi = 0; pi < list.length; pi++) {
@@ -3359,7 +3441,8 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
 
     var li = prog.levelInfo();
     $('r-xpfill').style.width = (li.frac * 100).toFixed(1) + '%';
-    $('r-xplabel').textContent = 'LEVEL ' + li.level + '  +' + res.xp + ' XP';
+    $('r-xplabel').textContent = 'LEVEL ' + li.level + (li.capped ? ' · MAX' : '') +
+      '  +' + res.xp + ' XP';
 
     var un = [];
     if (res.levelUp) un.push('LEVEL ' + res.level + ' REACHED');
@@ -3532,8 +3615,12 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       group('CORE', prog.cores, 'core', c.core, autoChip) +
       group('TRAIL', prog.trails, 'trail', c.trail) +
       group('DEATH', prog.deaths, 'death', c.death) +
-      '<p class="muted small">Level ' + lv + '. Next evolution at level ' +
-        (prog.cores.filter(function (x) { return x.at > lv; })[0] || { at: '—' }).at + '.</p>';
+      (function () {
+        var next = prog.cores.filter(function (x) { return x.at > lv; })[0];
+        return '<p class="muted small">Level ' + lv + '. ' +
+          (next ? 'Next evolution at level ' + next.at + '.'
+                : 'Every evolution unlocked.') + '</p>';
+      })();
 
     var chips = $('gar-body').querySelectorAll('.chip');
     for (var i = 0; i < chips.length; i++) {

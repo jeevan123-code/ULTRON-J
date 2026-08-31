@@ -43,12 +43,22 @@
     root.addEventListener('visibilitychange', function () { if (root.document && root.document.hidden) flush(); });
   }
 
-  /* ---- levels ---- */
-  function needFor(level) { return Math.round(70 + 46 * Math.pow(level - 1, 1.32)); }
+  /* ---- levels ----
+     The curve ends where the rewards end. It used to run to 99 while the last
+     cosmetic unlocked at 50, so 80% of the climb — 658,000 of 823,000 XP —
+     bought nothing at all. It is also re-weighted: the old curve put the final
+     evolution about 1,430 runs away, which is not a long tail, it is a wall.
+     It is now roughly 600 runs: still a real chase, actually reachable.
+     `frac` is clamped at the cap. It previously kept accumulating remainder
+     after the level stopped advancing, so the XP bar fill grew without bound —
+     43x the bar width at twice the cap — and the label read past 100%. */
+  var MAX_LEVEL = 50;
+  function needFor(level) { return Math.round(60 + 19 * Math.pow(level - 1, 1.32)); }
   function levelInfo(xp) {
     var lv = 1, rem = xp, need = needFor(1);
-    while (rem >= need && lv < 99) { rem -= need; lv++; need = needFor(lv); }
-    return { level: lv, into: rem, need: need, frac: rem / need };
+    while (rem >= need && lv < MAX_LEVEL) { rem -= need; lv++; need = needFor(lv); }
+    if (lv >= MAX_LEVEL) return { level: MAX_LEVEL, into: need, need: need, frac: 1, capped: true };
+    return { level: lv, into: rem, need: need, frac: rem / need, capped: false };
   }
 
   /* ---- cosmetics ----
@@ -188,6 +198,7 @@
     flush: flush, touch: touch,
     levelInfo: function () { return levelInfo(save.xp); },
     needFor: needFor,
+    maxLevel: MAX_LEVEL,
     commitRun: commitRun,
     dailyStreak: dailyStreak,
     nightmareUnlocked: function () { return save.best >= 120; },

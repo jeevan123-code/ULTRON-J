@@ -158,6 +158,39 @@
     return false;
   };
 
+  /* One collision and near-miss pass at a single instant. Returns the cause of
+     death, or null.
+     Near misses fire once per obstacle through the _nm flag, so running this at
+     240Hz does not inflate the count — it only makes the moment of detection
+     accurate, and that moment is what PERFECT is judged against. */
+  var SCAN = [];
+  function scanObstacles(r, near, t) {
+    var px = r.px, py = r.y, R = P.R, R2 = R * R;
+    var nearD2 = (R + P.NEAR_MISS_DIST) * (R + P.NEAR_MISS_DIST);
+    for (var i = 0; i < near.length; i++) {
+      var o = near[i];
+      SCAN.length = 0;
+      var rects = PAT.rectsOf(o, t, SCAN);
+      for (var j = 0; j < rects.length; j++) {
+        var q = rects[j];
+        var d2 = P.circleRectDist2(px, py, R, q.x, q.y, q.w, q.h);
+        if (d2 <= R2) return o.t;
+        if (d2 < nearD2 && !o._nm) {
+          o._nm = true;
+          o._flash = 1;
+          r.nearMiss++;
+          r.sinceNear = 0;
+          var perfect = r.sinceFlip < P.PERFECT_WINDOW;
+          if (perfect) { r.perfect++; OM.audio.play('perfect'); G.screen.slow = 0.55; }
+          else OM.audio.play('near');
+          G.screen.kick(perfect ? 7 : 3);
+          OM.bus.emit('run:near', { perfect: perfect, clear: Math.sqrt(d2) - R });
+        }
+      }
+    }
+    return null;
+  }
+
   /* Arrival matters as much as departure. A flip that ends in a soundless,
      motionless stop reads as the character being teleported onto the surface;
      the compression, the dust and the mark on the floor are what make it read
@@ -205,7 +238,7 @@
       /* Context for the death analysis: what killed you is far less useful than
          what you were doing when it did. */
       context: {
-        tier: patternTierAt(r),
+        pat: patternIdAt(r),
         speed: r.speed,
         airborne: !r.grounded,
         sinceFlip: r.sinceFlip,
@@ -223,8 +256,10 @@
   G.playerScreenX = function () { return G.W * (G.playerXFrac || P.PLAYER_X_FRAC); };
 
   /* Which authored pattern was the player inside when it ended? This is the
-     single most useful fact for telling somebody what they are bad at. */
-  function patternTierAt(r) {
+     single most useful fact for telling somebody what they are bad at.
+     It returns a pattern ID. It was called patternTierAt and its result was
+     stored as context.tier, which is what the next person would have believed. */
+  function patternIdAt(r) {
     var best = null, bestD = 1e9;
     for (var i = 0; i < r.gen.obstacles.length; i++) {
       var o = r.gen.obstacles[i];
@@ -244,11 +279,13 @@
     var r = G.run;
 
     // mutations first: they set speed and density for this instant
+    /* Mutations can now overlap, so "the newest one is last in the list" is no
+       longer true — the list is ordered by start time, not by recency. Announce
+       whichever entry was not active last frame. */
     var mods = MUT.activeAt(r.sched, r.t);
-    if (mods.list.length !== r.mods.list.length) {
-      if (mods.list.length > r.mods.list.length) {
-        var fresh = mods.list[mods.list.length - 1];
-        r.mutFlash = 1.6; r.mutLabel = fresh.m;
+    for (var mi = 0; mi < mods.list.length; mi++) {
+      if (r.mods.list.indexOf(mods.list[mi]) < 0) {
+        r.mutFlash = 1.6; r.mutLabel = mods.list[mi].m;
         OM.audio.play('mutation');
         G.screen.kick(9);
       }
@@ -277,49 +314,48 @@
       OM.bus.emit('run:passed-best', r);
     }
 
+    /* Obstacles are tested INSIDE the substep loop, at 240Hz, alongside the
+       surfaces. Testing them once per frame against the post-frame position let
+       a fast player cross a floating obstacle entirely between samples, and let
+       anyone clip a corner unnoticed — which also made the outcome depend on
+       frame rate. Measured before this change: a 196px bar at 1218px/s with a
+       50ms frame was passed through 72 times out of 72.
+
+       The candidate list is filtered once per frame rather than per substep: the
+       player advances at most speed*dt in x, so widening the window by that much
+       covers every substep without rescanning the whole world twelve times. */
+    r.gen.ensure(r.px + G.W + 700, r.t + r.tBias, mods.spacing);
+    r.gen.prune(r.px - G.W * 0.6);
+    var list = r.gen.obstacles;
+    var reach = r.speed * dt + 90;
+    var near = [];
+    for (var ni = 0; ni < list.length; ni++) {
+      var no = list[ni];
+      if (no.x > r.px + reach || no.x + (no.w || 0) < r.px - reach) continue;
+      near.push(no);
+    }
+
     // integrate in fixed sub-steps
     var remaining = dt, landedAt = 0;
+    var tSub = r.t - dt;                  // r.t advanced above; walk it back
     while (remaining > 0) {
       var h = Math.min(STEP, remaining);
       remaining -= h;
       r.px += r.speed * h;
+      tSub += h;                          // moving geometry sampled where it IS
       var vBefore = r.vy;
       var out = P.stepPlayer(r, h, g, r.px, r.gen.holes);
-      if (out === 'void') { die('void'); return; }
+      /* Report the substep the run actually ended on, not the end of the frame
+         that contained it. r.t is advanced once per frame, so without this a
+         player at 30fps banks up to 33ms of survival they did not earn, and the
+         same death scores differently on different hardware. */
+      if (out === 'void') { r.t = tSub; die('void'); return; }
       if (r.grounded && !r.wasGrounded) landedAt = Math.abs(vBefore);
       r.wasGrounded = r.grounded;
+      var cause = scanObstacles(r, near, tSub);
+      if (cause) { r.t = tSub; die(cause); return; }
     }
     if (landedAt > 240) land(r, landedAt);
-
-    r.gen.ensure(r.px + G.W + 700, r.t + r.tBias, mods.spacing);
-    r.gen.prune(r.px - G.W * 0.6);
-
-    // collision + near miss
-    var px = r.px, py = r.y, R = P.R, R2 = R * R;
-    var nearD = P.NEAR_MISS_DIST, nearD2 = (R + nearD) * (R + nearD);
-    var list = r.gen.obstacles, scratch = [];
-    for (var i = 0; i < list.length; i++) {
-      var o = list[i];
-      if (o.x > px + 90 || o.x + (o.w || 0) < px - 90) continue;
-      scratch.length = 0;
-      var rects = PAT.rectsOf(o, r.t, scratch);
-      for (var j = 0; j < rects.length; j++) {
-        var q = rects[j];
-        var d2 = P.circleRectDist2(px, py, R, q.x, q.y, q.w, q.h);
-        if (d2 <= R2) { die(o.t); return; }
-        if (d2 < nearD2 && !o._nm) {
-          o._nm = true;
-          o._flash = 1;
-          r.nearMiss++;
-          r.sinceNear = 0;
-          var perfect = r.sinceFlip < P.PERFECT_WINDOW;
-          if (perfect) { r.perfect++; OM.audio.play('perfect'); G.screen.slow = 0.55; }
-          else OM.audio.play('near');
-          G.screen.kick(perfect ? 7 : 3);
-          OM.bus.emit('run:near', { perfect: perfect, clear: Math.sqrt(d2) - R });
-        }
-      }
-    }
 
     // audible tell for pistons about to fire near you
     for (var pi = 0; pi < list.length; pi++) {

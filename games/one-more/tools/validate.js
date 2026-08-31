@@ -67,6 +67,17 @@ function materialize(p, x0) {
    An earlier version of this file reimplemented the rects for speed and drifted
    out of sync with the game the moment lasers changed shape — never again. */
 var SCRATCH = [];
+/* Sample the SEGMENT between two states, not just its endpoint.
+   The shipped game now tests collision every 240Hz substep — about 3.9px of
+   travel at top speed — while this search marches DX=8px. Testing only the
+   endpoint would leave the proof coarser than the code it certifies, so a line
+   proved survivable here could clip a corner in play. Two samples per march
+   brings the proof to 4px, at the cost of one extra rect test. */
+function hitsSeg(world, x0, y0, x1, y1, t0, t1) {
+  if (hits(world, (x0 + x1) / 2, (y0 + y1) / 2, (t0 + t1) / 2)) return true;
+  return hits(world, x1, y1, t1);
+}
+
 function hits(world, x, y, t) {
   var obs = world.obs;
   for (var i = 0; i < obs.length; i++) {
@@ -106,10 +117,11 @@ function solve(p, speed, t0, grav) {
       for (var f = 0; f < (canFlip ? 2 : 1); f++) {
         var n = { y: s.y, vy: s.vy, grav: f ? -s.grav : s.grav, grounded: f ? false : s.grounded,
                   path: s.path, lf: f ? x : s.lf };
+        var y0 = n.y;
         var out = P.stepPlayer(n, dt, g, x + DX, world.holes);
         if (out === 'void') continue;
         if (n.y > P.FLOOR + P.VOID_DEATH || n.y < P.CEIL - P.VOID_DEATH) continue;
-        if (hits(world, x + DX, n.y, t + dt)) continue;
+        if (hitsSeg(world, x, y0, x + DX, n.y, t, t + dt)) continue;
         if (f) n.path = s.path.concat(x);
         var cb = Math.min(15, Math.max(0, Math.ceil((n.lf + cool - x) / DX)));
         var key = ((((Math.round(n.y / QY) * 2 + (n.grav > 0 ? 1 : 0)) * 4096) +
@@ -162,10 +174,11 @@ function replay(p, speed, t0, grav, flips) {
   for (var x = b.start; x < b.end; x += DX) {
     var t = t0 + (x - b.start) / speed;
     while (fi < flips.length && flips[fi] <= x) { st.grav = -st.grav; st.grounded = false; fi++; }
+    var y0 = st.y;
     var out = P.stepPlayer(st, dt, g, x + DX, world.holes);
     if (out === 'void') return false;
     if (st.y > P.FLOOR + P.VOID_DEATH || st.y < P.CEIL - P.VOID_DEATH) return false;
-    if (hits(world, x + DX, st.y, t + dt)) return false;
+    if (hitsSeg(world, x, y0, x + DX, st.y, t, t + dt)) return false;
   }
   // A flip scheduled past the end of the section simply never happened — that
   // is a survivable line, not a death. Counting it as one made every pattern

@@ -176,7 +176,7 @@ function ok(name, cond, detail) {
     for (var i = 0; i < 20; i++) {
       OM.analysis.record({
         time: 20 + i, cause: i % 5 === 0 ? 'spike' : 'mover',
-        context: { tier: 't3_mover_pair', airborne: true, sinceFlip: 0.4, mutations: [], worldId: 'origin', flipRate: 1.2 }
+        context: { pat: 't3_mover_pair', airborne: true, sinceFlip: 0.4, mutations: [], worldId: 'origin', flipRate: 1.2 }
       });
     }
   });
@@ -228,6 +228,62 @@ function ok(name, cond, detail) {
   ok('nightmare starts at speed', await page.evaluate('OM.game.run.speed') > 850);
   ok('nightmare starts in the last world',
      await page.evaluate('OM.game.run.world.id') === 'nightmare');
+
+  /* ---- F1: collision must not depend on frame rate ----
+     Obstacle collision used to be sampled once per frame on the post-frame
+     position, so whether you hit something depended on where the frame boundary
+     happened to land. Measured before the fix: a 196px bar at 1218px/s with a
+     50ms frame was passed straight through 72 times out of 72, and a mover was
+     clipped-but-unregistered 14% of the time even at 430px/s and 60fps.
+     Same world, same (absent) input, five frame rates: the run must end at the
+     same moment on the same obstacle. */
+  var fr = await page.evaluate(function () {
+    /* 1/120, 1/60, 1/30 and 0.05 are exact multiples of the 1/240 substep, so
+       they must agree EXACTLY. 1/45 is not, so its last substep is a partial one
+       and it may differ by up to that fraction — a separate, known limitation
+       (no remainder is carried between frames) rather than a collision bug. */
+    var rates = [[1 / 120, '120fps', true], [1 / 60, '60fps', true],
+                 [1 / 30, '30fps', true], [0.05, '50ms', true],
+                 [1 / 45, '45fps', false]];
+    var real = Math.random, out = [];
+    for (var seed = 0; seed < 4; seed++) {
+      var row = { seed: seed, runs: [] };
+      for (var i = 0; i < rates.length; i++) {
+        Math.random = function () { return 0.1 + seed * 0.2; };   // pin the world
+        OM.ui.hideAll();
+        OM.game.start('nightmare', {});                            // 901px/s at once
+        OM.audio.setMuted(true);
+        Math.random = real;
+        var t = 0, guard = 0;
+        while (OM.game.state === 'playing' && t < 60 && guard++ < 200000) {
+          OM.game.stepHeadless(rates[i][0]); t += rates[i][0];
+        }
+        row.runs.push({ rate: rates[i][1], exact: rates[i][2],
+                        t: OM.game.run.t, cause: OM.game.run.cause });
+      }
+      out.push(row);
+    }
+    Math.random = real;
+    return out;
+  });
+  var worstExact = 0, worstAny = 0, causeMismatch = 0;
+  fr.forEach(function (row) {
+    var all = row.runs.map(function (r) { return r.t; });
+    var ex = row.runs.filter(function (r) { return r.exact; }).map(function (r) { return r.t; });
+    worstAny = Math.max(worstAny, Math.max.apply(null, all) - Math.min.apply(null, all));
+    worstExact = Math.max(worstExact, Math.max.apply(null, ex) - Math.min.apply(null, ex));
+    var c0 = row.runs[0].cause;
+    row.runs.forEach(function (r) { if (r.cause !== c0) causeMismatch++; });
+  });
+  // 1e-6s of tolerance for float accumulation: adding 1/120 twice is not bit-
+  // identical to adding 1/60 once. Anything larger would be a real divergence.
+  ok('identical outcome at every whole-substep frame rate', worstExact < 1e-6,
+     'spread ' + (worstExact * 1e6).toFixed(3) + 'us across 120fps/60fps/30fps/50ms');
+  ok('a ragged frame rate costs less than one frame', worstAny < 0.025,
+     'spread ' + (worstAny * 1000).toFixed(2) + 'ms including 45fps');
+  ok('the same obstacle kills at every frame rate', causeMismatch === 0);
+  console.log('    (death-time spread: ' + (worstExact * 1e6).toFixed(2) +
+              'us exact, ' + (worstAny * 1000).toFixed(2) + 'ms incl. ragged)');
 
   // ---- render cost ----
   var perf = await page.evaluate(function () {

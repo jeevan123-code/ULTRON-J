@@ -213,6 +213,50 @@ ok('director never emits an empty tier set', (function () {
 })());
 
 console.log('\n  mutations');
+ok('at most two run at once', (function () {
+  for (var seed = 0; seed < 300; seed++) {
+    var sc = OM.mutations.schedule(OM.rng(seed));
+    for (var t = 0; t < 300; t += 0.5) if (OM.mutations.activeAt(sc, t).list.length > 2) return false;
+  }
+  return true;
+})());
+ok('two mutations never share a class', (function () {
+  for (var seed = 0; seed < 300; seed++) {
+    var sc = OM.mutations.schedule(OM.rng(seed));
+    for (var t = 0; t < 300; t += 0.5) {
+      var a = OM.mutations.activeAt(sc, t).list, seen = {};
+      for (var i = 0; i < a.length; i++) {
+        if (seen[a[i].m.cls]) return false;
+        seen[a[i].m.cls] = 1;
+      }
+    }
+  }
+  return true;
+})(), 'two visibility mutations at once would make a proven-fair pattern unreadable');
+ok('nothing stacks before the overlay window', (function () {
+  for (var seed = 0; seed < 300; seed++) {
+    var sc = OM.mutations.schedule(OM.rng(seed));
+    for (var t = 0; t < OM.mutations.overlayFrom; t += 0.5) {
+      if (OM.mutations.activeAt(sc, t).list.length > 1) return false;
+    }
+  }
+  return true;
+})(), 'the first 90s must play exactly as they were tuned');
+ok('stacking does actually happen later', (function () {
+  var hits = 0;
+  for (var seed = 0; seed < 300; seed++) {
+    var sc = OM.mutations.schedule(OM.rng(seed));
+    for (var t = OM.mutations.overlayFrom; t < 300; t += 0.5) {
+      if (OM.mutations.activeAt(sc, t).list.length > 1) { hits++; break; }
+    }
+  }
+  return hits > 250;
+})(), 'machinery that pretends to stack but never does is the thing being fixed');
+ok('every mutation declares a class', OM.mutations.list.every(function (m) { return !!m.cls; }));
+ok('the dead `ending` field is gone', (function () {
+  var sc = OM.mutations.schedule(OM.rng(1));
+  return !('ending' in OM.mutations.activeAt(sc, 0));
+})());
 ok('schedule is deterministic per seed', (function () {
   var s1 = JSON.stringify(OM.mutations.schedule(OM.rng(42)).map(function (s) { return [s.at, s.m.id]; }));
   var s2 = JSON.stringify(OM.mutations.schedule(OM.rng(42)).map(function (s) { return [s.at, s.m.id]; }));
@@ -222,10 +266,23 @@ ok('no mutation touches gravity', OM.mutations.list.every(function (m) {
   return m.gravity === undefined && m.gmul === undefined;
 }), 'a gravity mutation would void the fairness proof for every pattern');
 ok('nothing fires in the first 15 seconds', OM.mutations.schedule(OM.rng(9))[0].at >= 15);
-ok('the same mutation never repeats back to back', (function () {
-  for (var seed = 0; seed < 40; seed++) {
-    var s = OM.mutations.schedule(OM.rng(seed));
-    for (var i = 1; i < s.length; i++) if (s[i].m.id === s[i - 1].m.id) return false;
+ok('the same mutation never repeats back to back within a track', (function () {
+  // the schedule now merges two tracks, so adjacency in the array is not
+  // adjacency in time; the guarantee belongs per-track
+  for (var seed = 0; seed < 60; seed++) {
+    var sc = OM.mutations.schedule(OM.rng(seed));
+    var pri = sc.filter(function (e) { return e.track === 'primary'; });
+    for (var i = 1; i < pri.length; i++) if (pri[i].m.id === pri[i - 1].m.id) return false;
+  }
+  return true;
+})());
+ok('the same mutation is never active twice at once', (function () {
+  for (var seed = 0; seed < 300; seed++) {
+    var sc = OM.mutations.schedule(OM.rng(seed));
+    for (var t = 0; t < 300; t += 0.5) {
+      var a = OM.mutations.activeAt(sc, t).list, seen = {};
+      for (var i = 0; i < a.length; i++) { if (seen[a[i].m.id]) return false; seen[a[i].m.id] = 1; }
+    }
   }
   return true;
 })());
@@ -269,6 +326,18 @@ ok('x deltas stay small (cheap to store)', (function () {
 })());
 
 console.log('\n  the read');
+ok('the death log reads the corrected context key', (function () {
+  OM.analysis.clear();
+  OM.analysis.record({ time: 10, cause: 'spike', context: { pat: 't1_floor' } });
+  return OM.analysis.history()[0].pat === 't1_floor';
+})(), 'the producer called it context.tier while storing a pattern id');
+ok('the unused tierOf helper is gone', OM.analysis.tierOf === undefined);
+ok('byPat survives — a trial needs it', (function () {
+  OM.analysis.clear();
+  OM.analysis.record({ time: 10, cause: 'spike', context: { pat: 't1_floor' } });
+  OM.analysis.record({ time: 10, cause: 'spike', context: { pat: 't1_floor' } });
+  return OM.analysis.tally().byPat.t1_floor === 2;
+})());
 var A = OM.analysis;
 function feed(cause, n, extra) {
   for (var i = 0; i < n; i++) A.record({ time: 20 + i, cause: cause, context: extra || {} });
@@ -351,6 +420,28 @@ console.log('\n  progression');
 ok('levels need progressively more xp', (function () {
   for (var l = 1; l < 40; l++) if (OM.progress.needFor(l + 1) <= OM.progress.needFor(l)) return false;
   return true;
+})());
+ok('the curve ends where the rewards end', (function () {
+  var last = 0;
+  [OM.progress.cores, OM.progress.trails, OM.progress.deaths].forEach(function (g) {
+    g.forEach(function (it) { last = Math.max(last, it.at); });
+  });
+  return last === OM.progress.maxLevel;
+})(), 'levels past the last unlock buy nothing');
+ok('xp bar fraction cannot exceed 1', (function () {
+  // the old curve kept accumulating remainder past the cap, so the fill grew
+  // without bound — 43x the bar width at twice the cap
+  var huge = 50000000;
+  var li = OM.progress.levelInfo();
+  OM.progress.data.xp = huge;
+  var at = OM.progress.levelInfo();
+  OM.progress.data.xp = 0;
+  return at.frac <= 1 && at.level === OM.progress.maxLevel && at.capped === true;
+})());
+ok('the cap is reachable in a plausible number of runs', (function () {
+  var c = 0;
+  for (var l = 1; l < OM.progress.maxLevel; l++) c += OM.progress.needFor(l);
+  return c / 115 < 900;            // ~115 xp is a typical run
 })());
 ok('a run banks xp and a record', (function () {
   var before = OM.progress.data.xp;

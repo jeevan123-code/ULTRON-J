@@ -183,7 +183,8 @@
 
     var li = prog.levelInfo();
     $('r-xpfill').style.width = (li.frac * 100).toFixed(1) + '%';
-    $('r-xplabel').textContent = 'LEVEL ' + li.level + '  +' + res.xp + ' XP';
+    $('r-xplabel').textContent = 'LEVEL ' + li.level + (li.capped ? ' · MAX' : '') +
+      '  +' + res.xp + ' XP';
 
     var un = [];
     if (res.levelUp) un.push('LEVEL ' + res.level + ' REACHED');
@@ -356,8 +357,12 @@
       group('CORE', prog.cores, 'core', c.core, autoChip) +
       group('TRAIL', prog.trails, 'trail', c.trail) +
       group('DEATH', prog.deaths, 'death', c.death) +
-      '<p class="muted small">Level ' + lv + '. Next evolution at level ' +
-        (prog.cores.filter(function (x) { return x.at > lv; })[0] || { at: '—' }).at + '.</p>';
+      (function () {
+        var next = prog.cores.filter(function (x) { return x.at > lv; })[0];
+        return '<p class="muted small">Level ' + lv + '. ' +
+          (next ? 'Next evolution at level ' + next.at + '.'
+                : 'Every evolution unlocked.') + '</p>';
+      })();
 
     var chips = $('gar-body').querySelectorAll('.chip');
     for (var i = 0; i < chips.length; i++) {

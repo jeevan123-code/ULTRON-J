@@ -23,7 +23,7 @@
     log.push({
       t: Math.round(summary.time * 10) / 10,
       cause: summary.cause,
-      pat: c.tier || null,
+      pat: c.pat || null,
       air: c.airborne ? 1 : 0,
       sf: Math.round((c.sinceFlip || 0) * 100) / 100,
       muts: c.mutations || [],
@@ -33,11 +33,6 @@
     });
     while (log.length > CAP) log.shift();
     OM.store.set(KEY, log);
-  }
-
-  function tierOf(patId) {
-    for (var i = 0; i < PAT.list.length; i++) if (PAT.list[i].id === patId) return PAT.list[i].tier;
-    return null;
   }
 
   /* Group deaths by the family of thing that killed you. Individual pattern ids
