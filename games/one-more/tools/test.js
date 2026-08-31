@@ -388,6 +388,64 @@ ok('trend detects decline', (function () {
   var t = A.trend();
   return t && t.delta < -25;
 })());
+ok('a habit stays silent below the evidence gate', (function () {
+  A.clear();
+  for (var i = 0; i < 8; i++) {
+    A.record({ time: 30, cause: 'spike', context: { sinceFlip: 2.0, flipRate: 1 } });
+  }
+  return A.habit() === null;
+})());
+ok('a habit stays silent when nothing clears its floor', (function () {
+  A.clear();
+  // deaths spread evenly across timings: nothing over-represented
+  for (var i = 0; i < 40; i++) {
+    A.record({ time: 30, cause: 'spike', context: { sinceFlip: i % 2 ? 0.15 : 2.0, flipRate: 1 } });
+  }
+  var h = A.habit();
+  return h === null || h.mult >= 1.25;
+})());
+ok('a habit names a real over-representation', (function () {
+  A.clear();
+  for (var i = 0; i < 30; i++) {
+    A.record({ time: 30, cause: 'spike', context: { sinceFlip: 2.0, flipRate: 1 } });
+  }
+  var h = A.habit();
+  return h && h.key === 'late' && h.share > 0.9 && h.mult > 1.5;
+})());
+ok('the same share is judged against YOUR flip rate, not a constant', (function () {
+  // identical behaviour, two players: one flips often, one rarely.
+  // 70% late deaths is damning for the first and unremarkable for the second,
+  // because long gaps are what rarely flipping produces.
+  function run(fr) {
+    A.clear();
+    for (var i = 0; i < 30; i++) {
+      A.record({ time: 30, cause: 'spike',
+                 context: { sinceFlip: i < 21 ? 2.0 : 0.2, flipRate: fr } });
+    }
+    return A.habit();
+  }
+  var busy = run(1.0), idle = run(0.2);
+  return busy && busy.key === 'late' && (!idle || idle.key !== 'late');
+})(), 'this is the difference between an observation and a horoscope');
+ok('a habit reports the baseline it was judged against', (function () {
+  A.clear();
+  for (var i = 0; i < 30; i++) {
+    A.record({ time: 30, cause: 'spike', context: { sinceFlip: 2.0, flipRate: 1 } });
+  }
+  var h = A.habit();
+  return h && h.expected > 0 && h.expected < 1 &&
+         Math.abs(h.mult - h.share / h.expected) < 1e-9 &&
+         h.count <= h.n;
+})(), 'every number it prints must be checkable against the log');
+ok('void deaths do not inflate the mid-flip habit', (function () {
+  A.clear();
+  // falling through a hole is airborne by definition; counting it would make
+  // every hole-heavy player look like they die crossing
+  for (var i = 0; i < 30; i++) {
+    A.record({ time: 30, cause: 'void', context: { airborne: true, sinceFlip: 0.5, flipRate: 1 } });
+  }
+  return A.tally().transit === 0 && A.tally().nonVoid === 0;
+})());
 ok('a trial pool is built only from proven patterns', (function () {
   var fams = ['timing', 'prediction', 'commitment', 'nerve'];
   for (var f = 0; f < fams.length; f++) {

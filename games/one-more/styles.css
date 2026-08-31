@@ -105,7 +105,11 @@ html, body {
 .read.quiet { border-left-color: var(--line); }
 
 .xpbar { position: relative; height: 22px; border: 1px solid var(--line); margin-bottom: 6px; overflow: hidden; }
-.xpbar i { position: absolute; inset: 0 auto 0 0; background: rgba(232, 234, 240, .16); transition: width .5s ease; }
+/* Fills by transform, not width: a scale is composited, a width is a layout
+   pass on every frame of the half second it takes to fill.
+   overflow:hidden is belt-and-braces — levelInfo() clamps frac at the cap, but
+   a scaleX above 1 would spill past the border and it costs nothing to stop. */
+.xpbar i { position: absolute; inset: 0; transform: scaleX(0); transform-origin: left; background: rgba(232, 234, 240, .16); transition: transform .5s ease; }
 .xpbar span { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--mono); font-size: 10px; letter-spacing: .16em; }
 .unlocks { min-height: 0; }
 .unlocks p { font-size: 11px; letter-spacing: .16em; margin: 8px 0 0; animation: fade .3s ease-out; }

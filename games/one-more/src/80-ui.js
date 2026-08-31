@@ -182,7 +182,7 @@
     renderRead(s);
 
     var li = prog.levelInfo();
-    $('r-xpfill').style.width = (li.frac * 100).toFixed(1) + '%';
+    $('r-xpfill').style.transform = 'scaleX(' + li.frac.toFixed(4) + ')';
     $('r-xplabel').textContent = 'LEVEL ' + li.level + (li.capped ? ' · MAX' : '') +
       '  +' + res.xp + ' XP';
 
@@ -201,25 +201,37 @@
     return '<div><span class="n">' + v + '</span><span class="k">' + k + '</span></div>';
   }
 
+  /* The habit, in the same voice as the rest of the read: the claim, the number
+     underneath it, and what to do. The multiple is carried rather than hidden
+     because it is the whole reason the claim is worth anything — 61% of deaths
+     means nothing until you know it is twice what your own flip rate explains. */
+  function habitLine(h) {
+    return h.headline + ' · ' + Math.round(h.share * 100) + '% of deaths, ' +
+           h.mult.toFixed(1) + '× normal for how often you flip. ' + h.fix;
+  }
+
   /* One honest sentence, or nothing. Never a fabricated percentile, never a
      comparison to players we cannot see. */
   function renderRead(s) {
-    var el = $('r-read'), rd = OM.analysis.read(), tr = OM.analysis.trend();
+    var el = $('r-read'), rd = OM.analysis.read(), hb = OM.analysis.habit(), tr = OM.analysis.trend();
     var html = '';
     if (rd.kind === 'none') {
-      el.className = 'read quiet';
       html = '<b>READING YOU</b><span>' + rd.need +
              ' more run' + (rd.need === 1 ? '' : 's') +
              ' and the game will tell you what keeps killing you.</span>';
     } else if (rd.kind === 'balanced') {
-      el.className = 'read quiet';
       html = '<b>' + rd.headline + '</b><span>' + rd.line + '</span>';
     } else {
-      el.className = 'read';
       html = '<b>' + rd.headline + '</b><span>' + rd.line + ' ' +
-             Math.round(rd.share * 100) + '% of your last ' + rd.n + ' deaths.</span>' +
-             '<i>' + rd.fix + '</i>';
+             Math.round(rd.share * 100) + '% of your last ' + rd.n + ' deaths.</span>';
     }
+    /* A habit is the more specific of the two claims and carries its own advice,
+       so it stands in for the family's generic fix rather than stacking a second
+       instruction under it. It is also the only thing the balanced read has ever
+       had to offer, which is why that case is no longer always quiet. */
+    if (hb) html += '<i>' + habitLine(hb) + '</i>';
+    else if (rd.kind === 'weakness') html += '<i>' + rd.fix + '</i>';
+    el.className = (rd.kind === 'weakness' || hb) ? 'read' : 'read quiet';
     if (tr && Math.abs(tr.pct) > 0.12) {
       html += '<i>' + (tr.delta > 0 ? 'Improving: ' : 'Slipping: ') +
               'median run ' + OM.fmtTime(tr.early, 2) + ' \u2192 ' + OM.fmtTime(tr.recent, 2) + '</i>';
@@ -242,18 +254,29 @@
       days.push(row(k + (i === 0 ? ' · today' : ''), d.daily[k] ? OM.fmtTime(d.daily[k], 2) : '—'));
     }
 
-    var rd = OM.analysis.read(), tr = OM.analysis.trend(), tl = OM.analysis.tally();
+    var rd = OM.analysis.read(), hb = OM.analysis.habit(), tr = OM.analysis.trend(), tl = OM.analysis.tally();
     var readBlock = '';
     if (rd.kind === 'weakness') {
-      readBlock = '<div class="read"><b>' + rd.headline + '</b><span>' + rd.line + ' ' +
+      readBlock = '<b>' + rd.headline + '</b><span>' + rd.line + ' ' +
         rd.count + ' of your last ' + rd.n + ' deaths (' + Math.round(rd.share * 100) + '%).</span>' +
-        '<i>' + rd.fix + '</i></div>';
+        '<i>' + rd.fix + '</i>';
     } else if (rd.kind === 'balanced') {
-      readBlock = '<div class="read quiet"><b>' + rd.headline + '</b><span>' + rd.line + '</span></div>';
+      readBlock = '<b>' + rd.headline + '</b><span>' + rd.line + '</span>';
     } else {
-      readBlock = '<div class="read quiet"><b>READING YOU</b><span>' + rd.need +
-        ' more runs before the game can say anything useful about how you play.</span></div>';
+      readBlock = '<b>READING YOU</b><span>' + rd.need +
+        ' more runs before the game can say anything useful about how you play.</span>';
     }
+    /* This is the screen you come to in order to study, so the habit sits
+       alongside the family advice here rather than replacing it as it does on
+       the results screen, and it spells out the baseline it was judged against
+       instead of compressing that into a multiple. */
+    if (hb) {
+      readBlock += '<i>' + hb.headline + ' · ' + hb.count + ' of ' + hb.n + ' deaths (' +
+        Math.round(hb.share * 100) + '%), against ' + Math.round(hb.expected * 100) +
+        '% expected at your flip rate. ' + hb.fix + '</i>';
+    }
+    readBlock = '<div class="read' +
+      ((rd.kind === 'weakness' || hb) ? '' : ' quiet') + '">' + readBlock + '</div>';
     if (tr) {
       readBlock += '<div class="list">' +
         row('Median run, first 15', OM.fmtTime(tr.early, 2)) +

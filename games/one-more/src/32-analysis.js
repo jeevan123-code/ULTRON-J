@@ -10,7 +10,7 @@
 (function (root) {
   'use strict';
   var OM = root.OM || (root.OM = {});
-  var PAT = OM.patterns;
+  var PAT = OM.patterns, P = OM.phys;
   var KEY = 'onemore.deaths.v1';
   var CAP = 260;                 // rolling history; enough to read, cheap to store
   var MIN_FOR_READ = 12;         // below this, any pattern is noise
@@ -68,7 +68,8 @@
 
   function tally() {
     var byFamily = {}, byCause = {}, byPat = {}, n = log.length;
-    var airborne = 0, lateFlip = 0, times = [];
+    var airborne = 0, lateFlip = 0, rushed = 0, transit = 0, nonVoid = 0;
+    var flipsTotal = 0, secsTotal = 0, times = [];
     for (var i = 0; i < n; i++) {
       var d = log[i];
       var fam = FAMILY[d.cause] || 'timing';
@@ -77,12 +78,25 @@
       if (d.pat) byPat[d.pat] = (byPat[d.pat] || 0) + 1;
       if (d.air) airborne++;
       if (d.sf > 0.9) lateFlip++;
+      if (d.sf < P.PERFECT_WINDOW) rushed++;
+      /* Falling through a hole is airborne by definition and already has a
+         family of its own, so void deaths come out of both halves of the
+         mid-flip fraction rather than inflating it. */
+      if (d.cause !== 'void') { nonVoid++; if (d.air) transit++; }
+      /* die() stores flipRate as flips / max(1, t). Undoing that exactly gives a
+         duration-weighted flip rate, instead of a mean that the many very short
+         runs would drag around. */
+      var secs = Math.max(1, d.t);
+      flipsTotal += (d.fr || 0) * secs;
+      secsTotal += secs;
       times.push(d.t);
     }
     times.sort(function (a, b) { return a - b; });
     return {
       n: n, byFamily: byFamily, byCause: byCause, byPat: byPat,
       airborne: airborne, lateFlip: lateFlip,
+      rushed: rushed, transit: transit, nonVoid: nonVoid,
+      flipRate: secsTotal > 0 ? flipsTotal / secsTotal : 0,
       median: times.length ? times[Math.floor(times.length / 2)] : 0,
       recentMedian: (function () {
         var r = log.slice(-15).map(function (d) { return d.t; }).sort(function (a, b) { return a - b; });
@@ -137,6 +151,74 @@
     };
   }
 
+  /* ---- habits: what you were doing, not what hit you ----
+   *
+   * The family read names the geometry that beats you. A habit names what you
+   * were doing when it did, which is the half of the answer you can act on
+   * during the very next run.
+   *
+   * Each one is measured against what it would be if dying had nothing to do
+   * with your flip timing — derived from YOUR flip rate, not from a constant.
+   * A fixed threshold cannot work here. At one flip per second you are already
+   * mid-flip about 57% of the time, so "57% of your deaths were mid-flip" says
+   * precisely nothing; for somebody flipping half as often the same number is
+   * damning. Comparing against a baseline the player generates themselves is
+   * the only version of this that is not a horoscope.
+   */
+  var HABITS = [
+    {
+      /* A surface-to-surface flip takes TRANSIT_T (~0.57s), so 0.9s since the
+         last one means the flip was long finished: you were sitting still on a
+         surface and never moved. That is a reading failure, not an execution
+         one, and it wants the opposite advice from the case below. */
+      key: 'late', count: 'lateFlip', of: 'n', floor: 0.30, ratio: 1.5,
+      expect: function (fr) { return Math.exp(-0.9 * fr); },
+      headline: 'YOU REACT LATE',
+      fix: 'Flip when you see the gap, not when you reach it.'
+    },
+    {
+      /* Dying inside the perfect-switch window means the input happened and was
+         simply the wrong one. */
+      key: 'rushed', count: 'rushed', of: 'n', floor: 0.45, ratio: 1.35,
+      expect: function (fr) { return 1 - Math.exp(-P.PERFECT_WINDOW * fr); },
+      headline: 'YOU FLIP INTO IT',
+      fix: 'Read the far side before you commit. A late flip beats a wrong one.'
+    },
+    {
+      /* Caught in the air rather than on a surface. The null is just the share
+         of the time a flip keeps you there: TRANSIT_T seconds of every one. */
+      key: 'transit', count: 'transit', of: 'nonVoid', floor: 0.55, ratio: 1.25,
+      expect: function (fr) { return Math.min(0.95, P.TRANSIT_T * fr); },
+      headline: 'YOU DIE CROSSING',
+      fix: 'Cross on the clear stretches, so you arrive before the obstacle does.'
+    }
+  ];
+
+  /* The strongest habit, or nothing at all. Ranked by how far each one clears
+     its own baseline, since the three are not measured on the same scale.
+     A habit must also clear an absolute floor, so that a small expected value
+     cannot turn a handful of deaths into a dramatic-looking multiple. */
+  function habit() {
+    var s = tally();
+    if (s.n < MIN_FOR_READ || s.flipRate <= 0) return null;
+    var fr = Math.min(4, Math.max(0.2, s.flipRate));
+    var best = null, bestMult = 0;
+    for (var i = 0; i < HABITS.length; i++) {
+      var h = HABITS[i], denom = s[h.of], count = s[h.count];
+      if (denom < MIN_FOR_READ || count < 5) continue;
+      var share = count / denom;
+      var exp = Math.max(0.02, h.expect(fr));
+      var mult = share / exp;
+      if (share < h.floor || mult < h.ratio) continue;
+      if (mult > bestMult) {
+        bestMult = mult;
+        best = { key: h.key, headline: h.headline, fix: h.fix, share: share,
+                 expected: exp, mult: mult, count: count, n: denom };
+      }
+    }
+    return best;
+  }
+
   /* Are you actually getting better? Median of your last 15 runs against your
      first 15. Honest, and it does not need a server. */
   function trend() {
@@ -172,6 +254,7 @@
   OM.analysis = {
     record: record,
     read: read,
+    habit: habit,
     trend: trend,
     tally: tally,
     trialPatterns: trialPatterns,
