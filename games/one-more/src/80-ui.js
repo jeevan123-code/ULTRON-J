@@ -439,13 +439,23 @@
   /* ---------- share ----------
      No download link: the artifact sandbox blocks page-initiated downloads and
      a dead button is worse than no button. Native share if the device has it,
-     clipboard otherwise. */
+     clipboard otherwise.
+
+     What gets shared is the read, not the time. A time is unarguable and so it
+     travels nowhere; a claim about how someone plays is the part a reader can
+     answer. Below the evidence gate shareClaim() returns null and we fall back
+     to the time — manufacturing a read at run three to make a better share
+     string is exactly the trade this game does not make. */
   UI.share = function () {
     var s = OM.game.run && OM.game.run.summary;
     if (!s) return;
-    var text = 'ONE MORE — I survived ' + OM.fmtTime(s.time, 2) +
-      (s.mode === 'daily' ? ' on Daily ' + OM.dayKey(s.day) : '') +
-      ' · ' + s.perfect + ' perfect switches · reached ' + s.world.name + '. Can you beat it?';
+    var head = 'ONE MORE · ' + OM.fmtTime(s.time, 2) +
+      (s.mode === 'daily' ? ' on Daily ' + OM.dayKey(s.day) : '');
+    var claim = OM.analysis.shareClaim();
+    var text = claim
+      ? head + ' — and it says ' + claim + '. What does it say about you?'
+      : head + ' · ' + s.perfect + ' perfect switches · reached ' +
+        s.world.name + '. Can you beat it?';
     if (root.navigator && root.navigator.share) {
       root.navigator.share({ title: 'ONE MORE', text: text }).catch(function () {});
       return;

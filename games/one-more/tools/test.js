@@ -446,6 +446,33 @@ ok('void deaths do not inflate the mid-flip habit', (function () {
   }
   return A.tally().transit === 0 && A.tally().nonVoid === 0;
 })());
+ok('the share stays silent below the evidence gate', (function () {
+  A.clear(); feed('mover', 8);
+  return A.shareClaim() === null;
+})(), 'a share button is not a reason to invent a read');
+ok('the share quotes the habit, and every number in it is checkable', (function () {
+  A.clear();
+  for (var i = 0; i < 30; i++) {
+    A.record({ time: 30, cause: 'spike', context: { sinceFlip: 2.0, flipRate: 1 } });
+  }
+  var h = A.habit(), c = A.shareClaim();
+  if (!h || !c) return false;
+  return c.indexOf(h.me) === 0 &&
+         c.indexOf(Math.round(h.share * 100) + '% of my deaths') > 0 &&
+         c.indexOf(h.mult.toFixed(1) + '\u00d7') > 0;
+})());
+ok('with no habit the share falls back to the family read', (function () {
+  A.clear(); feed('mover', 12); feed('laser', 6); feed('spike', 2);
+  var r = A.read(), c = A.shareClaim();
+  if (r.kind !== 'weakness' || A.habit() !== null || !c) return false;
+  return c.indexOf(r.me) === 0 &&
+         c.indexOf('my last ' + r.n + ' deaths') > 0 &&
+         c.indexOf(r.mult.toFixed(1) + '\u00d7') > 0;
+})());
+ok('an even spread shares nothing rather than something', (function () {
+  A.clear(); feed('spike', 10); feed('mover', 10); feed('bar', 10); feed('void', 10);
+  return A.read().kind === 'balanced' && A.shareClaim() === null;
+})(), 'silence is the correct fallback, not a manufactured line');
 ok('a trial pool is built only from proven patterns', (function () {
   var fams = ['timing', 'prediction', 'commitment', 'nerve'];
   for (var f = 0; f < fams.length; f++) {

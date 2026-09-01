@@ -47,21 +47,25 @@
     timing: {
       name: 'TIMING',
       line: 'You flip late into static geometry.',
+      me: 'I flip late into static geometry',
       fix: 'Commit to the flip when you see the gap, not when you reach it.'
     },
     prediction: {
       name: 'PREDICTION',
       line: 'Moving geometry catches you out.',
+      me: 'moving geometry catches me out',
       fix: 'Read where it will be, not where it is. Watch the guide rails.'
     },
     commitment: {
       name: 'COMMITMENT',
       line: 'Bars and blocks catch you mid-decision.',
+      me: 'bars and blocks catch me mid-decision',
       fix: 'Pick a surface early and stay on it through the obstacle.'
     },
     nerve: {
       name: 'NERVE',
       line: 'The floor disappearing is what gets you.',
+      me: 'the disappearing floor is what gets me',
       fix: 'A gap is not a wall. Ride the ceiling across it.'
     }
   };
@@ -144,8 +148,14 @@
       family: top,
       headline: copy.name,
       line: copy.line,
+      me: copy.me,
       fix: copy.fix,
       share: topShare,
+      /* The same baseline the threshold above is judged against: an even split
+         across every family that could occur. Carrying it means a share can be
+         quoted as a multiple without the reader having to know what 'even' is. */
+      expected: even,
+      mult: topShare / even,
       count: s.byFamily[top],
       n: s.n
     };
@@ -171,7 +181,7 @@
          last one means the flip was long finished: you were sitting still on a
          surface and never moved. That is a reading failure, not an execution
          one, and it wants the opposite advice from the case below. */
-      key: 'late', count: 'lateFlip', of: 'n', floor: 0.30, ratio: 1.5,
+      key: 'late', me: 'I react late', count: 'lateFlip', of: 'n', floor: 0.30, ratio: 1.5,
       expect: function (fr) { return Math.exp(-0.9 * fr); },
       headline: 'YOU REACT LATE',
       fix: 'Flip when you see the gap, not when you reach it.'
@@ -179,7 +189,7 @@
     {
       /* Dying inside the perfect-switch window means the input happened and was
          simply the wrong one. */
-      key: 'rushed', count: 'rushed', of: 'n', floor: 0.45, ratio: 1.35,
+      key: 'rushed', me: 'I flip into things', count: 'rushed', of: 'n', floor: 0.45, ratio: 1.35,
       expect: function (fr) { return 1 - Math.exp(-P.PERFECT_WINDOW * fr); },
       headline: 'YOU FLIP INTO IT',
       fix: 'Read the far side before you commit. A late flip beats a wrong one.'
@@ -187,7 +197,7 @@
     {
       /* Caught in the air rather than on a surface. The null is just the share
          of the time a flip keeps you there: TRANSIT_T seconds of every one. */
-      key: 'transit', count: 'transit', of: 'nonVoid', floor: 0.55, ratio: 1.25,
+      key: 'transit', me: 'I die crossing', count: 'transit', of: 'nonVoid', floor: 0.55, ratio: 1.25,
       expect: function (fr) { return Math.min(0.95, P.TRANSIT_T * fr); },
       headline: 'YOU DIE CROSSING',
       fix: 'Cross on the clear stretches, so you arrive before the obstacle does.'
@@ -212,7 +222,7 @@
       if (share < h.floor || mult < h.ratio) continue;
       if (mult > bestMult) {
         bestMult = mult;
-        best = { key: h.key, headline: h.headline, fix: h.fix, share: share,
+        best = { key: h.key, headline: h.headline, me: h.me, fix: h.fix, share: share,
                  expected: exp, mult: mult, count: count, n: denom };
       }
     }
@@ -251,8 +261,32 @@
     return out.length >= 4 ? out : PAT.list.slice();
   }
 
+  /* What the game says about you, in your own voice, with the number under it.
+   *
+   * "I survived 47.30s" is what every runner's share button produces and it
+   * travels nowhere — nobody can disagree with it, so nobody replies. A claim
+   * about how you play invites one.
+   *
+   * Returns null below the evidence gate. A share button that manufactured a
+   * read at run three would break the one rule this whole layer exists for, and
+   * the caller falls back to the time instead. */
+  function shareClaim() {
+    var hb = habit();
+    if (hb) {
+      return hb.me + ': ' + Math.round(hb.share * 100) + '% of my deaths, ' +
+             hb.mult.toFixed(1) + '\u00d7 what my own flip rate explains';
+    }
+    var rd = read();
+    if (rd.kind === 'weakness') {
+      return rd.me + ': ' + Math.round(rd.share * 100) + '% of my last ' + rd.n +
+             ' deaths, ' + rd.mult.toFixed(1) + '\u00d7 an even spread';
+    }
+    return null;
+  }
+
   OM.analysis = {
     record: record,
+    shareClaim: shareClaim,
     read: read,
     habit: habit,
     trend: trend,
