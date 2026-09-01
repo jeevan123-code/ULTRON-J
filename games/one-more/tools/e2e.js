@@ -377,6 +377,30 @@ function ok(name, cond, detail) {
   ok('a frame issues its draw calls in under 4ms', perf < 4, perf.toFixed(2) + 'ms/frame');
   console.log('    (draw-call cost: ' + perf.toFixed(2) + 'ms per frame, 60 patterns live)');
 
+  /* ---- compositions ----
+     The proof lives in tools/validate.js; what this checks is that the proven
+     joins are actually part of the world the player gets. */
+  var comp = await page.evaluate(function () {
+    OM.game.state = 'idle';
+    OM.game.start('endless', { seed: 12345 });
+    OM.game.run.gen.ensure(300000, 200, 1);
+    var seen = {}, list = OM.game.run.gen.obstacles.concat(OM.game.run.gen.holes);
+    for (var i = 0; i < list.length; i++) if (list[i].pat) seen[list[i].pat] = 1;
+    var ids = Object.keys(seen);
+    var known = {};
+    OM.patterns.list.forEach(function (p) { known[p.id] = p; });
+    var joined = ids.filter(function (id) { return known[id] && known[id].parts; });
+    OM.game.state = 'idle'; OM.game.run = null;
+    return { total: OM.patterns.list.length,
+             composed: OM.patterns.list.filter(function (p) { return !!p.parts; }).length,
+             spawnedIds: ids.length, spawnedJoins: joined.length,
+             unknown: ids.filter(function (id) { return !known[id]; }).length };
+  });
+  ok('the proven joins are part of the shipped library', comp.composed > 0);
+  ok('and they actually reach the world', comp.spawnedJoins > 0,
+     JSON.stringify(comp));
+  ok('nothing spawns that is not in the library', comp.unknown === 0);
+
   /* ---- practice ---- */
   await page.evaluate(function () {
     OM.game.state = 'idle'; OM.game.run = null;

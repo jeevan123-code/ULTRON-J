@@ -17,6 +17,7 @@ globalThis.localStorage = {
 require(path.join(SRC, '00-core.js'));
 require(path.join(SRC, '10-physics.js'));
 require(path.join(SRC, '20-patterns.js'));
+try { require(path.join(SRC, '22-compositions.js')); } catch (e) {}
 require(path.join(SRC, '25-generator.js'));
 require(path.join(SRC, '30-mutations.js'));
 require(path.join(SRC, '32-analysis.js'));
@@ -775,6 +776,73 @@ ok('weighting never smuggles in a pattern from another family', (function () {
   var pool = A.trialPatterns('timing');
   return poolCount(pool, nerve) === 0 && pool.length > 0;
 })());
+/* ---- compositions ---- */
+/* These run against whatever src/22-compositions.js currently holds, so they
+   are a check on the generated file as shipped, not on the generator's
+   intentions. */
+var COMPS = PAT.list.filter(function (p) { return !!p.parts; });
+function fragById(id) {
+  for (var i = 0; i < PAT.list.length; i++) if (PAT.list[i].id === id) return PAT.list[i];
+  return null;
+}
+ok('the library actually grew', COMPS.length > 0 && PAT.list.length > COMPS.length,
+   COMPS.length + ' compositions on top of ' + (PAT.list.length - COMPS.length) + ' authored');
+ok('every composition is exactly its two fragments, joined', (function () {
+  for (var i = 0; i < COMPS.length; i++) {
+    var c = COMPS[i], a = fragById(c.parts[0]), b = fragById(c.parts[1]);
+    if (!a || !b) return false;
+    if (c.items.length !== a.items.length + b.items.length) return false;
+    var gap = c.len - a.len - b.len;
+    if (gap <= 0) return false;
+    for (var j = 0; j < a.items.length; j++) {
+      if (c.items[j].t !== a.items[j].t || c.items[j].dx !== a.items[j].dx) return false;
+    }
+    for (j = 0; j < b.items.length; j++) {
+      var it = c.items[a.items.length + j];
+      if (it.t !== b.items[j].t || it.dx !== b.items[j].dx + a.len + gap) return false;
+    }
+  }
+  return COMPS.length > 0;
+})(), 'the geometry is rebuilt from the fragments, so it cannot drift away from them');
+ok('a composition is never built from a composition', (function () {
+  for (var i = 0; i < COMPS.length; i++) {
+    var a = fragById(COMPS[i].parts[0]), b = fragById(COMPS[i].parts[1]);
+    if (a.parts || b.parts) return false;
+  }
+  return true;
+})());
+ok('compositions carry no moving geometry', (function () {
+  for (var i = 0; i < COMPS.length; i++) if (PAT.isDynamic(COMPS[i])) return false;
+  return true;
+})(), 'static only, so one proof covers every speed the pair can spawn at');
+ok('compositions never outnumber the authored patterns at their tier', (function () {
+  var comp = {}, auth = {};
+  PAT.list.forEach(function (p) {
+    var m = p.parts ? comp : auth;
+    m[p.tier] = (m[p.tier] || 0) + 1;
+  });
+  for (var t in comp) if (comp[t] > (auth[t] || 0)) return false;
+  return true;
+})(), 'past that the world is a shuffle of two patterns, not sixty');
+ok('every pattern id is still unique', (function () {
+  var seen = {};
+  for (var i = 0; i < PAT.list.length; i++) {
+    if (seen[PAT.list[i].id]) return false;
+    seen[PAT.list[i].id] = 1;
+  }
+  return true;
+})());
+ok('the derived tables were rebuilt to include them', (function () {
+  var n = 0;
+  for (var t = 1; t <= 5; t++) n += PAT.byTier[t].length;
+  if (n !== PAT.list.length) return false;
+  for (var i = 0; i < COMPS.length; i++) {
+    if (PAT.byTier[COMPS[i].tier].indexOf(COMPS[i]) < 0) return false;
+    if (PAT.staticList.indexOf(COMPS[i]) < 0) return false;
+  }
+  return true;
+})());
+
 /* ---- practice mode ---- */
 ok('every pattern is either static or time-driven, and nothing is both', (function () {
   var stat = PAT.staticList, i;

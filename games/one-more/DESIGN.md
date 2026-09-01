@@ -28,16 +28,33 @@ This is the single load-bearing decision. It means:
 **Nothing may break it.** That is why the mutation list has SURGE and DRAG (pure
 speed changes, safe for free under the invariant) and does not have HEAVY or
 FLOAT. A gravity multiplier changes the arc by `1/√mult` and would silently void
-the proof for all 38 patterns — the game would start killing people in places it
+the proof for every pattern at once — the game would start killing people where it
 had promised were fair. A mutation may change how fast the world moves, how much
 of it you can see, or which way is up. It may never change the shape of the arc.
 There is a unit test asserting no mutation carries a gravity term.
 
 ## 3. Difficult, and provably fair
 
-Randomness picks *which* authored pattern comes next and how much room follows
+Randomness picks *which* proven pattern comes next and how much room follows
 it. It never invents geometry. That is the whole difference between hard and
 unfair.
+
+Patterns come from two places and neither of them is chance. Sixty are authored
+by hand. Forty-one are joins of two authored fragments at 90 px — one problem
+rather than two, since that gap is the tight end of what the generator already
+leaves between patterns — and each of those joins goes through the identical
+proof before it can spawn. A line that clears A and a line that clears B say
+nothing about whether a line clears both, so the join is a new pattern and is
+treated as one.
+
+Fairness is not what limits that. All 342 candidate joins passed the fairness
+proof; 178 of them were thrown out anyway, for not being joins. A bar high up
+followed by a block on the floor is perfectly survivable and needs no input at
+all — two things you could have ignored separately. So a join also has to be
+strictly harder than either half, in flips or in slack, and to need at least one
+flip. The proof says a pattern is fair. It cannot say a pattern is worth
+spawning, and pretending otherwise is how a library gets bigger without the game
+getting better.
 
 Each tier owes the player a slack budget, measured at top speed:
 
@@ -135,11 +152,33 @@ The discipline is in what it refuses to say:
 - The trend line is your own median, first fifteen runs against last fifteen. It
   can and does tell you that you are getting worse.
 
-When there is a diagnosis, there is a **Trial**: a run built mostly from the
-patterns you actually fail. A Trial narrows *which* proven patterns can appear
-and starts past the tutorial band. It never changes the rules, the physics or
-the geometry — because those are the things the fairness proof covers, and a
-mode that quietly escaped that proof would be the least fair part of the game.
+When there is a diagnosis, there is a **Trial**: a run weighted towards the
+patterns you actually fail — the family chooses which proven patterns may
+appear, and your own record chooses how often each one comes up. It starts past
+the tutorial band. It never changes the rules, the physics or the geometry —
+because those are the things the fairness proof covers, and a mode that quietly
+escaped that proof would be the least fair part of the game.
+
+And then it closes the loop. Taking the moment of your first Trial in a family
+and comparing that family's share of your normal deaths before it against after
+gives the game a way to say whether its own advice worked — with Trial deaths
+excluded from both sides, since a Trial is one family by construction, and with
+a rise reported exactly as readily as a fall.
+
+Before there are twelve deaths there is nothing statistical to say, but there is
+still something true: what hit you, which surface you were on, how old your last
+flip was, and what a crossing costs at that speed. One death cannot show whether
+the gap you needed was even there, so it stops there.
+
+**Practice** is the one mode that runs at a different speed, and it draws only
+from the 41 static patterns. That is not caution, it is the same invariant: a
+pattern fixed in space, crossed by an arc fixed in space, poses the identical
+problem at any speed — and the flip cooldown, being a fixed number of seconds,
+covers fewer pixels the slower you go, so the line only gets easier to execute.
+Time-driven patterns have no such guarantee: their phase advances further over
+the same stretch of tunnel, so they are a different problem and they stay out.
+Practice keeps its own record, pays no XP, and its deaths never enter the read —
+otherwise every number the game quotes you would carry a hidden asterisk.
 
 ## 8. The last two seconds
 

@@ -301,13 +301,24 @@
 
   OM.patterns = {
     list: L,
-    byTier: (function () {
+    byTier: null,
+    isDynamic: isDynamic,
+    staticList: null,
+    /* Compositions are appended by a generated module rather than authored
+       here, so the derived tables are built by a function that can be run
+       again once they arrive. Nothing may be added that tools/validate.js has
+       not proven — see tools/compose.js, which is the only thing that writes
+       that module. */
+    add: function (extra) {
+      for (var i = 0; i < extra.length; i++) L.push(extra[i]);
+      OM.patterns.rebuild();
+    },
+    rebuild: function () {
       var m = { 1: [], 2: [], 3: [], 4: [], 5: [] };
       for (var i = 0; i < L.length; i++) m[L[i].tier].push(L[i]);
-      return m;
-    })(),
-    isDynamic: isDynamic,
-    staticList: L.filter(function (p) { return !isDynamic(p); }),
+      OM.patterns.byTier = m;
+      OM.patterns.staticList = L.filter(function (p) { return !isDynamic(p); });
+    },
     rectsOf: rectsOf,
     moverY: moverY,
     pistonExt: pistonExt,
@@ -316,4 +327,5 @@
     laserPhase: laserPhase,
     needle: needle
   };
+  OM.patterns.rebuild();
 })(typeof globalThis !== 'undefined' ? globalThis : this);

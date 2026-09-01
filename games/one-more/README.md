@@ -24,32 +24,46 @@ You move forward automatically. The only thing you control is which way is down.
 ## What is in it
 
 **Core** — gravity-flip survival, 60 hand-authored obstacle patterns across five
-difficulty tiers built from eight obstacle types, a procedural generator that
-composes them, a difficulty director, five worlds you arrive at by surviving
-rather than by choosing, nine mutations that rewrite one rule at a time,
-near-miss and perfect-switch detection, instant restart.
+difficulty tiers built from eight obstacle types, plus 41 proven compositions
+of them, a procedural generator, a difficulty director, five worlds you arrive
+at by surviving rather than by choosing, nine mutations that rewrite one rule at
+a time, near-miss and perfect-switch detection, instant restart.
 
 **The read** — the game watches how you die and tells you. Not with a fabricated
 percentile: with your own numbers, held against your own baseline, and only once
 there are enough of them to mean anything. When one kind of death dominates it
-names it, explains the fix, and offers a **Trial** — a run built mostly from the
-patterns you actually fail. When your deaths are evenly spread it says so
-instead of inventing a weakness. Under twelve runs it says nothing at all.
+names it, explains the fix, and offers a **Trial** — a run weighted towards the
+patterns you actually fail. Then it comes back and tells you whether the
+drilling worked: *since your first TIMING trial, deaths to static geometry have
+fallen from 60% to 20% (12 of 20 → 4 of 20)*. The records screen shows the same
+history as a shape, so "you used to die to static geometry; now it is moving
+geometry" is a thing the game can say. When your deaths are evenly spread it
+says so instead of inventing a weakness.
+
+Under twelve runs the statistics say nothing at all — but the panel is not an
+empty countdown either. It describes the death that just happened against the
+one constant the physics guarantees: *a mover caught you crossing to the floor.
+That flip was 0.23s old. A crossing takes 0.57s at this speed — it had not
+finished.* No generalisation, no invented percentile, and it works on death
+one.
 
 **Death replay** — every death captures the last two seconds and replays them on
 the results screen in slow motion, framed on the geometry that killed you. It is
 the honest answer to "what just happened", and it is the clip people post.
 
 **Modes** — Endless, a Daily Challenge seeded from the UTC date so every player
-in the world runs the identical layout, Trials aimed at your weakness, and
-Nightmare, which unlocks at two minutes and starts where the endless run ends:
-top speed, last world, no warm-up.
+in the world runs the identical layout, Trials aimed at your weakness, Practice
+at a fixed 335 px/s with its own record and no XP, and Nightmare, which unlocks
+at two minutes and starts where the endless run ends: top speed, last world, no
+warm-up.
 
 **Retention** — ghost replays of your own record runs that occupy real positions
 in the world so you can watch your past self pull ahead, XP and levels, six
 Nanogon evolutions, five trails, six death effects, twenty achievements, a daily
 streak, a run-history sparkline, and per-device records including exactly what
-kills you.
+kills you. Any run can be replayed exactly — the world is a pure function of one
+32-bit seed — and that seed rides in a URL hash, so a link is a world: **retry
+this exact run**, or hand it to somebody else.
 
 **Feel** — fixed-timestep physics, landing impacts that scale with drop height
 (compression, dust, a scar on the floor, a matched thump), squash and stretch,
@@ -84,8 +98,8 @@ rather than asserted.
 
 ```bash
 npm run validate    # prove every pattern is survivable and fair
-npm test            # 61 unit tests over the pure logic
-npm run e2e         # 53 end-to-end checks driven by real taps
+npm test            # 128 unit tests over the pure logic
+npm run e2e         # 94 end-to-end checks driven by real taps
 npm run playtest    # play the real game in a real browser with a bot
 npm run build       # bundle to dist/
 ```
@@ -93,9 +107,16 @@ npm run build       # bundle to dist/
 ### `tools/validate.js` — the fairness proof
 
 For every pattern, a beam search over the *shipping* physics explores the whole
-space of flip timings — from both entry surfaces, at three speeds, across six
-phase offsets for anything that moves. A pattern passes only if a surviving line
-exists in every combination.
+space of flip timings — from both entry surfaces, at every speed the pattern can
+spawn at, across six phase offsets for anything that moves. A pattern passes
+only if a surviving line exists in every combination.
+
+Where slack has to be measured depends on whether the pattern moves. Static
+geometry is fixed in space and so is the flip arc, so its survivable band is the
+same pixels at every speed and the thinnest window is trivially the fastest one.
+Moving geometry has no such guarantee — its phase advances differently over the
+same stretch of tunnel — so it is measured at every speed and held to the
+worst.
 
 It then measures the number that actually matters: take the most forgiving line
 and slide each flip until the run dies. That is how much timing error the
@@ -109,7 +130,7 @@ t3_gate *             3     1      105ms     pass
 t4_needle_tight       4     2      62ms      pass
 t5_gate_pair *        5     2      53ms      pass
 
-60 patterns / 60 survivable at every speed, entry side and phase
+101 patterns / 101 survivable at every speed, entry side and phase
 All patterns fair, every tier within its slack budget.
 ```
 
@@ -135,6 +156,47 @@ This tool keeps earning its keep. Three findings that changed the game:
   openings and approach rails drawn back from each jaw so a thin obstacle still
   telegraphs from a distance.
 
+### `tools/compose.js` — more world, without more hand-authoring
+
+Sixty authored patterns is a lot of hand work and not a lot of world. The cheap
+way to more is to author another hundred; the honest way is to join the ones
+that exist and prove every join.
+
+`node tools/validate.js --compose` runs each candidate join through the same
+proof the authored library goes through, and writes the survivors to
+`src/22-compositions.js` — the only way a composition can ship.
+
+```
+342 candidate joins at 90px, from 19 static fragments
+342 attempted · 342 fair · 164 PROVEN-DISTINCT COMBINATIONS
+real joins by tier: {"2":34,"3":78,"4":52}
+rejected as unfair: 0 · rejected as no harder than one half: 178
+  no join  t1_bar_high+t1_block 0 flips vs 0, 633ms vs 1072ms
+shipping 41 of them: {"2":13,"3":14,"4":14}
+```
+
+Two fragments joined at 90 px are one problem, not two: that is the tight end of
+what the generator already puts between patterns once the late-game spacing and
+RUSH are both applied, and it is the one case sixty individually-proven patterns
+never said anything about. A line that clears A and a line that clears B say
+nothing about whether a line clears both.
+
+**Fairness turned out not to be the binding constraint.** All 342 joins passed
+the fairness proof, and the first version of this shipped 41 of them — of which
+seventeen could be survived without touching the screen. A bar high up joined to
+a block on the floor is perfectly fair and is also two things you could have
+ignored separately.
+
+So a join clears a second gate: it must need at least one flip, and it must be
+strictly harder than *either* half by one of the two measures there are — more
+flips than either half needs, or less slack than either half leaves. That gate
+rejects 178 of 342. It is the one that does the work.
+
+What limits growth after that is variety, not fairness: compositions never
+outnumber the hand-authored patterns at their tier, because past that the world
+stops being the thing sixty patterns were authored to be and becomes a shuffle
+of two of them. 164 are provably real joins; 41 ship.
+
 ### `tools/playtest.js` — the difficulty curve, measured
 
 Loads the built game in Chromium and plays it with a bot that looks ahead
@@ -143,11 +205,18 @@ a solver and starts standing in for a person.
 
 ```
 PROFILE   REACTION   RUNS  MEDIAN    BEST      WORLD REACHED
-PERFECT   0ms        5     02:54.63  05:31.17  COLLAPSE
-GOOD      110ms      5     01:10.13  02:09.28  PULSE
-HUMAN     190ms      5     00:54.19  01:26.44  PULSE
-SLOPPY    300ms      5     00:23.11  00:43.47  ORIGIN
+PERFECT   0ms        11    02:45.01  04:53.26  PULSE
+GOOD      110ms      11    01:18.63  02:25.33  PULSE
+HUMAN     190ms      11    00:37.07  01:07.30  ORIGIN
+SLOPPY    300ms      11    00:15.73  00:38.71  ORIGIN
 ```
+
+Eleven runs a profile, not five. A PERFECT run lasts minutes and its length has
+a long tail, so five samples put its median anywhere: three consecutive runs of
+an unchanged build gave 4:04, 1:10 and 2:53, and the middle one reported that a
+slower reaction survived longer. That was the sample size talking, not the game
+— but a curve that says something different every time you measure it is not a
+measurement, so the default went up.
 
 A competent human lands around a minute — long enough to feel like progress,
 short enough that restarting costs nothing. Sharpening your reaction from 190 ms
@@ -156,7 +225,7 @@ minutes, so there is a real mastery ceiling to chase.
 
 ### `tools/e2e.js` — the buttons, not just the game
 
-Fifty-three checks driven by real taps on a touch viewport: menu to play, pause
+Ninety-four checks driven by real taps on a touch viewport: menu to play, pause
 without losing the run, death to results to one-more, the daily seed's
 stability, cosmetic locks, persistence across a reload, and every new system —
 that the replay captures the geometry which killed you, that the read stays
@@ -176,6 +245,7 @@ of the families that *could*. One-of-one scored as perfectly even.
 src/00-core.js        RNG, storage, formatting, event bus
 src/10-physics.js     constants, integration, difficulty director   [pure]
 src/20-patterns.js    60 authored patterns + collision geometry     [pure]
+src/22-compositions.js 41 proven joins of them (generated)          [pure]
 src/25-generator.js   seeded procedural composition                 [pure]
 src/30-mutations.js   the nine rule changes                         [pure]
 src/32-analysis.js    the read: death history, diagnosis, trials    [pure]

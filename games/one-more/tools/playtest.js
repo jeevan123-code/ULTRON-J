@@ -18,7 +18,13 @@ var chromium = require('/opt/node22/lib/node_modules/playwright').chromium;
 
 var args = process.argv.slice(2);
 function flag(n, d) { var i = args.indexOf('--' + n); return i >= 0 ? (args[i + 1] || true) : d; }
-var RUNS = parseInt(flag('runs', 5), 10);
+/* Eleven, not five. A PERFECT run lasts minutes and its length has a long tail,
+   so five samples put its median anywhere: three consecutive runs of an
+   unchanged build gave 4:04, 1:10 and 2:53, and the middle one reported that a
+   slower reaction survived longer. That was the sample size talking, not the
+   game, and a curve that says something different every time it is measured is
+   not a measurement. */
+var RUNS = parseInt(flag('runs', 11), 10);
 var SHOTS = args.indexOf('--shots') >= 0;
 var FILE = 'file://' + path.join(__dirname, '..', 'dist', 'one-more.html');
 

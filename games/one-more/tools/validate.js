@@ -22,6 +22,10 @@ var SRC = path.join(__dirname, '..', 'src');
 require(path.join(SRC, '00-core.js'));
 require(path.join(SRC, '10-physics.js'));
 require(path.join(SRC, '20-patterns.js'));
+/* The proven compositions are part of the library and get validated with it.
+   Guarded because --compose is what writes the file: the first run, and any run
+   after deleting it, has to be able to start without it. */
+try { require(path.join(SRC, '22-compositions.js')); } catch (e) {}
 
 var P = OM.phys, PAT = OM.patterns;
 var VERBOSE = process.argv.indexOf('--verbose') >= 0;
@@ -422,7 +426,7 @@ if (ONLY && TARGETS.length !== ONLY.length) {
   process.exit(2);
 }
 
-TARGETS.forEach(function (p) {
+function proveOne(p) {
   var dyn = isDynamic(p);
   var phases = dyn ? [0, 0.17, 0.34, 0.51, 0.68, 0.85] : [0];
   var allOk = true, failAt = null, minFlips = 99, worstWindow = Infinity;
@@ -460,25 +464,32 @@ TARGETS.forEach(function (p) {
      it is reported as >= and held to a floor that reflects the weaker claim. */
   var exact = minFlips <= 2;
   var floor = exact ? TIER_FLOOR[p.tier] : LB_FLOOR[p.tier];
-  rows.push({ id: p.id, tier: p.tier, ok: allOk, window: worstWindow, flips: minFlips,
-              dyn: dyn, failAt: failAt, exact: exact, floor: floor });
-  if (!allOk) fails.push(p.id + ' @x=' + failAt.x + ' (speed ' + failAt.speed + ', from ' + (failAt.grav > 0 ? 'floor' : 'ceiling') + ')');
-  else if (worstWindow < floor) warns.push(p.id + ' ' + Math.round(worstWindow) + 'ms<' + floor);
+  return { id: p.id, tier: p.tier, ok: allOk, window: worstWindow, flips: minFlips,
+           dyn: dyn, failAt: failAt, exact: exact, floor: floor };
+}
+
+if (process.argv.indexOf('--compose') >= 0) { require('./compose.js')(proveOne); return; }
+
+TARGETS.forEach(function (p) {
+  var r = proveOne(p);
+  rows.push(r);
+  if (!r.ok) fails.push(r.id + ' @x=' + r.failAt.x + ' (speed ' + r.failAt.speed + ', from ' + (r.failAt.grav > 0 ? 'floor' : 'ceiling') + ')');
+  else if (r.window < r.floor) warns.push(r.id + ' ' + Math.round(r.window) + 'ms<' + r.floor);
 });
 
 function pad(s, n) { s = String(s); while (s.length < n) s += ' '; return s; }
 rows.sort(function (a, b) { return a.tier - b.tier || a.id.localeCompare(b.id); });
 console.log('\n  ONE MORE — pattern fairness report');
-console.log('  ' + '-'.repeat(64));
-console.log('  ' + pad('PATTERN', 22) + pad('TIER', 6) + pad('FLIPS', 7) + pad('SLACK', 10) + 'RESULT');
-console.log('  ' + '-'.repeat(64));
+console.log('  ' + '-'.repeat(69));
+console.log('  ' + pad('PATTERN', 27) + pad('TIER', 6) + pad('FLIPS', 7) + pad('SLACK', 10) + 'RESULT');
+console.log('  ' + '-'.repeat(69));
 rows.forEach(function (r) {
   var res = r.ok ? (r.window < r.floor ? 'TIGHT (floor ' + r.floor + 'ms)' : 'pass') : 'FAIL @x=' + r.failAt.x;
-  console.log('  ' + pad(r.id + (r.dyn ? ' *' : ''), 22) + pad(String(r.tier), 6) +
+  console.log('  ' + pad(r.id + (r.dyn ? ' *' : ''), 27) + pad(String(r.tier), 6) +
     pad(r.flips === 99 ? '-' : String(r.flips), 7) +
     pad(isFinite(r.window) ? (r.exact ? '' : '>=') + Math.round(r.window) + 'ms' : 'free', 10) + res);
 });
-console.log('  ' + '-'.repeat(64));
+console.log('  ' + '-'.repeat(69));
 console.log('  * = moving geometry, validated across 6 phase offsets');
 console.log('  slack = timing error the most forgiving line tolerates (moving patterns: worst speed)');
 console.log('  >= marks a lower bound (line needs 3+ flips; space not scanned exhaustively)');
