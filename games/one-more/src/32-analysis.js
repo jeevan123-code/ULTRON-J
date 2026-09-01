@@ -337,15 +337,46 @@
     nerve: { hole: 1 }
   };
 
+  /* The family decides WHICH patterns a Trial may draw from. Your own record
+     decides how often each one comes up.
+   *
+   * byPat is too granular to say out loud — being told you die on
+   * t4_mover_gate is trivia — but a Trial never has to name anything, only
+   * select, and there it is the sharpest signal in the log.
+   *
+   * The pool comes back as a multiset: a pattern appears once per unit of
+   * weight, because the generator already picks uniformly from whatever pool it
+   * is handed, so this needs no change at all to the thing that builds the
+   * world. Same proven patterns, same rules, different frequencies.
+   *
+   * Every eligible pattern keeps a weight of at least one. A Trial made only of
+   * what you have already failed could never show you the one you are about to,
+   * and drilling a fixed list is how you get good at a list. The extra weight is
+   * capped relative to your worst pattern, so no single obstacle can take over
+   * the run — at the cap it is four picks in place of one, not the whole pool. */
+  var WEIGHT_MAX = 4;
+
   function trialPatterns(family) {
     var want = FAMILY_TYPES[family] || FAMILY_TYPES.timing;
-    var out = [];
-    for (var i = 0; i < PAT.list.length; i++) {
+    var base = [], i, k;
+    for (i = 0; i < PAT.list.length; i++) {
       var p = PAT.list[i], hit = 0;
       for (var j = 0; j < p.items.length; j++) if (want[p.items[j].t]) hit++;
-      if (hit >= 1 && hit / p.items.length >= 0.5) out.push(p);
+      if (hit >= 1 && hit / p.items.length >= 0.5) base.push(p);
     }
-    return out.length >= 4 ? out : PAT.list.slice();
+    if (base.length < 4) base = PAT.list.slice();
+
+    var byPat = tally().byPat, top = 0;
+    for (i = 0; i < base.length; i++) top = Math.max(top, byPat[base[i].id] || 0);
+    if (!top) return base;                    // nothing failed yet: no opinion
+
+    var out = [];
+    for (i = 0; i < base.length; i++) {
+      var w = 1 + Math.min(WEIGHT_MAX - 1,
+                Math.round((WEIGHT_MAX - 1) * (byPat[base[i].id] || 0) / top));
+      for (k = 0; k < w; k++) out.push(base[i]);
+    }
+    return out;
   }
 
   /* What the game says about you, in your own voice, with the number under it.

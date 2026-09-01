@@ -592,6 +592,66 @@ ok('trial verdicts are ranked by how much moved, in either direction', (function
   return es.length === 2 && es[0].family === 'nerve' &&
          Math.abs(es[0].delta) > Math.abs(es[1].delta);
 })());
+/* ---- weighting a trial by the patterns you actually fail ---- */
+function poolCount(pool, id) {
+  var n = 0;
+  for (var i = 0; i < pool.length; i++) if (pool[i].id === id) n++;
+  return n;
+}
+function timingIds(n) {
+  var pool = A.trialPatterns('timing'), ids = [], i;
+  for (i = 0; i < pool.length && ids.length < n; i++) {
+    if (ids.indexOf(pool[i].id) < 0) ids.push(pool[i].id);
+  }
+  return ids;
+}
+ok('with no history the pool has no opinion', (function () {
+  A.clear();
+  var pool = A.trialPatterns('timing'), seen = {};
+  for (var i = 0; i < pool.length; i++) {
+    if (seen[pool[i].id]) return false;
+    seen[pool[i].id] = 1;
+  }
+  return pool.length > 0;
+})(), 'a trial cannot weight what it has never seen you fail');
+ok('a pattern you keep failing comes up more often', (function () {
+  var ids = timingIds(2);
+  A.clear();
+  for (var i = 0; i < 30; i++) {
+    A.record({ time: 20, cause: 'spike', mode: 'endless', context: { pat: ids[0] } });
+  }
+  var pool = A.trialPatterns('timing');
+  return poolCount(pool, ids[0]) > poolCount(pool, ids[1]);
+})());
+ok('a pattern you have never failed is still in the pool', (function () {
+  var ids = timingIds(2);
+  A.clear();
+  for (var i = 0; i < 30; i++) {
+    A.record({ time: 20, cause: 'spike', mode: 'endless', context: { pat: ids[0] } });
+  }
+  var pool = A.trialPatterns('timing');
+  return poolCount(pool, ids[1]) === 1;
+})(), 'drilling only what you have already failed is how you get good at a list');
+ok('no single pattern can take over a trial', (function () {
+  var ids = timingIds(1);
+  A.clear();
+  for (var i = 0; i < 200; i++) {
+    A.record({ time: 20, cause: 'spike', mode: 'endless', context: { pat: ids[0] } });
+  }
+  var pool = A.trialPatterns('timing');
+  return poolCount(pool, ids[0]) === 4 &&
+         poolCount(pool, ids[0]) / pool.length < 0.35;
+})());
+ok('weighting never smuggles in a pattern from another family', (function () {
+  A.clear();
+  // fail hard on a NERVE pattern, then ask for a TIMING trial
+  var nerve = A.trialPatterns('nerve')[0].id;
+  for (var i = 0; i < 40; i++) {
+    A.record({ time: 20, cause: 'void', mode: 'endless', context: { pat: nerve } });
+  }
+  var pool = A.trialPatterns('timing');
+  return poolCount(pool, nerve) === 0 && pool.length > 0;
+})());
 ok('a trial pool is built only from proven patterns', (function () {
   var fams = ['timing', 'prediction', 'commitment', 'nerve'];
   for (var f = 0; f < fams.length; f++) {
