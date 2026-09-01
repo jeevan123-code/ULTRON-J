@@ -238,6 +238,53 @@
     return best;
   }
 
+  /* ---------- the read before there is a read ----------
+   *
+   * The statistical read is silent until death twelve, and for the eleven runs
+   * before that the panel has only ever offered a countdown. That is a promise
+   * with nothing under it, on exactly the runs where a new player most needs
+   * something.
+   *
+   * This is not a statistic and never becomes one. Every clause is a fact about
+   * the death that just happened, measured against the one constant the physics
+   * guarantees: a crossing covers TRANSIT_X pixels at every speed, so it costs
+   * TRANSIT_X / speed seconds. Holding the age of your last flip against that
+   * number is the whole lesson, and it is available on death one.
+   *
+   * It says what was true. It does not say what you should have done — there is
+   * no way to know from one death whether the gap you needed was even there. */
+  function moment(summary) {
+    if (!summary || !summary.cause) return null;
+    var c = summary.context || {};
+    var speed = c.speed > 0 ? c.speed : P.BASE_SPEED;
+    var cross = P.TRANSIT_X / speed;
+    var label = (OM.causeLabel ? OM.causeLabel(summary.cause) : 'SOMETHING').toLowerCase();
+    label = label.charAt(0).toUpperCase() + label.slice(1);
+    var sf = c.sinceFlip;
+    var cs = cross.toFixed(2) + 's';
+
+    var where;
+    if (summary.cause === 'void') where = 'The floor ran out from under you.';
+    else if (c.airborne) {
+      where = label + ' caught you crossing to the ' +
+              (c.grav > 0 ? 'floor' : 'ceiling') + '.';
+    } else {
+      where = label + ' caught you on the ' + (c.grav > 0 ? 'floor' : 'ceiling') + '.';
+    }
+
+    var when;
+    if (!(sf >= 0) || sf > 20) {
+      when = 'You had not flipped yet. A crossing costs ' + cs + ' at this speed.';
+    } else if (c.airborne && sf < cross) {
+      when = 'That flip was ' + sf.toFixed(2) + 's old. A crossing takes ' + cs +
+             ' at this speed \u2014 it had not finished.';
+    } else {
+      when = 'Your last flip was ' + sf.toFixed(2) + 's earlier. A crossing costs ' +
+             cs + ' at this speed.';
+    }
+    return { where: where, when: when, cross: cross, speed: speed };
+  }
+
   /* ---------- did the drilling work? ----------
    *
    * A Trial points the generator at your weakness and then, until now, never
@@ -407,6 +454,7 @@
     shareClaim: shareClaim,
     read: read,
     habit: habit,
+    moment: moment,
     trialEffect: trialEffect,
     trialEffects: trialEffects,
     trend: trend,

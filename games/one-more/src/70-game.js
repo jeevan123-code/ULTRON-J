@@ -255,6 +255,7 @@
         pat: patternIdAt(r),
         speed: r.speed,
         airborne: !r.grounded,
+        grav: r.grav,
         sinceFlip: r.sinceFlip,
         mutations: r.mods.list.map(function (m) { return m.m.id; }),
         worldId: r.world.id,

@@ -215,8 +215,21 @@ function ok(name, cond, detail) {
        .indexOf(await page.evaluate('OM.game.run.summary.replay.cause')) >= 0);
 
   // ---- the read ----
-  ok('the read stays quiet until it has evidence',
-     (await page.textContent('#r-read')).indexOf('READING YOU') >= 0);
+  var early = await page.textContent('#r-read');
+  ok('the statistical read stays quiet until it has evidence',
+     early.indexOf('more run') >= 0 && early.indexOf('% of your last') < 0,
+     early);
+  /* ...but the gap before it is not an empty countdown: the panel describes the
+     death that just happened, against the crossing time at that speed. */
+  ok('the early panel describes the death instead of promising one',
+     /caught you (on|crossing to) the (floor|ceiling)|floor ran out/.test(early), early);
+  ok('the early panel quotes the crossing cost the player can act on',
+     /A crossing (costs|takes) \d\.\d\ds/.test(early), early);
+  ok('the crossing cost it shows is the one the physics gives', await page.evaluate(function () {
+    var m = OM.analysis.moment(OM.game.run.summary);
+    var c = OM.game.run.summary.context;
+    return !!m && Math.abs(m.cross - OM.phys.TRANSIT_X / c.speed) < 1e-12;
+  }));
   ok('trial is hidden without a diagnosis', await page.isHidden('#r-actions [data-act="trial"]'));
 
   await page.evaluate(function () {

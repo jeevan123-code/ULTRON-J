@@ -473,6 +473,42 @@ ok('an even spread shares nothing rather than something', (function () {
   A.clear(); feed('spike', 10); feed('mover', 10); feed('bar', 10); feed('void', 10);
   return A.read().kind === 'balanced' && A.shareClaim() === null;
 })(), 'silence is the correct fallback, not a manufactured line');
+/* ---- the read before there is a read ---- */
+function death(cause, ctx) {
+  return { cause: cause, context: ctx || {} };
+}
+ok('nothing to say about nothing', A.moment(null) === null && A.moment({}) === null);
+ok('the crossing time it quotes is the crossing time at that speed', (function () {
+  var m = A.moment(death('spike', { speed: 860, sinceFlip: 3, airborne: false, grav: 1 }));
+  return m && Math.abs(m.cross - P.TRANSIT_X / 860) < 1e-12 &&
+         m.when.indexOf((P.TRANSIT_X / 860).toFixed(2) + 's') > 0;
+})(), 'the one constant a player can act on: a crossing is the same distance at every speed');
+ok('a flip that it had not finished is named as one', (function () {
+  var speed = P.BASE_SPEED, cross = P.TRANSIT_X / speed;
+  var m = A.moment(death('mover', { speed: speed, sinceFlip: cross * 0.4, airborne: true, grav: 1 }));
+  return m && m.when.indexOf('it had not finished') > 0 &&
+         m.where.indexOf('crossing to the floor') > 0;
+})());
+ok('a flip that had time is not accused of anything', (function () {
+  var speed = P.BASE_SPEED, cross = P.TRANSIT_X / speed;
+  var m = A.moment(death('spike', { speed: speed, sinceFlip: cross * 3, airborne: false, grav: -1 }));
+  return m && m.when.indexOf('it had not finished') < 0 &&
+         m.where.indexOf('on the ceiling') > 0;
+})(), 'one death cannot show whether the gap you needed was even there');
+ok('never having flipped is stated, not measured', (function () {
+  var m = A.moment(death('spike', { speed: 430, sinceFlip: 99, airborne: false, grav: 1 }));
+  return m && m.when.indexOf('had not flipped yet') > 0;
+})());
+ok('the void gets its own sentence', (function () {
+  var m = A.moment(death('void', { speed: 430, sinceFlip: 0.4, airborne: true, grav: 1 }));
+  return m && m.where.indexOf('floor ran out') > 0;
+})());
+ok('a missing speed falls back to the base speed rather than dividing by zero', (function () {
+  var m = A.moment(death('spike', {}));
+  return m && isFinite(m.cross) && m.cross > 0 &&
+         Math.abs(m.cross - P.TRANSIT_T) < 1e-12;
+})());
+
 /* ---- did the drilling work? ---- */
 /* Deliberately no clock stubbing: the before/after split is by position in the
    log, so these run at real speed and every one of them would fail if it ever

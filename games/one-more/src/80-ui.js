@@ -293,9 +293,20 @@
     var el = $('r-read'), rd = OM.analysis.read(), hb = OM.analysis.habit(), tr = OM.analysis.trend();
     var html = '';
     if (rd.kind === 'none') {
-      html = '<b>READING YOU</b><span>' + rd.need +
-             ' more run' + (rd.need === 1 ? '' : 's') +
-             ' and the game will tell you what keeps killing you.</span>';
+      /* Before there are twelve deaths there is no read, and a countdown on its
+         own is a promise with nothing under it. So the panel talks about the
+         death that just happened instead — no statistics, only what was true of
+         this one — and the countdown drops to a footnote where it belongs. */
+      var mo = OM.analysis.moment(s);
+      if (mo) {
+        html = '<b>WHAT JUST HAPPENED</b><span>' + mo.where + ' ' + mo.when + '</span>' +
+               '<i>' + rd.need + ' more run' + (rd.need === 1 ? '' : 's') +
+               ' and the game can tell you what keeps killing you, not just what did.</i>';
+      } else {
+        html = '<b>READING YOU</b><span>' + rd.need +
+               ' more run' + (rd.need === 1 ? '' : 's') +
+               ' and the game will tell you what keeps killing you.</span>';
+      }
     } else if (rd.kind === 'balanced') {
       html = '<b>' + rd.headline + '</b><span>' + rd.line + '</span>';
     } else {
@@ -308,7 +319,9 @@
        had to offer, which is why that case is no longer always quiet. */
     if (hb) html += '<i>' + habitLine(hb) + '</i>';
     else if (rd.kind === 'weakness') html += '<i>' + rd.fix + '</i>';
-    el.className = (rd.kind === 'weakness' || hb) ? 'read' : 'read quiet';
+    /* The early panel is saying something real, so it does not get the muted
+       treatment reserved for having nothing to say. */
+    el.className = (rd.kind === 'weakness' || hb || rd.kind === 'none') ? 'read' : 'read quiet';
     if (tr && Math.abs(tr.pct) > 0.12) {
       html += '<i>' + (tr.delta > 0 ? 'Improving: ' : 'Slipping: ') +
               'median run ' + OM.fmtTime(tr.early, 2) + ' \u2192 ' + OM.fmtTime(tr.recent, 2) + '</i>';
