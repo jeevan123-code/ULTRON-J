@@ -403,6 +403,7 @@
     $('rec-body').innerHTML =
       '<h3>THE READ</h3>' + readBlock +
       sparkline(OM.analysis.history()) +
+      weaknessChart() +
       (famRows ? '<h3>DEATHS BY KIND</h3><div class="list">' + famRows + '</div>' : '') +
       '<div class="split"><div><span class="lbl">BEST RUN</span><span class="val">' +
         (d.best ? OM.fmtTime(d.best, 2) : '—') + '</span></div>' +
@@ -468,6 +469,52 @@
       '<p class="muted small" style="text-align:left;margin:0 0 6px">' +
       'oldest on the left · longest run highlighted · peak ' + OM.fmtTime(max, 2) + '</p>';
   }
+  /* The read as a history. Four families in four weights of the same ink,
+     oldest bucket on the left — monochrome, so the legend does the job colour
+     would, and the stacking order is fixed so the shape means the same thing
+     every time you look at it. */
+  var BAND_INK = { timing: 0.88, prediction: 0.62, commitment: 0.38, nerve: 0.18 };
+  function bandFill(f) { return 'rgba(232,234,240,' + (BAND_INK[f] || 0.5) + ')'; }
+
+  function weaknessChart() {
+    var wb = OM.analysis.weaknessBands(8);
+    if (!wb) return '';
+    var W = 100, H = 30, bw = W / wb.buckets.length, rects = '', i, k;
+    for (i = 0; i < wb.buckets.length; i++) {
+      var b = wb.buckets[i], y = 0;
+      for (k = 0; k < wb.order.length; k++) {
+        var f = wb.order[k], c = b.counts[f] || 0;
+        if (!c) continue;
+        var h = (c / b.n) * H;
+        rects += '<rect x="' + (i * bw + bw * 0.08).toFixed(2) + '" y="' + y.toFixed(2) +
+                 '" width="' + (bw * 0.84).toFixed(2) + '" height="' + h.toFixed(2) +
+                 '" fill="' + bandFill(f) + '"/>';
+        y += h;
+      }
+    }
+    var legend = '';
+    for (k = 0; k < wb.order.length; k++) {
+      legend += '<span><i style="background:' + bandFill(wb.order[k]) + '"></i>' +
+                OM.analysis.families[wb.order[k]].name + '</span>';
+    }
+    var sh = OM.analysis.shift();
+    /* The exclusion is stated either way. DEATHS BY KIND below counts every
+       death including Trials, so without this the two panels would quietly
+       disagree about the same word and there would be no way to tell why. */
+    var note = sh
+      ? 'You used to die to ' + sh.from.noun + ' (' + Math.round(sh.from.share * 100) +
+        '% of ' + sh.from.n + '); now it is ' + sh.to.noun + ' (' +
+        Math.round(sh.to.share * 100) + '% of ' + sh.to.n + '). Trial runs excluded.'
+      : 'oldest on the left \u00b7 ' + wb.n + ' deaths, trial runs excluded';
+    return '<h3>WHAT HAS BEEN KILLING YOU</h3>' +
+      '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" ' +
+      'style="width:100%;height:64px;display:block;margin:10px 0 6px" role="img" ' +
+      'aria-label="Stacked bars showing which kind of obstacle killed you over ' +
+      wb.n + ' deaths, oldest on the left">' + rects + '</svg>' +
+      '<p class="legend">' + legend + '</p>' +
+      '<p class="muted small" style="text-align:left;margin:0 0 6px">' + note + '</p>';
+  }
+
   function fmtLong(sec) {
     var h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60;
     return (h ? h + 'h ' : '') + m + 'm ' + Math.floor(sec % 60) + 's';

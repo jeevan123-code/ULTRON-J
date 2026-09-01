@@ -473,6 +473,79 @@ ok('an even spread shares nothing rather than something', (function () {
   A.clear(); feed('spike', 10); feed('mover', 10); feed('bar', 10); feed('void', 10);
   return A.read().kind === 'balanced' && A.shareClaim() === null;
 })(), 'silence is the correct fallback, not a manufactured line');
+/* ---- the read as a history ---- */
+ok('a history needs two halves worth of deaths', (function () {
+  A.clear();
+  for (var i = 0; i < 20; i++) A.record({ time: 20, cause: 'spike', mode: 'endless', context: {} });
+  return A.shift() === null && A.weaknessBands() === null;
+})());
+ok('a shift is only named when the thing beating you changed', (function () {
+  A.clear();
+  for (var i = 0; i < 20; i++) A.record({ time: 20, cause: 'spike', mode: 'endless', context: {} });
+  for (i = 0; i < 20; i++) A.record({ time: 20, cause: 'mover', mode: 'endless', context: {} });
+  var sh = A.shift();
+  return sh && sh.from.family === 'timing' && sh.to.family === 'prediction' &&
+         sh.from.n === 20 && sh.to.n === 20;
+})());
+ok('the same weakness throughout is not a story', (function () {
+  A.clear();
+  for (var i = 0; i < 40; i++) A.record({ time: 20, cause: 'spike', mode: 'endless', context: {} });
+  return A.shift() === null;
+})());
+ok('two halves of nothing in particular is not a story either', (function () {
+  A.clear();
+  var causes = ['spike', 'mover', 'bar', 'void'];
+  for (var i = 0; i < 48; i++) {
+    A.record({ time: 20, cause: causes[i % 4], mode: 'endless', context: {} });
+  }
+  return A.shift() === null;
+})(), 'a 51/49 wobble between two families is not a change of weakness');
+ok('drilling cannot fake a shift towards the thing you drilled', (function () {
+  A.clear();
+  for (var i = 0; i < 20; i++) A.record({ time: 20, cause: 'mover', mode: 'endless', context: {} });
+  // 40 trial deaths, all timing, from deliberately practising timing
+  for (i = 0; i < 40; i++) {
+    A.record({ time: 20, cause: 'spike', mode: 'trial', family: 'timing', context: {} });
+  }
+  for (i = 0; i < 20; i++) A.record({ time: 20, cause: 'mover', mode: 'endless', context: {} });
+  return A.shift() === null;
+})(), 'a trial is one family by construction; counting it would invent the shift');
+ok('the bands cover every death they claim to', (function () {
+  A.clear();
+  for (var i = 0; i < 48; i++) {
+    A.record({ time: 20, cause: i < 24 ? 'spike' : 'mover', mode: 'endless', context: {} });
+  }
+  var wb = A.weaknessBands(8), total = 0;
+  for (i = 0; i < wb.buckets.length; i++) {
+    var b = wb.buckets[i], sum = 0;
+    for (var k in b.counts) sum += b.counts[k];
+    if (sum !== b.n) return false;
+    total += b.n;
+  }
+  return total === wb.n && wb.n === 48;
+})());
+ok('the bands are in recorded order, oldest first', (function () {
+  A.clear();
+  for (var i = 0; i < 48; i++) {
+    A.record({ time: 20, cause: i < 24 ? 'spike' : 'mover', mode: 'endless', context: {} });
+  }
+  var wb = A.weaknessBands(8), b = wb.buckets;
+  return (b[0].counts.timing || 0) > 0 && !(b[0].counts.prediction > 0) &&
+         (b[b.length - 1].counts.prediction || 0) > 0 &&
+         !(b[b.length - 1].counts.timing > 0);
+})());
+ok('every family has a band weight, so none is invisible', (function () {
+  var fams = Object.keys(A.families);
+  A.clear();
+  for (var i = 0; i < 48; i++) {
+    A.record({ time: 20, cause: 'spike', mode: 'endless', context: {} });
+  }
+  var wb = A.weaknessBands();
+  if (wb.order.length !== fams.length) return false;
+  for (i = 0; i < fams.length; i++) if (wb.order.indexOf(fams[i]) < 0) return false;
+  return true;
+})());
+
 /* ---- the read before there is a read ---- */
 function death(cause, ctx) {
   return { cause: cause, context: ctx || {} };

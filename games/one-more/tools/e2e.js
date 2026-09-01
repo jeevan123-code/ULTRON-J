@@ -365,6 +365,34 @@ function ok(name, cond, detail) {
   ok('a frame issues its draw calls in under 4ms', perf < 4, perf.toFixed(2) + 'ms/frame');
   console.log('    (draw-call cost: ' + perf.toFixed(2) + 'ms per frame, 60 patterns live)');
 
+  /* ---- the read as a history ---- */
+  await page.evaluate(function () {
+    OM.analysis.clear();
+    for (var i = 0; i < 24; i++) {
+      OM.analysis.record({ time: 20, cause: 'spike', mode: 'endless', context: {} });
+    }
+    for (i = 0; i < 24; i++) {
+      OM.analysis.record({ time: 20, cause: 'mover', mode: 'endless', context: {} });
+    }
+    OM.ui.showRecords();
+  });
+  var recText = await page.textContent('#rec-body');
+  ok('the records screen shows what has been killing you over time',
+     recText.indexOf('WHAT HAS BEEN KILLING YOU') >= 0);
+  ok('it names the change rather than only the snapshot',
+     /You used to die to static geometry.*now it is moving geometry/.test(recText), recText.slice(0, 400));
+  ok('the history is drawn, not just described', await page.evaluate(function () {
+    var svgs = document.querySelectorAll('#rec-body svg');
+    var last = svgs[svgs.length - 1];
+    return !!last && last.querySelectorAll('rect').length >= 8;
+  }));
+  ok('every family in the chart is labelled, since nothing is colour-coded',
+     await page.evaluate(function () {
+       var l = document.querySelector('#rec-body .legend');
+       return !!l && l.querySelectorAll('span').length === 4 &&
+              l.querySelectorAll('i').length === 4;
+     }));
+
   /* ---- the trial loop closes ----
      A seeded history with a Trial in the middle of it, then a real Trial run to
      death, to prove the verdict reaches the screen the run was asking on. */

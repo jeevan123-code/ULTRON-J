@@ -108,6 +108,13 @@ html, body {
 .read i.verdict { color: var(--dim); border-top: 1px solid var(--line); padding-top: 7px; margin-top: 9px; }
 .read i.verdict + i.verdict { border-top: 0; padding-top: 0; margin-top: 4px; }
 
+/* Legend for the weakness history. Monochrome, so the swatch has to sit right
+   next to its label — there is no colour to carry the mapping across a gap. */
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 6px; padding: 0; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 10px;
+  letter-spacing: .14em; color: var(--dim); }
+.legend i { width: 9px; height: 9px; display: inline-block; }
+
 .xpbar { position: relative; height: 22px; border: 1px solid var(--line); margin-bottom: 6px; overflow: hidden; }
 /* Fills by transform, not width: a scale is composited, a width is a layout
    pass on every frame of the half second it takes to fill.

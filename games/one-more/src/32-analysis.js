@@ -79,6 +79,14 @@
     }
   };
 
+  /* The bar a family has to clear before it is called a weakness, against an
+     even split of every family that COULD occur rather than the ones that
+     happen to have. Defined once: the weakness read, the history and anything
+     later that wants to say "lopsided" must all mean the same thing by it. */
+  var EVEN = 1 / Object.keys(FAMILY_COPY).length;
+  var WEAK_AT = Math.max(0.42, EVEN * 1.6);
+  var FAMILY_ORDER = ['timing', 'prediction', 'commitment', 'nerve'];
+
   function tally() {
     var byFamily = {}, byCause = {}, byPat = {}, n = log.length;
     var airborne = 0, lateFlip = 0, rushed = 0, transit = 0, nonVoid = 0;
@@ -141,9 +149,8 @@
        happen to appear. Measuring against the observed set means somebody who
        dies to exactly one thing scores 1/1 = "even", and gets told they have no
        weakness at the precise moment they most obviously do. */
-    var possible = Object.keys(FAMILY_COPY).length;
-    var even = 1 / possible;
-    if (topShare < Math.max(0.42, even * 1.6)) {
+    var even = EVEN;
+    if (topShare < WEAK_AT) {
       return {
         kind: 'balanced',
         headline: 'NO SINGLE WEAKNESS',
@@ -236,6 +243,72 @@
       }
     }
     return best;
+  }
+
+  /* ---------- the read as a history ----------
+   *
+   * "You used to flip late; now you flip into things" says more than either
+   * half on its own, and the log has always had the order to prove it.
+   *
+   * Trial deaths come out. A Trial is deliberately built almost entirely from
+   * one family, so leaving them in would show every player who took up drilling
+   * a dramatic "shift" towards the thing they chose to practise. Nightmare and
+   * daily stay in: unlike the trial verdict, this is not attributing a change to
+   * anything — it is describing what has been killing you, and those deaths
+   * count. Buckets are by position in the log for the same reason the verdict
+   * is: recorded order cannot move, wall clocks can. */
+  function normalLog() {
+    var out = [];
+    for (var i = 0; i < log.length; i++) if (log[i].md !== 'trial') out.push(log[i]);
+    return out;
+  }
+
+  function dominant(pool, lo, hi) {
+    var counts = {}, n = hi - lo, i;
+    for (i = lo; i < hi; i++) {
+      var f = FAMILY[pool[i].cause] || 'timing';
+      counts[f] = (counts[f] || 0) + 1;
+    }
+    var top = null, best = 0;
+    for (var k in counts) if (counts[k] > best) { best = counts[k]; top = k; }
+    if (!top || n <= 0) return null;
+    var share = best / n;
+    if (share < WEAK_AT) return null;         // no dominant family in this half
+    return { family: top, name: FAMILY_COPY[top].name, noun: FAMILY_COPY[top].noun,
+             share: share, count: best, n: n };
+  }
+
+  /* Only when the thing that beats you has actually changed, and only when both
+     halves are lopsided enough to have a "the thing" at all. Two halves that are
+     both a spread of everything is not a story, and neither is a 51/49 wobble
+     between the same two families. */
+  function shift() {
+    var pool = normalLog();
+    if (pool.length < MIN_FOR_READ * 2) return null;
+    var mid = Math.floor(pool.length / 2);
+    var a = dominant(pool, 0, mid), b = dominant(pool, mid, pool.length);
+    if (!a || !b || a.family === b.family) return null;
+    return { from: a, to: b };
+  }
+
+  /* The same history as a shape rather than a sentence: each bucket is a slice
+     of your deaths in order, split by family. It asserts nothing, so it needs
+     only enough per bucket to not be single deaths. */
+  function weaknessBands(want) {
+    var pool = normalLog();
+    if (pool.length < MIN_FOR_READ * 2) return null;
+    var b = Math.max(4, Math.min(want || 8, Math.floor(pool.length / 6)));
+    var out = [];
+    for (var k = 0; k < b; k++) {
+      var lo = Math.floor(k * pool.length / b), hi = Math.floor((k + 1) * pool.length / b);
+      var counts = {};
+      for (var i = lo; i < hi; i++) {
+        var f = FAMILY[pool[i].cause] || 'timing';
+        counts[f] = (counts[f] || 0) + 1;
+      }
+      out.push({ n: hi - lo, counts: counts });
+    }
+    return { order: FAMILY_ORDER, buckets: out, n: pool.length };
   }
 
   /* ---------- the read before there is a read ----------
@@ -455,6 +528,8 @@
     read: read,
     habit: habit,
     moment: moment,
+    shift: shift,
+    weaknessBands: weaknessBands,
     trialEffect: trialEffect,
     trialEffects: trialEffects,
     trend: trend,

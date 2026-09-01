@@ -118,6 +118,13 @@ html, body {
 .read i.verdict { color: var(--dim); border-top: 1px solid var(--line); padding-top: 7px; margin-top: 9px; }
 .read i.verdict + i.verdict { border-top: 0; padding-top: 0; margin-top: 4px; }
 
+/* Legend for the weakness history. Monochrome, so the swatch has to sit right
+   next to its label — there is no colour to carry the mapping across a gap. */
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 6px; padding: 0; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 10px;
+  letter-spacing: .14em; color: var(--dim); }
+.legend i { width: 9px; height: 9px; display: inline-block; }
+
 .xpbar { position: relative; height: 22px; border: 1px solid var(--line); margin-bottom: 6px; overflow: hidden; }
 /* Fills by transform, not width: a scale is composited, a width is a layout
    pass on every frame of the half second it takes to fill.
@@ -182,7 +189,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
 }
 
 </style>
-<!-- build baf0f71065da -->
+<!-- build 0e1404e1de13 -->
 </head>
 <body>
 <div id="app">
@@ -1165,6 +1172,14 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     }
   };
 
+  /* The bar a family has to clear before it is called a weakness, against an
+     even split of every family that COULD occur rather than the ones that
+     happen to have. Defined once: the weakness read, the history and anything
+     later that wants to say "lopsided" must all mean the same thing by it. */
+  var EVEN = 1 / Object.keys(FAMILY_COPY).length;
+  var WEAK_AT = Math.max(0.42, EVEN * 1.6);
+  var FAMILY_ORDER = ['timing', 'prediction', 'commitment', 'nerve'];
+
   function tally() {
     var byFamily = {}, byCause = {}, byPat = {}, n = log.length;
     var airborne = 0, lateFlip = 0, rushed = 0, transit = 0, nonVoid = 0;
@@ -1227,9 +1242,8 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
        happen to appear. Measuring against the observed set means somebody who
        dies to exactly one thing scores 1/1 = "even", and gets told they have no
        weakness at the precise moment they most obviously do. */
-    var possible = Object.keys(FAMILY_COPY).length;
-    var even = 1 / possible;
-    if (topShare < Math.max(0.42, even * 1.6)) {
+    var even = EVEN;
+    if (topShare < WEAK_AT) {
       return {
         kind: 'balanced',
         headline: 'NO SINGLE WEAKNESS',
@@ -1322,6 +1336,72 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       }
     }
     return best;
+  }
+
+  /* ---------- the read as a history ----------
+   *
+   * "You used to flip late; now you flip into things" says more than either
+   * half on its own, and the log has always had the order to prove it.
+   *
+   * Trial deaths come out. A Trial is deliberately built almost entirely from
+   * one family, so leaving them in would show every player who took up drilling
+   * a dramatic "shift" towards the thing they chose to practise. Nightmare and
+   * daily stay in: unlike the trial verdict, this is not attributing a change to
+   * anything — it is describing what has been killing you, and those deaths
+   * count. Buckets are by position in the log for the same reason the verdict
+   * is: recorded order cannot move, wall clocks can. */
+  function normalLog() {
+    var out = [];
+    for (var i = 0; i < log.length; i++) if (log[i].md !== 'trial') out.push(log[i]);
+    return out;
+  }
+
+  function dominant(pool, lo, hi) {
+    var counts = {}, n = hi - lo, i;
+    for (i = lo; i < hi; i++) {
+      var f = FAMILY[pool[i].cause] || 'timing';
+      counts[f] = (counts[f] || 0) + 1;
+    }
+    var top = null, best = 0;
+    for (var k in counts) if (counts[k] > best) { best = counts[k]; top = k; }
+    if (!top || n <= 0) return null;
+    var share = best / n;
+    if (share < WEAK_AT) return null;         // no dominant family in this half
+    return { family: top, name: FAMILY_COPY[top].name, noun: FAMILY_COPY[top].noun,
+             share: share, count: best, n: n };
+  }
+
+  /* Only when the thing that beats you has actually changed, and only when both
+     halves are lopsided enough to have a "the thing" at all. Two halves that are
+     both a spread of everything is not a story, and neither is a 51/49 wobble
+     between the same two families. */
+  function shift() {
+    var pool = normalLog();
+    if (pool.length < MIN_FOR_READ * 2) return null;
+    var mid = Math.floor(pool.length / 2);
+    var a = dominant(pool, 0, mid), b = dominant(pool, mid, pool.length);
+    if (!a || !b || a.family === b.family) return null;
+    return { from: a, to: b };
+  }
+
+  /* The same history as a shape rather than a sentence: each bucket is a slice
+     of your deaths in order, split by family. It asserts nothing, so it needs
+     only enough per bucket to not be single deaths. */
+  function weaknessBands(want) {
+    var pool = normalLog();
+    if (pool.length < MIN_FOR_READ * 2) return null;
+    var b = Math.max(4, Math.min(want || 8, Math.floor(pool.length / 6)));
+    var out = [];
+    for (var k = 0; k < b; k++) {
+      var lo = Math.floor(k * pool.length / b), hi = Math.floor((k + 1) * pool.length / b);
+      var counts = {};
+      for (var i = lo; i < hi; i++) {
+        var f = FAMILY[pool[i].cause] || 'timing';
+        counts[f] = (counts[f] || 0) + 1;
+      }
+      out.push({ n: hi - lo, counts: counts });
+    }
+    return { order: FAMILY_ORDER, buckets: out, n: pool.length };
   }
 
   /* ---------- the read before there is a read ----------
@@ -1541,6 +1621,8 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     read: read,
     habit: habit,
     moment: moment,
+    shift: shift,
+    weaknessBands: weaknessBands,
     trialEffect: trialEffect,
     trialEffects: trialEffects,
     trend: trend,
@@ -3983,6 +4065,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     $('rec-body').innerHTML =
       '<h3>THE READ</h3>' + readBlock +
       sparkline(OM.analysis.history()) +
+      weaknessChart() +
       (famRows ? '<h3>DEATHS BY KIND</h3><div class="list">' + famRows + '</div>' : '') +
       '<div class="split"><div><span class="lbl">BEST RUN</span><span class="val">' +
         (d.best ? OM.fmtTime(d.best, 2) : '—') + '</span></div>' +
@@ -4048,6 +4131,52 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       '<p class="muted small" style="text-align:left;margin:0 0 6px">' +
       'oldest on the left · longest run highlighted · peak ' + OM.fmtTime(max, 2) + '</p>';
   }
+  /* The read as a history. Four families in four weights of the same ink,
+     oldest bucket on the left — monochrome, so the legend does the job colour
+     would, and the stacking order is fixed so the shape means the same thing
+     every time you look at it. */
+  var BAND_INK = { timing: 0.88, prediction: 0.62, commitment: 0.38, nerve: 0.18 };
+  function bandFill(f) { return 'rgba(232,234,240,' + (BAND_INK[f] || 0.5) + ')'; }
+
+  function weaknessChart() {
+    var wb = OM.analysis.weaknessBands(8);
+    if (!wb) return '';
+    var W = 100, H = 30, bw = W / wb.buckets.length, rects = '', i, k;
+    for (i = 0; i < wb.buckets.length; i++) {
+      var b = wb.buckets[i], y = 0;
+      for (k = 0; k < wb.order.length; k++) {
+        var f = wb.order[k], c = b.counts[f] || 0;
+        if (!c) continue;
+        var h = (c / b.n) * H;
+        rects += '<rect x="' + (i * bw + bw * 0.08).toFixed(2) + '" y="' + y.toFixed(2) +
+                 '" width="' + (bw * 0.84).toFixed(2) + '" height="' + h.toFixed(2) +
+                 '" fill="' + bandFill(f) + '"/>';
+        y += h;
+      }
+    }
+    var legend = '';
+    for (k = 0; k < wb.order.length; k++) {
+      legend += '<span><i style="background:' + bandFill(wb.order[k]) + '"></i>' +
+                OM.analysis.families[wb.order[k]].name + '</span>';
+    }
+    var sh = OM.analysis.shift();
+    /* The exclusion is stated either way. DEATHS BY KIND below counts every
+       death including Trials, so without this the two panels would quietly
+       disagree about the same word and there would be no way to tell why. */
+    var note = sh
+      ? 'You used to die to ' + sh.from.noun + ' (' + Math.round(sh.from.share * 100) +
+        '% of ' + sh.from.n + '); now it is ' + sh.to.noun + ' (' +
+        Math.round(sh.to.share * 100) + '% of ' + sh.to.n + '). Trial runs excluded.'
+      : 'oldest on the left \u00b7 ' + wb.n + ' deaths, trial runs excluded';
+    return '<h3>WHAT HAS BEEN KILLING YOU</h3>' +
+      '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" ' +
+      'style="width:100%;height:64px;display:block;margin:10px 0 6px" role="img" ' +
+      'aria-label="Stacked bars showing which kind of obstacle killed you over ' +
+      wb.n + ' deaths, oldest on the left">' + rects + '</svg>' +
+      '<p class="legend">' + legend + '</p>' +
+      '<p class="muted small" style="text-align:left;margin:0 0 6px">' + note + '</p>';
+  }
+
   function fmtLong(sec) {
     var h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60;
     return (h ? h + 'h ' : '') + m + 'm ' + Math.floor(sec % 60) + 's';
