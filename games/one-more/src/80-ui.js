@@ -32,6 +32,12 @@
     OM.bus.on('run:again', function (mode) { UI.startRun(mode); });
     OM.bus.on('run:passed-best', function () { UI.toast('BEST BEATEN'); });
 
+    readChallenge();
+    root.addEventListener('hashchange', function () {
+      readChallenge();
+      if (UI.screen === 'menu') refreshMenu();
+    });
+
     UI.show('menu');
   };
 
@@ -41,6 +47,8 @@
       case 'daily': UI.showDaily(); break;
       case 'play-daily': UI.startRun('daily'); break;
       case 'again': UI.startRun(UI.lastMode); break;
+      case 'retry': UI.retryRun(); break;
+      case 'challenge': UI.startRun('endless', { seed: UI.challenge }); break;
       case 'menu': UI.show('menu'); OM.game.state = 'idle'; OM.game.run = null; OM.audio.stopMusic(); break;
       case 'records': UI.showRecords(); break;
       case 'garage': UI.showGarage(); break;
@@ -73,6 +81,53 @@
     if (replay) replay.stop();
     UI.hideAll();
     OM.game.start(mode, opts || (mode === 'trial' ? { family: UI.lastFamily } : {}));
+  };
+
+  /* ---------- challenge links ----------
+     A seed is the whole world, so a seed is the whole challenge. It rides in
+     the hash where it costs no server and no round trip: open the link and the
+     menu offers the exact run somebody else just played.
+
+     Anything unparseable is ignored rather than coerced. A hash that produced
+     *some* world for a link meant to produce a specific one would be the worst
+     outcome available here — two people would believe they were playing the
+     same thing and quietly not be. */
+  function parseChallenge(hash) {
+    var m = /(?:^|[#&])c=([0-9a-z]{1,7})(?:&|$)/i.exec(hash || '');
+    if (!m) return null;
+    var n = parseInt(m[1], 36);
+    if (!isFinite(n) || n < 0 || n > 0xffffffff) return null;
+    return n >>> 0;
+  }
+
+  function readChallenge() {
+    UI.challenge = parseChallenge(root.location && root.location.hash);
+    var cb = $('menu-challenge');
+    if (UI.challenge == null) { cb.hidden = true; return; }
+    cb.hidden = false;
+    cb.querySelector('em').textContent = 'world ' + UI.code(UI.challenge) +
+      ' \u00b7 sent to you';
+  }
+
+  UI.code = function (seed) { return (seed >>> 0).toString(36).toUpperCase(); };
+
+  /* Only a real link is worth sharing. Under file:// the href is a path on
+     somebody else's disk, so there is nothing to offer and we say nothing. */
+  UI.challengeLink = function (seed) {
+    var loc = root.location;
+    if (!loc || !/^https?:$/.test(loc.protocol)) return null;
+    return loc.href.split('#')[0] + '#c=' + UI.code(seed).toLowerCase();
+  };
+
+  /* The same world again: same obstacles, same mutations, same everything the
+     seed derives. Nothing about the layout is stored — only the number it came
+     from — so this cannot drift out of step with what the generator would build.
+     Daily has no button because Daily is already this: ONE MORE replays it. */
+  UI.retryRun = function () {
+    var s = OM.game.run && OM.game.run.summary;
+    if (!s || s.seed == null || s.mode === 'daily') return;
+    UI.startRun(s.mode, { seed: s.seed, day: s.day, family: s.family,
+                          pool: s.pool, ghost: s.ghost });
   };
 
   /* A Trial points the generator at whatever is actually killing you. It is not
@@ -118,6 +173,9 @@
       nb.querySelector('em').textContent = d.nightmare
         ? 'best ' + OM.fmtTime(d.nightmare, 2) : 'no warnings, no warm-up';
     } else nb.hidden = true;
+
+    var cb = $('menu-challenge');
+    cb.hidden = UI.challenge == null;
 
     var rd = OM.analysis.read(), tb = $('menu-trial');
     if (rd.kind === 'weakness') {
@@ -165,6 +223,9 @@
     $('r-stats').innerHTML =
       stat(s.nearMiss, 'NEAR MISS') + stat(s.perfect, 'PERFECT') +
       stat(s.flips, 'FLIPS') + stat(s.world.name, 'REACHED');
+
+    doc.querySelector('#r-actions [data-act="retry"]').hidden =
+      s.mode === 'daily' || s.seed == null;
 
     // last moments
     var box = doc.querySelector('.replay');
@@ -456,6 +517,14 @@
       ? head + ' — and it says ' + claim + '. What does it say about you?'
       : head + ' · ' + s.perfect + ' perfect switches · reached ' +
         s.world.name + '. Can you beat it?';
+
+    /* The world comes along with the claim, so "can you beat it" is answerable
+       on the run that actually beat me rather than on a different one.
+       Endless only: the same seed under a Trial or Nightmare builds a different
+       world, and Daily already gives everyone today's, so a link there would
+       hand them something other than what it appears to. */
+    var link = s.mode === 'endless' ? UI.challengeLink(s.seed) : null;
+    if (link) text += '\n' + link;
     if (root.navigator && root.navigator.share) {
       root.navigator.share({ title: 'ONE MORE', text: text }).catch(function () {});
       return;

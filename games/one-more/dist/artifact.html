@@ -181,6 +181,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       <div class="stack">
         <button class="btn primary" data-act="play">PLAY</button>
         <button class="btn" data-act="daily">DAILY CHALLENGE<em id="daily-badge"></em></button>
+        <button class="btn" id="menu-challenge" data-act="challenge" hidden>CHALLENGE RUN<em></em></button>
         <button class="btn" id="menu-trial" data-act="trial" hidden>TRIAL<em></em></button>
         <button class="btn" id="menu-nightmare" data-act="nightmare" hidden>NIGHTMARE<em></em></button>
         <div class="row">
@@ -209,6 +210,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       <div class="xpbar"><i id="r-xpfill"></i><span id="r-xplabel"></span></div>
       <div id="r-unlocks" class="unlocks"></div>
       <div class="row" id="r-actions">
+        <button class="btn small" data-act="retry" hidden>RETRY RUN</button>
         <button class="btn small" data-act="trial" hidden>TRIAL</button>
         <button class="btn small" data-act="share">SHARE</button>
         <button class="btn small" data-act="menu">MENU</button>
@@ -2604,15 +2606,25 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
   G.start = function (mode, opts) {
     opts = opts || {};
     var day = mode === 'daily' ? (opts.day == null ? OM.dayIndex() : opts.day) : 0;
+    /* Every mode except daily has thrown its seed away until now, which meant a
+       run you had just learned something from could never be played again. A
+       retry passes the old seed back in and gets the identical world: the
+       generator and the mutation schedule are pure functions of it, so nothing
+       about the layout has to be stored or trusted — if a retry ever diverged,
+       determinism would already be broken and worth finding out. */
     var seed = mode === 'daily' ? OM.hashSeed('onemore-' + OM.dayKey(day))
-                                : (Math.random() * 0xffffffff) >>> 0;
+             : opts.seed != null ? (opts.seed >>> 0)
+             : (Math.random() * 0xffffffff) >>> 0;
     var rng = OM.rng(seed);
 
     /* A Trial is a run built mostly from the patterns you actually fail, and it
        starts past the tutorial band because you are not here to be taught. */
-    var pool = null, tBias = 0, family = opts.family || null;
+    var pool = opts.pool || null, tBias = 0, family = opts.family || null;
     if (mode === 'trial') {
-      pool = OM.analysis.trialPatterns(family);
+      /* A retry carries the pool rather than recomputing it. The pool is derived
+         from the death log, and the run being retried has already added to that
+         log — recomputing would quietly hand back a different world. */
+      if (!pool) pool = OM.analysis.trialPatterns(family);
       tBias = 30;
     } else if (mode === 'nightmare') {
       /* Starts where the endless run ends. No runway, no tier-one warm-up, top
@@ -2621,8 +2633,12 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       tBias = 245;
     }
 
+    /* A retry races the attempt it repeats, not your all-time best. On the same
+       world that is the only comparison that teaches anything: here is where you
+       were last time, and here is where it went wrong. */
     var ghostData = null;
-    if (mode === 'endless') ghostData = prog.data.ghost;
+    if (opts.ghost) ghostData = opts.ghost;
+    else if (mode === 'endless') ghostData = prog.data.ghost;
     else if (mode === 'trial') ghostData = null;
     else if (prog.data.dailyGhost && prog.data.dailyGhost.key === OM.dayKey(day)) {
       ghostData = prog.data.dailyGhost.data;
@@ -2634,7 +2650,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
                : (prog.data.daily[OM.dayKey(day)] || 0);
 
     G.run = {
-      mode: mode, day: day, seed: seed, rng: rng,
+      mode: mode, day: day, seed: seed, rng: rng, pool: pool,
       gen: OM.Generator(OM.rng(seed ^ 0x9e3779b9), { pool: pool, startX: mode === 'nightmare' ? 620 : undefined }),
       tBias: tBias, family: family,
       sched: MUT.schedule(OM.rng(seed ^ 0x85ebca6b)),
@@ -2771,7 +2787,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     var summary = {
       mode: r.mode, day: r.day, family: r.family, time: r.t, cause: cause,
       nearMiss: r.nearMiss, perfect: r.perfect, flips: r.flips,
-      world: r.world, ghost: r.rec.finish(), seed: r.seed,
+      world: r.world, ghost: r.rec.finish(), seed: r.seed, pool: r.pool,
       replay: OM.captureDeath(r, cause),
       /* Context for the death analysis: what killed you is far less useful than
          what you were doing when it did. */
@@ -3411,6 +3427,12 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     OM.bus.on('run:again', function (mode) { UI.startRun(mode); });
     OM.bus.on('run:passed-best', function () { UI.toast('BEST BEATEN'); });
 
+    readChallenge();
+    root.addEventListener('hashchange', function () {
+      readChallenge();
+      if (UI.screen === 'menu') refreshMenu();
+    });
+
     UI.show('menu');
   };
 
@@ -3420,6 +3442,8 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       case 'daily': UI.showDaily(); break;
       case 'play-daily': UI.startRun('daily'); break;
       case 'again': UI.startRun(UI.lastMode); break;
+      case 'retry': UI.retryRun(); break;
+      case 'challenge': UI.startRun('endless', { seed: UI.challenge }); break;
       case 'menu': UI.show('menu'); OM.game.state = 'idle'; OM.game.run = null; OM.audio.stopMusic(); break;
       case 'records': UI.showRecords(); break;
       case 'garage': UI.showGarage(); break;
@@ -3452,6 +3476,53 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     if (replay) replay.stop();
     UI.hideAll();
     OM.game.start(mode, opts || (mode === 'trial' ? { family: UI.lastFamily } : {}));
+  };
+
+  /* ---------- challenge links ----------
+     A seed is the whole world, so a seed is the whole challenge. It rides in
+     the hash where it costs no server and no round trip: open the link and the
+     menu offers the exact run somebody else just played.
+
+     Anything unparseable is ignored rather than coerced. A hash that produced
+     *some* world for a link meant to produce a specific one would be the worst
+     outcome available here — two people would believe they were playing the
+     same thing and quietly not be. */
+  function parseChallenge(hash) {
+    var m = /(?:^|[#&])c=([0-9a-z]{1,7})(?:&|$)/i.exec(hash || '');
+    if (!m) return null;
+    var n = parseInt(m[1], 36);
+    if (!isFinite(n) || n < 0 || n > 0xffffffff) return null;
+    return n >>> 0;
+  }
+
+  function readChallenge() {
+    UI.challenge = parseChallenge(root.location && root.location.hash);
+    var cb = $('menu-challenge');
+    if (UI.challenge == null) { cb.hidden = true; return; }
+    cb.hidden = false;
+    cb.querySelector('em').textContent = 'world ' + UI.code(UI.challenge) +
+      ' \u00b7 sent to you';
+  }
+
+  UI.code = function (seed) { return (seed >>> 0).toString(36).toUpperCase(); };
+
+  /* Only a real link is worth sharing. Under file:// the href is a path on
+     somebody else's disk, so there is nothing to offer and we say nothing. */
+  UI.challengeLink = function (seed) {
+    var loc = root.location;
+    if (!loc || !/^https?:$/.test(loc.protocol)) return null;
+    return loc.href.split('#')[0] + '#c=' + UI.code(seed).toLowerCase();
+  };
+
+  /* The same world again: same obstacles, same mutations, same everything the
+     seed derives. Nothing about the layout is stored — only the number it came
+     from — so this cannot drift out of step with what the generator would build.
+     Daily has no button because Daily is already this: ONE MORE replays it. */
+  UI.retryRun = function () {
+    var s = OM.game.run && OM.game.run.summary;
+    if (!s || s.seed == null || s.mode === 'daily') return;
+    UI.startRun(s.mode, { seed: s.seed, day: s.day, family: s.family,
+                          pool: s.pool, ghost: s.ghost });
   };
 
   /* A Trial points the generator at whatever is actually killing you. It is not
@@ -3497,6 +3568,9 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       nb.querySelector('em').textContent = d.nightmare
         ? 'best ' + OM.fmtTime(d.nightmare, 2) : 'no warnings, no warm-up';
     } else nb.hidden = true;
+
+    var cb = $('menu-challenge');
+    cb.hidden = UI.challenge == null;
 
     var rd = OM.analysis.read(), tb = $('menu-trial');
     if (rd.kind === 'weakness') {
@@ -3544,6 +3618,9 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     $('r-stats').innerHTML =
       stat(s.nearMiss, 'NEAR MISS') + stat(s.perfect, 'PERFECT') +
       stat(s.flips, 'FLIPS') + stat(s.world.name, 'REACHED');
+
+    doc.querySelector('#r-actions [data-act="retry"]').hidden =
+      s.mode === 'daily' || s.seed == null;
 
     // last moments
     var box = doc.querySelector('.replay');
@@ -3835,6 +3912,14 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       ? head + ' — and it says ' + claim + '. What does it say about you?'
       : head + ' · ' + s.perfect + ' perfect switches · reached ' +
         s.world.name + '. Can you beat it?';
+
+    /* The world comes along with the claim, so "can you beat it" is answerable
+       on the run that actually beat me rather than on a different one.
+       Endless only: the same seed under a Trial or Nightmare builds a different
+       world, and Daily already gives everyone today's, so a link there would
+       hand them something other than what it appears to. */
+    var link = s.mode === 'endless' ? UI.challengeLink(s.seed) : null;
+    if (link) text += '\n' + link;
     if (root.navigator && root.navigator.share) {
       root.navigator.share({ title: 'ONE MORE', text: text }).catch(function () {});
       return;

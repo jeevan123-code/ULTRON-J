@@ -66,15 +66,25 @@
   G.start = function (mode, opts) {
     opts = opts || {};
     var day = mode === 'daily' ? (opts.day == null ? OM.dayIndex() : opts.day) : 0;
+    /* Every mode except daily has thrown its seed away until now, which meant a
+       run you had just learned something from could never be played again. A
+       retry passes the old seed back in and gets the identical world: the
+       generator and the mutation schedule are pure functions of it, so nothing
+       about the layout has to be stored or trusted — if a retry ever diverged,
+       determinism would already be broken and worth finding out. */
     var seed = mode === 'daily' ? OM.hashSeed('onemore-' + OM.dayKey(day))
-                                : (Math.random() * 0xffffffff) >>> 0;
+             : opts.seed != null ? (opts.seed >>> 0)
+             : (Math.random() * 0xffffffff) >>> 0;
     var rng = OM.rng(seed);
 
     /* A Trial is a run built mostly from the patterns you actually fail, and it
        starts past the tutorial band because you are not here to be taught. */
-    var pool = null, tBias = 0, family = opts.family || null;
+    var pool = opts.pool || null, tBias = 0, family = opts.family || null;
     if (mode === 'trial') {
-      pool = OM.analysis.trialPatterns(family);
+      /* A retry carries the pool rather than recomputing it. The pool is derived
+         from the death log, and the run being retried has already added to that
+         log — recomputing would quietly hand back a different world. */
+      if (!pool) pool = OM.analysis.trialPatterns(family);
       tBias = 30;
     } else if (mode === 'nightmare') {
       /* Starts where the endless run ends. No runway, no tier-one warm-up, top
@@ -83,8 +93,12 @@
       tBias = 245;
     }
 
+    /* A retry races the attempt it repeats, not your all-time best. On the same
+       world that is the only comparison that teaches anything: here is where you
+       were last time, and here is where it went wrong. */
     var ghostData = null;
-    if (mode === 'endless') ghostData = prog.data.ghost;
+    if (opts.ghost) ghostData = opts.ghost;
+    else if (mode === 'endless') ghostData = prog.data.ghost;
     else if (mode === 'trial') ghostData = null;
     else if (prog.data.dailyGhost && prog.data.dailyGhost.key === OM.dayKey(day)) {
       ghostData = prog.data.dailyGhost.data;
@@ -96,7 +110,7 @@
                : (prog.data.daily[OM.dayKey(day)] || 0);
 
     G.run = {
-      mode: mode, day: day, seed: seed, rng: rng,
+      mode: mode, day: day, seed: seed, rng: rng, pool: pool,
       gen: OM.Generator(OM.rng(seed ^ 0x9e3779b9), { pool: pool, startX: mode === 'nightmare' ? 620 : undefined }),
       tBias: tBias, family: family,
       sched: MUT.schedule(OM.rng(seed ^ 0x85ebca6b)),
@@ -233,7 +247,7 @@
     var summary = {
       mode: r.mode, day: r.day, family: r.family, time: r.t, cause: cause,
       nearMiss: r.nearMiss, perfect: r.perfect, flips: r.flips,
-      world: r.world, ghost: r.rec.finish(), seed: r.seed,
+      world: r.world, ghost: r.rec.finish(), seed: r.seed, pool: r.pool,
       replay: OM.captureDeath(r, cause),
       /* Context for the death analysis: what killed you is far less useful than
          what you were doing when it did. */

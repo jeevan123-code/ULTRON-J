@@ -83,6 +83,54 @@ function ok(name, cond, detail) {
   ok('the run knows the record to chase', await page.evaluate('OM.game.run.target') > 0);
   ok('a ghost of the record run is loaded', await page.evaluate('!!OM.game.run.ghost'));
 
+  /* Retry this exact run. The claim is not "the seed is reused" but "the world
+     is identical", so the check compares the built geometry and the mutation
+     schedule, and confirms an unseeded start does NOT match — otherwise a
+     generator that ignored its seed entirely would pass. */
+  var retry = await page.evaluate(function () {
+    function sig(opts) {
+      OM.game.start('endless', opts);
+      var r = OM.game.run;
+      r.gen.ensure(60000, 0, 1);
+      return {
+        seed: r.seed,
+        n: r.gen.obstacles.length,
+        world: r.gen.obstacles.map(function (o) {
+          return o.t + ':' + Math.round(o.x) + ':' + Math.round(o.y || 0) +
+                 ':' + Math.round(o.w || 0) + ':' + Math.round(o.h || 0);
+        }).join('|'),
+        muts: r.sched.map(function (e) { return e.m.id + '@' + e.at.toFixed(3); }).join(',')
+      };
+    }
+    var a = sig({}), b = sig({ seed: a.seed }), c = sig({});
+    OM.game.state = 'idle'; OM.game.run = null;
+    return { a: a, b: b, c: c };
+  });
+  ok('a retried seed rebuilds the identical world',
+     retry.a.world === retry.b.world && retry.a.n >= 20);
+  ok('a retried seed rebuilds the identical mutation schedule',
+     retry.a.muts === retry.b.muts && retry.a.muts.length > 0);
+  ok('an unseeded start is still a new world',
+     retry.c.seed !== retry.a.seed && retry.c.world !== retry.a.world);
+
+  await page.evaluate(function () { OM.game.state = 'idle'; OM.game.run = null; OM.ui.show('menu'); });
+
+  // the retry button on the results screen must carry the seed through the UI
+  await page.click('[data-act="play"]');
+  await page.waitForFunction("OM.game.state === 'playing'", null, { timeout: 5000 });
+  var retrySeed = await page.evaluate('OM.game.run.seed');
+  await page.evaluate(function () {
+    var t = 0;
+    while (OM.game.state === 'playing' && t < 90) { OM.game.stepHeadless(1 / 120); t += 1 / 120; }
+  });
+  await page.waitForFunction("OM.ui.screen === 'result'", null, { timeout: 8000 });
+  ok('the results screen offers a retry',
+     await page.isVisible('#r-actions [data-act="retry"]'));
+  await page.click('#r-actions [data-act="retry"]');
+  await page.waitForFunction("OM.game.state === 'playing'", null, { timeout: 5000 }).catch(function () {});
+  ok('RETRY RUN replays the same seed', await page.evaluate('OM.game.run.seed') === retrySeed);
+  ok('a retry races the attempt it repeats', await page.evaluate('!!OM.game.run.ghost'));
+
   await page.evaluate(function () { OM.game.state = 'idle'; OM.game.run = null; OM.ui.show('menu'); });
 
   // daily challenge
@@ -303,6 +351,53 @@ function ok(name, cond, detail) {
      is where an accidental O(n^2) over the obstacle list would show up. */
   ok('a frame issues its draw calls in under 4ms', perf < 4, perf.toFixed(2) + 'ms/frame');
   console.log('    (draw-call cost: ' + perf.toFixed(2) + 'ms per frame, 60 patterns live)');
+
+  /* ---- challenge links ----
+     Done last, because each case reloads the page. The trip through about:blank
+     is what makes it a reload: navigating from FILE to FILE#c=... differs only
+     in the hash, which the browser serves as a same-document jump, and the boot
+     path would never run. */
+  await page.goto('about:blank');
+  await page.goto(FILE + '#c=1zzz', { waitUntil: 'load' });
+  await page.waitForFunction('window.OM && OM.ui');
+  ok('a challenge link is read on boot',
+     await page.evaluate('OM.ui.challenge') === parseInt('1zzz', 36));
+  ok('the menu offers the world it was sent',
+     await page.isVisible('#menu-challenge'));
+  ok('the menu names the world code',
+     (await page.textContent('#menu-challenge')).indexOf('1ZZZ') >= 0);
+  await page.click('[data-act="challenge"]');
+  await page.waitForFunction("OM.game.state === 'playing'", null, { timeout: 5000 }).catch(function () {});
+  ok('the challenge starts the world in the link',
+     await page.evaluate('OM.game.run.seed') === parseInt('1zzz', 36));
+  ok('no link is offered from a file:// build',
+     await page.evaluate('OM.ui.challengeLink(123) === null'));
+
+  // a link opened while the game is already up, not from a cold boot
+  await page.evaluate(function () {
+    OM.game.state = 'idle'; OM.game.run = null;
+    OM.ui.show('menu');
+    window.location.hash = '#c=2abc';
+  });
+  await page.waitForFunction("OM.ui.challenge === parseInt('2abc', 36)", null, { timeout: 3000 })
+    .catch(function () {});
+  ok('a link opened mid-session updates the offer',
+     await page.evaluate('OM.ui.challenge') === parseInt('2abc', 36) &&
+     await page.isVisible('#menu-challenge'));
+
+  /* A hash that cannot be parsed must produce no challenge at all. Silently
+     coercing it would hand two people different worlds under one link. */
+  await page.goto('about:blank');
+  await page.goto(FILE + '#c=not-a-seed&x=1', { waitUntil: 'load' });
+  await page.waitForFunction('window.OM && OM.ui');
+  ok('an unparseable hash offers nothing rather than something',
+     await page.evaluate('OM.ui.challenge') === null &&
+     !(await page.isVisible('#menu-challenge')));
+
+  await page.goto('about:blank');
+  await page.goto(FILE, { waitUntil: 'load' });
+  await page.waitForFunction('window.OM && OM.ui');
+  ok('no hash, no challenge', await page.evaluate('OM.ui.challenge') === null);
 
   console.log('  ' + '-'.repeat(52));
   if (errors.length) {
