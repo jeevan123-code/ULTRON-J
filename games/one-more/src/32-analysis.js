@@ -19,6 +19,13 @@
   if (!Array.isArray(log)) log = [];
 
   function record(summary) {
+    /* Practice deaths never enter the history at all. Tagging them and
+       filtering them at every consumer would work too, but they would still be
+       competing for the 260 slots the rolling history has, so a player who
+       drilled a lot would quietly shorten the memory the read is built from.
+       Keeping them out is one line here instead of a filter at five call sites
+       that all have to stay in step. */
+    if (summary.mode === 'practice') return;
     var c = summary.context || {};
     log.push({
       t: Math.round(summary.time * 10) / 10,

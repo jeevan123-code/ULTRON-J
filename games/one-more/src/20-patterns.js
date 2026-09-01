@@ -286,6 +286,19 @@
     return Math.max(CEIL + o.half + 26, Math.min(FLOOR - o.half - 26, c));
   }
 
+  /* Whether a pattern's geometry is driven by the clock. It matters wherever
+     the run speed changes: static geometry is fixed in space and so is the flip
+     arc, so the problem it poses is identical at every speed; a time-driven one
+     advances further during a slower traversal and becomes a different problem.
+     Defined here, next to the patterns, because both the game and the validator
+     have to agree on the answer — two implementations of this would be two
+     opinions about which patterns are proven. */
+  var DYNAMIC_TYPES = { mover: 1, laser: 1, piston: 1, gate: 1 };
+  function isDynamic(p) {
+    for (var i = 0; i < p.items.length; i++) if (DYNAMIC_TYPES[p.items[i].t]) return true;
+    return false;
+  }
+
   OM.patterns = {
     list: L,
     byTier: (function () {
@@ -293,6 +306,8 @@
       for (var i = 0; i < L.length; i++) m[L[i].tier].push(L[i]);
       return m;
     })(),
+    isDynamic: isDynamic,
+    staticList: L.filter(function (p) { return !isDynamic(p); }),
     rectsOf: rectsOf,
     moverY: moverY,
     pistonExt: pistonExt,

@@ -80,7 +80,27 @@
     /* A Trial is a run built mostly from the patterns you actually fail, and it
        starts past the tutorial band because you are not here to be taught. */
     var pool = opts.pool || null, tBias = 0, family = opts.family || null;
-    if (mode === 'trial') {
+    /* Practice: one fixed speed, no ramp, no mutations. The mutations are out
+       because SURGE and DRAG are speed multipliers, and a mode whose whole point
+       is a single known speed cannot have two of them wandering off it. */
+    var fixed = mode === 'practice' ? P.PRACTICE_SPEED : 0;
+    if (mode === 'practice') {
+      /* Static geometry only, and this is the whole safety argument for the
+         mode. A static pattern is fixed in space and so is the flip arc, so the
+         line that survives it is the same line at any speed — and the flip
+         cooldown, being a fixed number of seconds, covers fewer pixels the
+         slower you go, so the line only gets easier to execute. Every one of
+         these 41 is therefore already proven at 335 by the run that proved it
+         at 911.
+         The 19 time-driven ones have no such guarantee: their phase advances
+         further over the same stretch of tunnel at a lower speed, so they are a
+         different problem that has not been proven, and they stay out. */
+      if (!pool) pool = PAT.staticList.slice();
+      /* Same as a Trial: start past the tutorial band. Practice is unlocked
+         after five runs, so nobody arrives here needing to be taught what a
+         spike is — and at this speed the opening tiers are close to empty. */
+      tBias = 30;
+    } else if (mode === 'trial') {
       /* A retry carries the pool rather than recomputing it. The pool is derived
          from the death log, and the run being retried has already added to that
          log — recomputing would quietly hand back a different world. */
@@ -99,7 +119,7 @@
     var ghostData = null;
     if (opts.ghost) ghostData = opts.ghost;
     else if (mode === 'endless') ghostData = prog.data.ghost;
-    else if (mode === 'trial') ghostData = null;
+    else if (mode === 'trial' || mode === 'practice') ghostData = null;
     else if (prog.data.dailyGhost && prog.data.dailyGhost.key === OM.dayKey(day)) {
       ghostData = prog.data.dailyGhost.data;
     }
@@ -107,14 +127,16 @@
     var target = mode === 'endless' ? prog.data.best
                : mode === 'trial' ? (prog.data.trial[family] || 0)
                : mode === 'nightmare' ? prog.data.nightmare
+               : mode === 'practice' ? prog.data.practice
                : (prog.data.daily[OM.dayKey(day)] || 0);
 
     G.run = {
       mode: mode, day: day, seed: seed, rng: rng, pool: pool,
       gen: OM.Generator(OM.rng(seed ^ 0x9e3779b9), { pool: pool, startX: mode === 'nightmare' ? 620 : undefined }),
       tBias: tBias, family: family,
-      sched: MUT.schedule(OM.rng(seed ^ 0x85ebca6b)),
-      t: 0, px: 0, speed: P.speedAt(tBias > 100 ? 200 : 0),
+      sched: fixed ? [] : MUT.schedule(OM.rng(seed ^ 0x85ebca6b)),
+      fixed: fixed,
+      t: 0, px: 0, speed: fixed || P.speedAt(tBias > 100 ? 200 : 0),
       y: P.FLOOR - P.R, vy: 0, grav: 1, grounded: true,
       rot: 0, rotTarget: 0,
       squash: 0, wasGrounded: true, lastVy: 0, marks: [],
@@ -248,6 +270,10 @@
       mode: r.mode, day: r.day, family: r.family, time: r.t, cause: cause,
       nearMiss: r.nearMiss, perfect: r.perfect, flips: r.flips,
       world: r.world, ghost: r.rec.finish(), seed: r.seed, pool: r.pool,
+      /* The record this run was chasing, chosen once when the run started.
+         The results screen used to re-derive it from the mode and got it wrong
+         for every mode that is not endless or daily. */
+      target: r.target,
       replay: OM.captureDeath(r, cause),
       /* Context for the death analysis: what killed you is far less useful than
          what you were doing when it did. */
@@ -308,7 +334,7 @@
     r.mods = mods;
 
     r.t += dt;
-    r.speed = P.speedAt(r.t + (r.tBias > 100 ? r.tBias : 0)) * mods.speed;
+    r.speed = r.fixed || P.speedAt(r.t + (r.tBias > 100 ? r.tBias : 0)) * mods.speed;
     var g = P.gravityFor(r.speed, 1);
 
     var world = P.worldAt(r.t + (r.tBias > 100 ? r.tBias : 0));

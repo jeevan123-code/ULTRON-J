@@ -13,6 +13,8 @@
     daily: {},            // dayKey -> best seconds
     trial: {},            // weakness family -> best seconds
     nightmare: 0,         // best in the unlockable hard mode
+    practice: 0,          // best at the fixed practice speed, kept apart on purpose
+    practiceRuns: 0,
     dailyDone: [],        // dayKeys played, for the streak
     nearMiss: 0, perfect: 0, flips: 0, deaths: {},
     cosmetics: { core: 'auto', trail: 'line', death: 'shatter' },
@@ -142,7 +144,25 @@
   /* ---- recording a run ---- */
   function commitRun(r) {
     var beforeLevel = levelInfo(save.xp).level;
-    if (OM.analysis) OM.analysis.record(r);
+    if (OM.analysis) OM.analysis.record(r);   // ignores practice runs itself
+
+    /* Practice is a training room, not a run. It banks its own best time and
+       touches nothing else.
+       No XP: XP is paid by the second, and a lower speed buys more seconds for
+       the same skill, so paying it here would make the training room the
+       fastest way to level. No lifetime totals and no achievements for the same
+       reason. Its best time is stored apart so that "best" keeps meaning one
+       thing. */
+    if (r.mode === 'practice') {
+      var pbest = r.time > save.practice;
+      if (pbest) save.practice = r.time;
+      save.practiceRuns++;
+      touch();
+      flush();
+      return { xp: 0, record: pbest, achievements: [], levelUp: false,
+               level: levelInfo(save.xp).level };
+    }
+
     save.runs++;
     save.totalTime += r.time;
     save.nearMiss += r.nearMiss;

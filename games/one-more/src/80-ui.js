@@ -58,6 +58,7 @@
       case 'share': UI.share(); break;
       case 'trial': UI.startTrial(); break;
       case 'nightmare': UI.startRun('nightmare'); break;
+      case 'practice': UI.startRun('practice'); break;
     }
   }
 
@@ -177,6 +178,14 @@
     var cb = $('menu-challenge');
     cb.hidden = UI.challenge == null;
 
+    var pb = $('menu-practice');
+    if (d.runs >= 5) {
+      pb.hidden = false;
+      pb.querySelector('em').textContent =
+        (d.practice ? 'best ' + OM.fmtTime(d.practice, 2) + ' \u00b7 ' : '') +
+        P.PRACTICE_SPEED + 'px/s, static geometry only';
+    } else pb.hidden = true;
+
     var rd = OM.analysis.read(), tb = $('menu-trial');
     if (rd.kind === 'weakness') {
       tb.hidden = false;
@@ -202,19 +211,23 @@
   /* ---------- results ---------- */
   UI.showResult = function (s) {
     var d = prog.data;
-    var best = s.mode === 'endless' ? d.best : (d.daily[OM.dayKey(s.day)] || 0);
+    /* The record this run was chasing, decided when it started. Re-deriving it
+       here from the mode got it wrong for everything that is not endless. */
+    var best = s.target || 0;
     var res = s.result;
 
     $('r-kicker').textContent = res.record
-      ? (s.mode === 'trial' ? 'BEST TRIAL' : 'NEW RECORD')
+      ? (s.mode === 'trial' ? 'BEST TRIAL' : s.mode === 'practice' ? 'BEST PRACTICE' : 'NEW RECORD')
       : (s.mode === 'trial' ? 'TRIAL · ' + (OM.analysis.families[s.family || UI.lastFamily] || { name: '' }).name
+         : s.mode === 'practice' ? 'PRACTICE · ' + P.PRACTICE_SPEED + 'PX/S'
                             : 'YOU SURVIVED');
     $('r-time').textContent = OM.fmtTime(s.time, 2);
 
     var dEl = $('r-delta');
     dEl.classList.toggle('record', !!res.record);
     if (res.record) {
-      dEl.textContent = s.mode === 'daily' ? 'BEST TODAY' : 'PERSONAL BEST';
+      dEl.textContent = s.mode === 'daily' ? 'BEST TODAY'
+                      : s.mode === 'practice' ? 'BEST IN PRACTICE' : 'PERSONAL BEST';
     } else if (best > 0) {
       // The number that creates "one more": how close you were, not how far.
       dEl.textContent = OM.fmtDelta(best - s.time) + ' FROM YOUR BEST · ' + OM.fmtTime(best, 2);
@@ -244,8 +257,11 @@
 
     var li = prog.levelInfo();
     $('r-xpfill').style.transform = 'scaleX(' + li.frac.toFixed(4) + ')';
-    $('r-xplabel').textContent = 'LEVEL ' + li.level + (li.capped ? ' · MAX' : '') +
-      '  +' + res.xp + ' XP';
+    /* Practice says out loud what it does not do, rather than showing +0 XP and
+       leaving the player to work out whether that is a bug. */
+    $('r-xplabel').textContent = s.mode === 'practice'
+      ? 'PRACTICE · SEPARATE RECORD, NO XP'
+      : 'LEVEL ' + li.level + (li.capped ? ' · MAX' : '') + '  +' + res.xp + ' XP';
 
     var un = [];
     if (res.levelUp) un.push('LEVEL ' + res.level + ' REACHED');
@@ -607,7 +623,8 @@
     var s = OM.game.run && OM.game.run.summary;
     if (!s) return;
     var head = 'ONE MORE · ' + OM.fmtTime(s.time, 2) +
-      (s.mode === 'daily' ? ' on Daily ' + OM.dayKey(s.day) : '');
+      (s.mode === 'daily' ? ' on Daily ' + OM.dayKey(s.day) : '') +
+      (s.mode === 'practice' ? ' in practice at ' + P.PRACTICE_SPEED + 'px/s' : '');
     var claim = OM.analysis.shareClaim();
     var text = claim
       ? head + ' — and it says ' + claim + '. What does it say about you?'

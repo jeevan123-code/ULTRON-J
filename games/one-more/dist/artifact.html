@@ -194,6 +194,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
         <button class="btn" data-act="daily">DAILY CHALLENGE<em id="daily-badge"></em></button>
         <button class="btn" id="menu-challenge" data-act="challenge" hidden>CHALLENGE RUN<em></em></button>
         <button class="btn" id="menu-trial" data-act="trial" hidden>TRIAL<em></em></button>
+        <button class="btn" id="menu-practice" data-act="practice" hidden>PRACTICE<em></em></button>
         <button class="btn" id="menu-nightmare" data-act="nightmare" hidden>NIGHTMARE<em></em></button>
         <div class="row">
           <button class="btn small" data-act="records">PROFILE</button>
@@ -451,6 +452,15 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     var ramp = 320 * (1 - Math.exp(-t / 42));
     return P.BASE_SPEED + ramp + Math.min(t, 400) * 0.62;
   };
+
+  /* Practice runs at one fixed speed with no ramp. It is a lower speed than the
+     game ever starts at, but not a lower difficulty setting for the game: it is
+     a separate mode with its own records and no XP, and its deaths are kept out
+     of the read entirely, so nothing you learn here is priced into what the
+     game tells you about how you play.
+     335 rather than a round fraction because that is the speed the difference
+     between slow and full was actually measured at. */
+  P.PRACTICE_SPEED = 335;
 
   P.gravityFor = function (speed, mult) {
     var s = speed / P.BASE_SPEED;
@@ -836,6 +846,19 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     return Math.max(CEIL + o.half + 26, Math.min(FLOOR - o.half - 26, c));
   }
 
+  /* Whether a pattern's geometry is driven by the clock. It matters wherever
+     the run speed changes: static geometry is fixed in space and so is the flip
+     arc, so the problem it poses is identical at every speed; a time-driven one
+     advances further during a slower traversal and becomes a different problem.
+     Defined here, next to the patterns, because both the game and the validator
+     have to agree on the answer — two implementations of this would be two
+     opinions about which patterns are proven. */
+  var DYNAMIC_TYPES = { mover: 1, laser: 1, piston: 1, gate: 1 };
+  function isDynamic(p) {
+    for (var i = 0; i < p.items.length; i++) if (DYNAMIC_TYPES[p.items[i].t]) return true;
+    return false;
+  }
+
   OM.patterns = {
     list: L,
     byTier: (function () {
@@ -843,6 +866,8 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       for (var i = 0; i < L.length; i++) m[L[i].tier].push(L[i]);
       return m;
     })(),
+    isDynamic: isDynamic,
+    staticList: L.filter(function (p) { return !isDynamic(p); }),
     rectsOf: rectsOf,
     moverY: moverY,
     pistonExt: pistonExt,
@@ -1100,6 +1125,13 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
   if (!Array.isArray(log)) log = [];
 
   function record(summary) {
+    /* Practice deaths never enter the history at all. Tagging them and
+       filtering them at every consumer would work too, but they would still be
+       competing for the 260 slots the rolling history has, so a player who
+       drilled a lot would quietly shorten the memory the read is built from.
+       Keeping them out is one line here instead of a filter at five call sites
+       that all have to stay in step. */
+    if (summary.mode === 'practice') return;
     var c = summary.context || {};
     log.push({
       t: Math.round(summary.time * 10) / 10,
@@ -1639,6 +1671,8 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     daily: {},            // dayKey -> best seconds
     trial: {},            // weakness family -> best seconds
     nightmare: 0,         // best in the unlockable hard mode
+    practice: 0,          // best at the fixed practice speed, kept apart on purpose
+    practiceRuns: 0,
     dailyDone: [],        // dayKeys played, for the streak
     nearMiss: 0, perfect: 0, flips: 0, deaths: {},
     cosmetics: { core: 'auto', trail: 'line', death: 'shatter' },
@@ -1768,7 +1802,25 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
   /* ---- recording a run ---- */
   function commitRun(r) {
     var beforeLevel = levelInfo(save.xp).level;
-    if (OM.analysis) OM.analysis.record(r);
+    if (OM.analysis) OM.analysis.record(r);   // ignores practice runs itself
+
+    /* Practice is a training room, not a run. It banks its own best time and
+       touches nothing else.
+       No XP: XP is paid by the second, and a lower speed buys more seconds for
+       the same skill, so paying it here would make the training room the
+       fastest way to level. No lifetime totals and no achievements for the same
+       reason. Its best time is stored apart so that "best" keeps meaning one
+       thing. */
+    if (r.mode === 'practice') {
+      var pbest = r.time > save.practice;
+      if (pbest) save.practice = r.time;
+      save.practiceRuns++;
+      touch();
+      flush();
+      return { xp: 0, record: pbest, achievements: [], levelUp: false,
+               level: levelInfo(save.xp).level };
+    }
+
     save.runs++;
     save.totalTime += r.time;
     save.nearMiss += r.nearMiss;
@@ -2874,7 +2926,27 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     /* A Trial is a run built mostly from the patterns you actually fail, and it
        starts past the tutorial band because you are not here to be taught. */
     var pool = opts.pool || null, tBias = 0, family = opts.family || null;
-    if (mode === 'trial') {
+    /* Practice: one fixed speed, no ramp, no mutations. The mutations are out
+       because SURGE and DRAG are speed multipliers, and a mode whose whole point
+       is a single known speed cannot have two of them wandering off it. */
+    var fixed = mode === 'practice' ? P.PRACTICE_SPEED : 0;
+    if (mode === 'practice') {
+      /* Static geometry only, and this is the whole safety argument for the
+         mode. A static pattern is fixed in space and so is the flip arc, so the
+         line that survives it is the same line at any speed — and the flip
+         cooldown, being a fixed number of seconds, covers fewer pixels the
+         slower you go, so the line only gets easier to execute. Every one of
+         these 41 is therefore already proven at 335 by the run that proved it
+         at 911.
+         The 19 time-driven ones have no such guarantee: their phase advances
+         further over the same stretch of tunnel at a lower speed, so they are a
+         different problem that has not been proven, and they stay out. */
+      if (!pool) pool = PAT.staticList.slice();
+      /* Same as a Trial: start past the tutorial band. Practice is unlocked
+         after five runs, so nobody arrives here needing to be taught what a
+         spike is — and at this speed the opening tiers are close to empty. */
+      tBias = 30;
+    } else if (mode === 'trial') {
       /* A retry carries the pool rather than recomputing it. The pool is derived
          from the death log, and the run being retried has already added to that
          log — recomputing would quietly hand back a different world. */
@@ -2893,7 +2965,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     var ghostData = null;
     if (opts.ghost) ghostData = opts.ghost;
     else if (mode === 'endless') ghostData = prog.data.ghost;
-    else if (mode === 'trial') ghostData = null;
+    else if (mode === 'trial' || mode === 'practice') ghostData = null;
     else if (prog.data.dailyGhost && prog.data.dailyGhost.key === OM.dayKey(day)) {
       ghostData = prog.data.dailyGhost.data;
     }
@@ -2901,14 +2973,16 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     var target = mode === 'endless' ? prog.data.best
                : mode === 'trial' ? (prog.data.trial[family] || 0)
                : mode === 'nightmare' ? prog.data.nightmare
+               : mode === 'practice' ? prog.data.practice
                : (prog.data.daily[OM.dayKey(day)] || 0);
 
     G.run = {
       mode: mode, day: day, seed: seed, rng: rng, pool: pool,
       gen: OM.Generator(OM.rng(seed ^ 0x9e3779b9), { pool: pool, startX: mode === 'nightmare' ? 620 : undefined }),
       tBias: tBias, family: family,
-      sched: MUT.schedule(OM.rng(seed ^ 0x85ebca6b)),
-      t: 0, px: 0, speed: P.speedAt(tBias > 100 ? 200 : 0),
+      sched: fixed ? [] : MUT.schedule(OM.rng(seed ^ 0x85ebca6b)),
+      fixed: fixed,
+      t: 0, px: 0, speed: fixed || P.speedAt(tBias > 100 ? 200 : 0),
       y: P.FLOOR - P.R, vy: 0, grav: 1, grounded: true,
       rot: 0, rotTarget: 0,
       squash: 0, wasGrounded: true, lastVy: 0, marks: [],
@@ -3042,6 +3116,10 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       mode: r.mode, day: r.day, family: r.family, time: r.t, cause: cause,
       nearMiss: r.nearMiss, perfect: r.perfect, flips: r.flips,
       world: r.world, ghost: r.rec.finish(), seed: r.seed, pool: r.pool,
+      /* The record this run was chasing, chosen once when the run started.
+         The results screen used to re-derive it from the mode and got it wrong
+         for every mode that is not endless or daily. */
+      target: r.target,
       replay: OM.captureDeath(r, cause),
       /* Context for the death analysis: what killed you is far less useful than
          what you were doing when it did. */
@@ -3102,7 +3180,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     r.mods = mods;
 
     r.t += dt;
-    r.speed = P.speedAt(r.t + (r.tBias > 100 ? r.tBias : 0)) * mods.speed;
+    r.speed = r.fixed || P.speedAt(r.t + (r.tBias > 100 ? r.tBias : 0)) * mods.speed;
     var g = P.gravityFor(r.speed, 1);
 
     var world = P.worldAt(r.t + (r.tBias > 100 ? r.tBias : 0));
@@ -3708,6 +3786,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       case 'share': UI.share(); break;
       case 'trial': UI.startTrial(); break;
       case 'nightmare': UI.startRun('nightmare'); break;
+      case 'practice': UI.startRun('practice'); break;
     }
   }
 
@@ -3827,6 +3906,14 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     var cb = $('menu-challenge');
     cb.hidden = UI.challenge == null;
 
+    var pb = $('menu-practice');
+    if (d.runs >= 5) {
+      pb.hidden = false;
+      pb.querySelector('em').textContent =
+        (d.practice ? 'best ' + OM.fmtTime(d.practice, 2) + ' \u00b7 ' : '') +
+        P.PRACTICE_SPEED + 'px/s, static geometry only';
+    } else pb.hidden = true;
+
     var rd = OM.analysis.read(), tb = $('menu-trial');
     if (rd.kind === 'weakness') {
       tb.hidden = false;
@@ -3852,19 +3939,23 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
   /* ---------- results ---------- */
   UI.showResult = function (s) {
     var d = prog.data;
-    var best = s.mode === 'endless' ? d.best : (d.daily[OM.dayKey(s.day)] || 0);
+    /* The record this run was chasing, decided when it started. Re-deriving it
+       here from the mode got it wrong for everything that is not endless. */
+    var best = s.target || 0;
     var res = s.result;
 
     $('r-kicker').textContent = res.record
-      ? (s.mode === 'trial' ? 'BEST TRIAL' : 'NEW RECORD')
+      ? (s.mode === 'trial' ? 'BEST TRIAL' : s.mode === 'practice' ? 'BEST PRACTICE' : 'NEW RECORD')
       : (s.mode === 'trial' ? 'TRIAL · ' + (OM.analysis.families[s.family || UI.lastFamily] || { name: '' }).name
+         : s.mode === 'practice' ? 'PRACTICE · ' + P.PRACTICE_SPEED + 'PX/S'
                             : 'YOU SURVIVED');
     $('r-time').textContent = OM.fmtTime(s.time, 2);
 
     var dEl = $('r-delta');
     dEl.classList.toggle('record', !!res.record);
     if (res.record) {
-      dEl.textContent = s.mode === 'daily' ? 'BEST TODAY' : 'PERSONAL BEST';
+      dEl.textContent = s.mode === 'daily' ? 'BEST TODAY'
+                      : s.mode === 'practice' ? 'BEST IN PRACTICE' : 'PERSONAL BEST';
     } else if (best > 0) {
       // The number that creates "one more": how close you were, not how far.
       dEl.textContent = OM.fmtDelta(best - s.time) + ' FROM YOUR BEST · ' + OM.fmtTime(best, 2);
@@ -3894,8 +3985,11 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
 
     var li = prog.levelInfo();
     $('r-xpfill').style.transform = 'scaleX(' + li.frac.toFixed(4) + ')';
-    $('r-xplabel').textContent = 'LEVEL ' + li.level + (li.capped ? ' · MAX' : '') +
-      '  +' + res.xp + ' XP';
+    /* Practice says out loud what it does not do, rather than showing +0 XP and
+       leaving the player to work out whether that is a bug. */
+    $('r-xplabel').textContent = s.mode === 'practice'
+      ? 'PRACTICE · SEPARATE RECORD, NO XP'
+      : 'LEVEL ' + li.level + (li.capped ? ' · MAX' : '') + '  +' + res.xp + ' XP';
 
     var un = [];
     if (res.levelUp) un.push('LEVEL ' + res.level + ' REACHED');
@@ -4257,7 +4351,8 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     var s = OM.game.run && OM.game.run.summary;
     if (!s) return;
     var head = 'ONE MORE · ' + OM.fmtTime(s.time, 2) +
-      (s.mode === 'daily' ? ' on Daily ' + OM.dayKey(s.day) : '');
+      (s.mode === 'daily' ? ' on Daily ' + OM.dayKey(s.day) : '') +
+      (s.mode === 'practice' ? ' in practice at ' + P.PRACTICE_SPEED + 'px/s' : '');
     var claim = OM.analysis.shareClaim();
     var text = claim
       ? head + ' — and it says ' + claim + '. What does it say about you?'

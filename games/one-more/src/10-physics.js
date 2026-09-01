@@ -42,6 +42,15 @@
     return P.BASE_SPEED + ramp + Math.min(t, 400) * 0.62;
   };
 
+  /* Practice runs at one fixed speed with no ramp. It is a lower speed than the
+     game ever starts at, but not a lower difficulty setting for the game: it is
+     a separate mode with its own records and no XP, and its deaths are kept out
+     of the read entirely, so nothing you learn here is priced into what the
+     game tells you about how you play.
+     335 rather than a round fraction because that is the speed the difference
+     between slow and full was actually measured at. */
+  P.PRACTICE_SPEED = 335;
+
   P.gravityFor = function (speed, mult) {
     var s = speed / P.BASE_SPEED;
     return P.BASE_G * s * s * (mult == null ? 1 : mult);

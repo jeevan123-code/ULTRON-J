@@ -349,6 +349,15 @@ function ok(name, cond, detail) {
   // ---- render cost ----
   var perf = await page.evaluate(function () {
     OM.ui.hideAll(); OM.game.start('endless', {}); OM.audio.setMuted(true);
+    /* This pass kills a run every few frames, and every death arms a 620ms
+       timer that opens the results screen. Left alone, those land in the middle
+       of whatever check comes next and hand it a stale panel. Suppressing the
+       screen for the duration and restoring it from a timer armed AFTER the
+       last of them — same delay, so it is behind them all in the queue — is an
+       ordering guarantee rather than a sleep and a hope. */
+    var realShow = OM.ui.showResult;
+    OM.ui.showResult = function () {};
+    OM.__perfSettled = false;
     var t = 0, guard = 0;
     // fast-forward into a busy part of the world, restarting on death
     while (t < 120 && guard++ < 200000) {
@@ -357,13 +366,69 @@ function ok(name, cond, detail) {
     }
     var n = 240, t0 = performance.now();
     for (var i = 0; i < n; i++) OM.game.draw();
-    return (performance.now() - t0) / n;
+    var ms = (performance.now() - t0) / n;
+    setTimeout(function () { OM.ui.showResult = realShow; OM.__perfSettled = true; }, 640);
+    return ms;
   });
+  await page.waitForFunction('OM.__perfSettled === true', null, { timeout: 8000 });
   /* Headless Chromium does not composite, so this measures the cost of issuing
      a frame's draw calls, not GPU time. It is still a real regression guard: it
      is where an accidental O(n^2) over the obstacle list would show up. */
   ok('a frame issues its draw calls in under 4ms', perf < 4, perf.toFixed(2) + 'ms/frame');
   console.log('    (draw-call cost: ' + perf.toFixed(2) + 'ms per frame, 60 patterns live)');
+
+  /* ---- practice ---- */
+  await page.evaluate(function () {
+    OM.game.state = 'idle'; OM.game.run = null;
+    OM.progress.data.runs = 20;
+    OM.ui.show('menu');
+  });
+  ok('practice is offered once there is something to practise for',
+     await page.isVisible('#menu-practice'));
+  ok('the menu says what practice is', (await page.textContent('#menu-practice'))
+     .indexOf('static geometry only') >= 0);
+
+  var prBefore = await page.evaluate(function () {
+    return { xp: OM.progress.data.xp, best: OM.progress.data.best,
+             deaths: OM.analysis.history().length };
+  });
+  await page.click('#menu-practice');
+  await page.waitForFunction("OM.game.state === 'playing'", null, { timeout: 5000 }).catch(function () {});
+  ok('practice runs at the fixed speed, not the curve',
+     await page.evaluate('OM.game.run.speed') === await page.evaluate('OM.phys.PRACTICE_SPEED'));
+  ok('practice runs no mutations, because two of them are speed multipliers',
+     await page.evaluate('OM.game.run.sched.length') === 0);
+  ok('practice spawns no moving geometry', await page.evaluate(function () {
+    OM.game.run.gen.ensure(40000, 0, 1);
+    var bad = ['mover', 'laser', 'piston', 'gate'];
+    var list = OM.game.run.gen.obstacles;
+    if (list.length < 20) return false;
+    for (var i = 0; i < list.length; i++) if (bad.indexOf(list[i].t) >= 0) return false;
+    return true;
+  }), 'the whole safety argument for the mode is that its geometry does not move');
+
+  await page.evaluate(function () {
+    var t = 0;
+    while (OM.game.state === 'playing' && t < 200) { OM.game.stepHeadless(1 / 120); t += 1 / 120; }
+  });
+  await page.waitForFunction(
+    "OM.ui.screen === 'result' && document.getElementById('r-kicker').textContent.indexOf('PRACTICE') >= 0",
+    null, { timeout: 8000 });
+  var prAfter = await page.evaluate(function () {
+    return { xp: OM.progress.data.xp, best: OM.progress.data.best,
+             practice: OM.progress.data.practice,
+             deaths: OM.analysis.history().length,
+             label: document.getElementById('r-xplabel').textContent };
+  });
+  ok('a practice run banks a practice record', prAfter.practice > 0);
+  ok('a practice run pays no xp and moves no record',
+     prAfter.xp === prBefore.xp && prAfter.best === prBefore.best);
+  ok('a practice death stays out of the read',
+     prAfter.deaths === prBefore.deaths);
+  ok('the results screen says practice is kept apart',
+     prAfter.label.indexOf('NO XP') >= 0, prAfter.label);
+
+  await page.evaluate(function () { OM.game.state = 'idle'; OM.game.run = null; OM.ui.show('menu'); });
 
   /* ---- the read as a history ---- */
   await page.evaluate(function () {

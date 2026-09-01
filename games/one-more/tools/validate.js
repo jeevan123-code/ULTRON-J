@@ -44,11 +44,11 @@ var COOLDOWN_S = 0.10; // a person cannot reliably tap twice inside 100ms
 var MAX_FLIPS = 12;    // and will not execute a twelve-input line under pressure
 var R2 = P.R * P.R;
 
-function isDynamic(p) {
-  var DYN = { mover: 1, laser: 1, piston: 1, gate: 1 };
-  for (var i = 0; i < p.items.length; i++) if (DYN[p.items[i].t]) return true;
-  return false;
-}
+/* The shipping definition, not a second copy of it. Which patterns count as
+   time-driven decides how many phase offsets they are proven across and, now,
+   at how many speeds — a validator that disagreed with the game about that
+   would be proving a different library. */
+var isDynamic = PAT.isDynamic;
 
 function materialize(p, x0) {
   var obs = [], holes = [];
@@ -394,7 +394,21 @@ if (insp >= 0) {
   process.exit(0);
 }
 
-var speeds = [P.speedAt(0), P.speedAt(70), P.speedAt(260)];
+/* The speeds the world is actually run at, per pattern.
+ *
+ * Practice runs at one fixed speed below the curve, and only the static half of
+ * the library ever spawns there — a time-driven pattern is a different problem
+ * at a different speed, which is exactly why it is kept out of that mode. So
+ * the practice speed is proven for the patterns that can meet it and skipped
+ * for the ones that cannot, rather than being either assumed or ignored.
+ *
+ * Slack is still measured against the top of the base curve. Below it the same
+ * pixel band buys more milliseconds, so a slower speed can never be the binding
+ * case for a static pattern's budget. */
+var BASE_SPEEDS = [P.speedAt(0), P.speedAt(70), P.speedAt(260)];
+function speedsFor(p) {
+  return isDynamic(p) ? BASE_SPEEDS : [P.PRACTICE_SPEED].concat(BASE_SPEEDS);
+}
 var fails = [], warns = [], rows = [];
 var t0Start = Date.now();
 
@@ -413,6 +427,7 @@ TARGETS.forEach(function (p) {
   var phases = dyn ? [0, 0.17, 0.34, 0.51, 0.68, 0.85] : [0];
   var allOk = true, failAt = null, minFlips = 99, worstWindow = Infinity;
 
+  var speeds = speedsFor(p);
   for (var si = 0; si < speeds.length; si++) {
     for (var pi = 0; pi < phases.length; pi++) {
       for (var gi = 0; gi < 2; gi++) {
@@ -423,8 +438,14 @@ TARGETS.forEach(function (p) {
           failAt = { speed: Math.round(speeds[si]), phase: phases[pi], grav: grav, x: r.atX };
           si = speeds.length; pi = phases.length; break;
         }
-        // Measure slack at the hardest speed only — that is where it is thinnest.
-        if (si === speeds.length - 1) {
+        /* Where slack has to be measured depends on whether the pattern moves.
+           A static pattern is fixed in space and so is the flip arc, so the
+           survivable band is the same pixels at every speed and the thinnest
+           time window is trivially the fastest one. A moving pattern has no
+           such guarantee: its phase advances differently over the same stretch
+           of tunnel at a different speed, so the band itself changes shape and
+           the worst case can sit anywhere. Those get measured at every speed. */
+        if (si === speeds.length - 1 || dyn) {
           var line0 = minimize(p, speeds[si], phases[pi] * 3.7, grav, r.lines[0]);
           minFlips = Math.min(minFlips, line0.length);
           var w = windowMs(p, speeds[si], phases[pi] * 3.7, grav, r.lines);
@@ -459,7 +480,7 @@ rows.forEach(function (r) {
 });
 console.log('  ' + '-'.repeat(64));
 console.log('  * = moving geometry, validated across 6 phase offsets');
-console.log('  slack = timing error the most forgiving line tolerates, at top speed');
+console.log('  slack = timing error the most forgiving line tolerates (moving patterns: worst speed)');
 console.log('  >= marks a lower bound (line needs 3+ flips; space not scanned exhaustively)');
 console.log('  ' + rows.length + (ONLY ? ' selected' : '') + ' patterns / ' + (rows.length - fails.length) +
   ' survivable at every speed, entry side and phase  (' + ((Date.now() - t0Start) / 1000).toFixed(1) + 's)');

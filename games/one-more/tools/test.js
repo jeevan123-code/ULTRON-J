@@ -58,6 +58,20 @@ ok('flip arc is speed invariant', (function () {
   });
   return spans.every(function (s) { return near(s, spans[0], 0.01); });
 })(), 'this invariant is what makes every authored pattern valid at every speed');
+ok('the practice speed keeps the same flip arc as the game', (function () {
+  function span(sp) { return Math.sqrt(2 * P.TRANSIT_H / P.gravityFor(sp, 1)) * sp; }
+  return near(span(P.PRACTICE_SPEED), span(P.BASE_SPEED), 1e-9) &&
+         P.PRACTICE_SPEED < P.BASE_SPEED;
+})(), 'practice is a slower run of the same game, not an easier one');
+ok('a flip line stays executable at the practice speed', (function () {
+  /* The cooldown is a fixed number of SECONDS, so at a lower speed it covers
+     fewer pixels. Any sequence of flip positions a human could hit at full
+     speed is therefore still executable slower — which is half of why the
+     static patterns need no revalidation for practice. The other half is the
+     arc invariant above. */
+  var COOLDOWN_S = 0.10;
+  return COOLDOWN_S * P.PRACTICE_SPEED < COOLDOWN_S * P.speedAt(260);
+})());
 ok('speed increases monotonically', (function () {
   for (var t = 0; t < 400; t += 5) if (P.speedAt(t + 5) <= P.speedAt(t)) return false;
   return true;
@@ -761,6 +775,37 @@ ok('weighting never smuggles in a pattern from another family', (function () {
   var pool = A.trialPatterns('timing');
   return poolCount(pool, nerve) === 0 && pool.length > 0;
 })());
+/* ---- practice mode ---- */
+ok('every pattern is either static or time-driven, and nothing is both', (function () {
+  var stat = PAT.staticList, i;
+  for (i = 0; i < stat.length; i++) if (PAT.isDynamic(stat[i])) return false;
+  var dyn = PAT.list.filter(function (p) { return PAT.isDynamic(p); });
+  return stat.length + dyn.length === PAT.list.length && stat.length > 0 && dyn.length > 0;
+})());
+ok('the practice pool holds no moving geometry', (function () {
+  for (var i = 0; i < PAT.staticList.length; i++) {
+    var p = PAT.staticList[i];
+    for (var j = 0; j < p.items.length; j++) {
+      if (['mover', 'laser', 'piston', 'gate'].indexOf(p.items[j].t) >= 0) return false;
+    }
+  }
+  return PAT.staticList.length >= 30;
+})(), 'a time-driven pattern is a different problem at a different speed, and unproven there');
+ok('the practice pool can still fill every tier', (function () {
+  var byTier = {};
+  for (var i = 0; i < PAT.staticList.length; i++) {
+    byTier[PAT.staticList[i].tier] = (byTier[PAT.staticList[i].tier] || 0) + 1;
+  }
+  for (var t = 1; t <= 5; t++) if (!byTier[t]) return false;
+  return true;
+})());
+ok('a practice death never enters the read', (function () {
+  A.clear();
+  for (var i = 0; i < 30; i++) {
+    A.record({ time: 40, cause: 'spike', mode: 'practice', context: {} });
+  }
+  return A.history().length === 0 && A.read().kind === 'none' && A.tally().n === 0;
+})(), 'a slower speed is a different problem; counting it would put an asterisk on the read');
 ok('a trial pool is built only from proven patterns', (function () {
   var fams = ['timing', 'prediction', 'commitment', 'nerve'];
   for (var f = 0; f < fams.length; f++) {
@@ -824,6 +869,16 @@ ok('a run banks xp and a record', (function () {
   });
   return OM.progress.data.xp > before && res.record === true && OM.progress.data.best === 42.5;
 })());
+ok('practice banks its own record and nothing else', (function () {
+  var d = OM.progress.data;
+  var xp = d.xp, best = d.best, runs = d.runs, total = d.totalTime;
+  var res = OM.progress.commitRun({
+    mode: 'practice', time: 300, cause: 'spike', nearMiss: 9, perfect: 4, flips: 90,
+    world: P.WORLDS[0], ghost: null
+  });
+  return res.xp === 0 && res.record === true && d.practice === 300 &&
+         d.xp === xp && d.best === best && d.runs === runs && d.totalTime === total;
+})(), 'xp is paid by the second, so a slower speed must not be the fastest way to level');
 ok('a worse run does not overwrite the record', (function () {
   OM.progress.commitRun({
     mode: 'endless', time: 10, cause: 'spike', nearMiss: 0, perfect: 0, flips: 3,
