@@ -103,6 +103,10 @@ html, body {
 .read span { display: block; font-size: 12px; color: var(--dim); line-height: 1.5; }
 .read i { display: block; font-style: normal; font-size: 11px; color: var(--faint); margin-top: 5px; }
 .read.quiet { border-left-color: var(--line); }
+/* A verdict is a measurement, not advice, so it is set brighter than the fix
+   lines around it and boxed off. Weight and a rule, not colour. */
+.read i.verdict { color: var(--dim); border-top: 1px solid var(--line); padding-top: 7px; margin-top: 9px; }
+.read i.verdict + i.verdict { border-top: 0; padding-top: 0; margin-top: 4px; }
 
 .xpbar { position: relative; height: 22px; border: 1px solid var(--line); margin-bottom: 6px; overflow: hidden; }
 /* Fills by transform, not width: a scale is composited, a width is a layout

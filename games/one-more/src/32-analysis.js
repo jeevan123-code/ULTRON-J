@@ -29,6 +29,11 @@
       muts: c.mutations || [],
       world: c.worldId,
       fr: Math.round((c.flipRate || 0) * 100) / 100,
+      /* Which mode this death happened in, and for a Trial which family it was
+         drilling. Without these a Trial is invisible in its own history, and the
+         one question the Trial exists to answer — did it work — has no data. */
+      md: summary.mode || null,
+      fam: summary.family || null,
       at: Date.now()
     });
     while (log.length > CAP) log.shift();
@@ -46,24 +51,28 @@
   var FAMILY_COPY = {
     timing: {
       name: 'TIMING',
+      noun: 'static geometry',
       line: 'You flip late into static geometry.',
       me: 'I flip late into static geometry',
       fix: 'Commit to the flip when you see the gap, not when you reach it.'
     },
     prediction: {
       name: 'PREDICTION',
+      noun: 'moving geometry',
       line: 'Moving geometry catches you out.',
       me: 'moving geometry catches me out',
       fix: 'Read where it will be, not where it is. Watch the guide rails.'
     },
     commitment: {
       name: 'COMMITMENT',
+      noun: 'bars and blocks',
       line: 'Bars and blocks catch you mid-decision.',
       me: 'bars and blocks catch me mid-decision',
       fix: 'Pick a surface early and stay on it through the obstacle.'
     },
     nerve: {
       name: 'NERVE',
+      noun: 'the void',
       line: 'The floor disappearing is what gets you.',
       me: 'the disappearing floor is what gets me',
       fix: 'A gap is not a wall. Ride the ceiling across it.'
@@ -229,6 +238,84 @@
     return best;
   }
 
+  /* ---------- did the drilling work? ----------
+   *
+   * A Trial points the generator at your weakness and then, until now, never
+   * came back to tell you whether it helped. Every death carries a timestamp
+   * and a mode, so the answer is already in the log: take the moment of your
+   * first Trial in a family and compare that family's share of your NORMAL
+   * deaths before it against after it.
+   *
+   * Three things keep this from turning into flattery.
+   *
+   * Trial deaths are excluded from both sides. A Trial is made almost entirely
+   * of one family, so counting its deaths would push that family's share up
+   * afterwards and make successful practice look like decline.
+   *
+   * Only endless and daily count — the two modes that run the same curve from
+   * zero. Nightmare starts at 245s in a different part of the world with a
+   * different mix of obstacles, and a player who took up Nightmare after their
+   * first Trial would otherwise see that change attributed to the Trial.
+   * Deaths recorded before this field existed have no mode and are excluded
+   * for the same reason: they might be Trials, and counting a Trial as normal
+   * play on the 'before' side would manufacture an improvement.
+   *
+   * And it reports a rise exactly as readily as a fall.
+   *
+   * The split is by position in the log, not by wall clock. Timestamps are
+   * whatever the device says they are and can move backwards; the order deaths
+   * were recorded in cannot. It also means a verdict goes quiet again once the
+   * rolling history has scrolled past the trial — at that point the evidence
+   * for it genuinely is gone. */
+  var NORMAL = { endless: 1, daily: 1 };
+  var MIN_PER_SIDE = 12;
+  var FLAT = 0.06;               // under six points, call it unchanged
+
+  function trialEffect(family) {
+    if (!FAMILY_COPY[family]) return null;
+    var first = -1, trials = 0, i, d;
+    for (i = 0; i < log.length; i++) {
+      d = log[i];
+      if (d.md !== 'trial' || d.fam !== family) continue;
+      trials++;
+      if (first < 0) first = i;
+    }
+    if (first < 0) return null;
+
+    var before = { n: 0, count: 0 }, after = { n: 0, count: 0 };
+    for (i = 0; i < log.length; i++) {
+      d = log[i];
+      if (!NORMAL[d.md]) continue;
+      var side = i < first ? before : after;
+      side.n++;
+      if ((FAMILY[d.cause] || 'timing') === family) side.count++;
+    }
+    if (before.n < MIN_PER_SIDE || after.n < MIN_PER_SIDE) return null;
+
+    before.share = before.count / before.n;
+    after.share = after.count / after.n;
+    var delta = after.share - before.share;
+    return {
+      family: family, name: FAMILY_COPY[family].name,
+      noun: FAMILY_COPY[family].noun, trials: trials, from: first,
+      before: before, after: after, delta: delta,
+      direction: Math.abs(delta) < FLAT ? 'flat' : (delta < 0 ? 'down' : 'up')
+    };
+  }
+
+  /* The strongest measurable trial result, for callers that have no particular
+     family in mind. Strongest means largest movement in either direction: a
+     drill that made things worse is the more useful thing to be told. */
+  function trialEffects() {
+    var out = [], fams = Object.keys(FAMILY_COPY);
+    for (var i = 0; i < fams.length; i++) {
+      var e = trialEffect(fams[i]);
+      if (e) out.push(e);
+    }
+    out.sort(function (a, b) { return Math.abs(b.delta) - Math.abs(a.delta); });
+    return out;
+  }
+
   /* Are you actually getting better? Median of your last 15 runs against your
      first 15. Honest, and it does not need a server. */
   function trend() {
@@ -289,6 +376,8 @@
     shareClaim: shareClaim,
     read: read,
     habit: habit,
+    trialEffect: trialEffect,
+    trialEffects: trialEffects,
     trend: trend,
     tally: tally,
     trialPatterns: trialPatterns,

@@ -352,6 +352,54 @@ function ok(name, cond, detail) {
   ok('a frame issues its draw calls in under 4ms', perf < 4, perf.toFixed(2) + 'ms/frame');
   console.log('    (draw-call cost: ' + perf.toFixed(2) + 'ms per frame, 60 patterns live)');
 
+  /* ---- the trial loop closes ----
+     A seeded history with a Trial in the middle of it, then a real Trial run to
+     death, to prove the verdict reaches the screen the run was asking on. */
+  await page.evaluate(function () {
+    OM.analysis.clear();
+    var real = Date.now, now = 1000;
+    Date.now = function () { return now; };
+    function feed(n, cause, mode, family) {
+      for (var i = 0; i < n; i++) {
+        OM.analysis.record({ time: 20, cause: cause, mode: mode, family: family, context: {} });
+      }
+    }
+    feed(12, 'spike', 'endless'); feed(8, 'mover', 'endless');
+    now = 2000; feed(5, 'spike', 'trial', 'timing');
+    now = 3000; feed(4, 'spike', 'endless'); feed(16, 'mover', 'endless');
+    Date.now = real;
+    OM.game.state = 'idle'; OM.game.run = null;
+  });
+  var verdict = await page.evaluate(function () { return OM.analysis.trialEffect('timing'); });
+  ok('the game measures whether the drilling worked',
+     verdict && verdict.direction === 'down' &&
+     verdict.before.count === 12 && verdict.after.count === 4);
+
+  await page.evaluate(function () { OM.ui.showRecords(); });
+  ok('the study screen carries the verdict',
+     (await page.textContent('#rec-body')).indexOf('Since your first TIMING trial') >= 0);
+
+  await page.evaluate(function () {
+    OM.ui.show('menu');
+    OM.ui.startRun('trial', { family: 'timing' });
+    var t = 0;
+    while (OM.game.state === 'playing' && t < 90) { OM.game.stepHeadless(1 / 120); t += 1 / 120; }
+  });
+  /* Wait for THIS run's results, not merely for a results screen. The
+     render-cost pass above kills a run every few frames and each death arms its
+     own 620ms showResult timer, so a stale one can land first and hand back the
+     previous run's panel. The kicker is the trial's own signature in the DOM. */
+  await page.waitForFunction(
+    "OM.ui.screen === 'result' && document.getElementById('r-kicker').textContent.indexOf('TRIAL') >= 0",
+    null, { timeout: 8000 });
+  var readText = await page.textContent('#r-read');
+  ok('a trial answers the question it was asking',
+     readText.indexOf('Since your first TIMING trial') >= 0, readText);
+  ok('the verdict shows the counts behind its percentages',
+     /\(12 of 20 \u2192|\(12 of 20 →/.test(readText), readText);
+
+  await page.evaluate(function () { OM.game.state = 'idle'; OM.game.run = null; OM.ui.show('menu'); });
+
   /* ---- challenge links ----
      Done last, because each case reloads the page. The trip through about:blank
      is what makes it a reload: navigating from FILE to FILE#c=... differs only

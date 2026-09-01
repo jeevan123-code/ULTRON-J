@@ -473,6 +473,125 @@ ok('an even spread shares nothing rather than something', (function () {
   A.clear(); feed('spike', 10); feed('mover', 10); feed('bar', 10); feed('void', 10);
   return A.read().kind === 'balanced' && A.shareClaim() === null;
 })(), 'silence is the correct fallback, not a manufactured line');
+/* ---- did the drilling work? ---- */
+/* Deliberately no clock stubbing: the before/after split is by position in the
+   log, so these run at real speed and every one of them would fail if it ever
+   went back to comparing timestamps — entries written in the same millisecond
+   would all land on one side. */
+function deaths(n, cause, mode, family) {
+  for (var i = 0; i < n; i++) {
+    A.record({ time: 20, cause: cause, mode: mode, family: family, context: {} });
+  }
+}
+ok('no trial, no verdict', (function () {
+  A.clear();
+  deaths(30, 'spike', 'endless');
+  return A.trialEffect('timing') === null;
+})());
+ok('a verdict needs deaths on both sides of the trial', (function () {
+  A.clear();
+  deaths(30, 'spike', 'endless');
+  deaths(4, 'spike', 'trial', 'timing');
+  deaths(3, 'spike', 'endless');   // only three normal deaths after
+  return A.trialEffect('timing') === null;
+})(), 'a two-run "after" window would be noise dressed as a result');
+ok('a verdict measures the drop it can actually see', (function () {
+  A.clear();
+  deaths(12, 'spike', 'endless');  // 12 of 20 timing before = 60%
+  deaths(8, 'mover', 'endless');
+  deaths(6, 'spike', 'trial', 'timing');
+  deaths(4, 'spike', 'endless');   // 4 of 20 timing after = 20%
+  deaths(16, 'mover', 'endless');
+  var e = A.trialEffect('timing');
+  return e && e.direction === 'down' && e.trials === 6 &&
+         Math.abs(e.before.share - 0.6) < 1e-9 && Math.abs(e.after.share - 0.2) < 1e-9 &&
+         e.before.count === 12 && e.after.count === 4;
+})());
+ok('a verdict reports a rise as readily as a fall', (function () {
+  A.clear();
+  deaths(4, 'spike', 'endless');
+  deaths(16, 'mover', 'endless');
+  deaths(6, 'spike', 'trial', 'timing');
+  deaths(14, 'spike', 'endless');
+  deaths(6, 'mover', 'endless');
+  var e = A.trialEffect('timing');
+  return e && e.direction === 'up' && e.after.share > e.before.share;
+})(), 'a drill that made things worse is the more useful thing to be told');
+ok('trial deaths are excluded from both sides of their own verdict', (function () {
+  // 40 trial deaths, all timing, sitting after the marker. If they counted,
+  // the after-share would be near 100% and successful practice would read as
+  // catastrophe.
+  A.clear();
+  deaths(10, 'spike', 'endless');
+  deaths(10, 'mover', 'endless');
+  deaths(40, 'spike', 'trial', 'timing');
+  deaths(2, 'spike', 'endless');
+  deaths(18, 'mover', 'endless');
+  var e = A.trialEffect('timing');
+  return e && e.after.n === 20 && e.after.count === 2 && e.direction === 'down';
+})(), 'a trial is made of one family; counting it would invert every verdict');
+ok('nightmare and legacy deaths stay out of the comparison', (function () {
+  A.clear();
+  deaths(20, 'spike', 'endless');
+  deaths(6, 'spike', 'trial', 'timing');
+  deaths(20, 'mover', 'endless');
+  deaths(40, 'spike', 'nightmare');
+  deaths(40, 'spike', null);       // recorded before md existed
+  var e = A.trialEffect('timing');
+  return e && e.before.n === 20 && e.after.n === 20 && e.after.count === 0;
+})(), 'a mode a player took up after the trial must not be read as its effect');
+ok('a small change is called unchanged, not a result', (function () {
+  A.clear();
+  deaths(10, 'spike', 'endless');
+  deaths(10, 'mover', 'endless');
+  deaths(6, 'spike', 'trial', 'timing');
+  deaths(9, 'spike', 'endless');
+  deaths(11, 'mover', 'endless');
+  var e = A.trialEffect('timing');
+  return e && e.direction === 'flat';
+})());
+ok('every number in a verdict is checkable against the log', (function () {
+  A.clear();
+  deaths(12, 'spike', 'endless');
+  deaths(8, 'mover', 'endless');
+  deaths(3, 'spike', 'trial', 'timing');
+  deaths(5, 'spike', 'endless');
+  deaths(15, 'mover', 'endless');
+  var e = A.trialEffect('timing'), h = A.history();
+  function normal(d) { return d.md === 'endless' || d.md === 'daily'; }
+  var before = h.slice(0, e.from).filter(normal);
+  var after = h.slice(e.from).filter(normal);
+  return e.before.n === before.length && e.after.n === after.length &&
+         Math.abs(e.before.share - e.before.count / e.before.n) < 1e-9 &&
+         Math.abs(e.delta - (e.after.share - e.before.share)) < 1e-9;
+})());
+ok('a clock that jumps backwards cannot rewrite the verdict', (function () {
+  A.clear();
+  var real = Date.now, now = 5e12;
+  Date.now = function () { return now; };
+  try {
+    deaths(20, 'spike', 'endless');
+    now = 1;                          // the device's clock moved, the history did not
+    deaths(3, 'spike', 'trial', 'timing');
+    deaths(20, 'mover', 'endless');
+  } finally { Date.now = real; }
+  var e = A.trialEffect('timing');
+  return e && e.before.n === 20 && e.after.n === 20 && e.after.count === 0;
+})(), 'the order deaths were recorded in cannot move; the wall clock can');
+ok('trial verdicts are ranked by how much moved, in either direction', (function () {
+  A.clear();
+  // timing barely moves; nerve collapses
+  deaths(10, 'spike', 'endless');
+  deaths(10, 'void', 'endless');
+  deaths(3, 'spike', 'trial', 'timing');
+  deaths(3, 'void', 'trial', 'nerve');
+  deaths(9, 'spike', 'endless');
+  deaths(1, 'void', 'endless');
+  deaths(10, 'mover', 'endless');
+  var es = A.trialEffects();
+  return es.length === 2 && es[0].family === 'nerve' &&
+         Math.abs(es[0].delta) > Math.abs(es[1].delta);
+})());
 ok('a trial pool is built only from proven patterns', (function () {
   var fams = ['timing', 'prediction', 'commitment', 'nerve'];
   for (var f = 0; f < fams.length; f++) {

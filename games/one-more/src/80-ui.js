@@ -273,6 +273,22 @@
 
   /* One honest sentence, or nothing. Never a fabricated percentile, never a
      comparison to players we cannot see. */
+  /* Whether the drilling worked, in a sentence, with both raw counts in it so
+     the percentages can be checked. It says "since", never "because": the game
+     knows what changed, not what caused it, and the difference is the whole
+     reason this line is trustworthy. */
+  function trialEffectLine(te) {
+    var b = Math.round(te.before.share * 100), a = Math.round(te.after.share * 100);
+    var counts = ' (' + te.before.count + ' of ' + te.before.n + ' \u2192 ' +
+                 te.after.count + ' of ' + te.after.n + ')';
+    var head = 'Since your first ' + te.name + ' trial, deaths to ' + te.noun + ' ';
+    if (te.direction === 'flat') {
+      return head + 'are unchanged: ' + b + '% then, ' + a + '% now' + counts + '.';
+    }
+    return head + (te.direction === 'down' ? 'have fallen from ' : 'have risen from ') +
+           b + '% to ' + a + '%' + counts + '.';
+  }
+
   function renderRead(s) {
     var el = $('r-read'), rd = OM.analysis.read(), hb = OM.analysis.habit(), tr = OM.analysis.trend();
     var html = '';
@@ -297,6 +313,17 @@
       html += '<i>' + (tr.delta > 0 ? 'Improving: ' : 'Slipping: ') +
               'median run ' + OM.fmtTime(tr.early, 2) + ' \u2192 ' + OM.fmtTime(tr.recent, 2) + '</i>';
     }
+    /* The payoff the read has always set up and never delivered. After a Trial
+       it goes at the top, because on that screen it is the answer to the
+       question the run was asking. */
+    var te = OM.analysis.trialEffect(s.mode === 'trial' ? (s.family || UI.lastFamily)
+                                                        : (rd.family || null));
+    if (te) {
+      var block = '<i class="verdict">' + trialEffectLine(te) + '</i>';
+      if (s.mode === 'trial') { html = block + html; el.className = 'read'; }
+      else html += block;
+    }
+
     el.innerHTML = html;
     var tb = doc.querySelector('#r-actions [data-act="trial"]');
     tb.hidden = rd.kind !== 'weakness';
@@ -336,6 +363,15 @@
         Math.round(hb.share * 100) + '%), against ' + Math.round(hb.expected * 100) +
         '% expected at your flip rate. ' + hb.fix + '</i>';
     }
+    /* On the study screen every family that has a measurement is shown, not just
+       the strongest one. This is the page you come to in order to look things
+       up, and a drill that made something worse belongs here as much as one
+       that worked. */
+    var tes = OM.analysis.trialEffects();
+    for (var ti = 0; ti < tes.length; ti++) {
+      readBlock += '<i class="verdict">' + trialEffectLine(tes[ti]) + '</i>';
+    }
+
     readBlock = '<div class="read' +
       ((rd.kind === 'weakness' || hb) ? '' : ' quiet') + '">' + readBlock + '</div>';
     if (tr) {
