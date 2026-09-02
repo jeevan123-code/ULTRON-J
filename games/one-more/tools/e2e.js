@@ -10,6 +10,9 @@ var chromium = require('/opt/node22/lib/node_modules/playwright').chromium;
 var FILE = 'file://' + path.join(__dirname, '..', 'dist', 'one-more.html');
 
 var pass = 0, fail = 0;
+function OM_worlds(per) {
+  return Object.keys(per).map(function (k) { return k + ' ' + per[k]; }).join(', ');
+}
 function ok(name, cond, detail) {
   if (cond) { pass++; console.log('  ✓ ' + name); }
   else { fail++; console.log('  ✗ ' + name + (detail ? '  -> ' + detail : '')); }
@@ -376,6 +379,40 @@ function ok(name, cond, detail) {
      is where an accidental O(n^2) over the obstacle list would show up. */
   ok('a frame issues its draw calls in under 4ms', perf < 4, perf.toFixed(2) + 'ms/frame');
   console.log('    (draw-call cost: ' + perf.toFixed(2) + 'ms per frame, 60 patterns live)');
+
+  /* ---- the environment never competes with the geometry ----
+     The visual priority is Nanogon, then whatever can kill you, then the
+     surfaces, then the atmosphere. Backdrops are where that gets lost: one
+     enthusiastic layer and a spike stops being the brightest thing on screen.
+     So every world is drawn with no obstacles in it and the brightest pixel is
+     measured against what a real spike puts on the same canvas. */
+  var readability = await page.evaluate(function () {
+    var W = 900, H = OM.phys.H;
+    var c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    var g = c.getContext('2d');
+    var out = {}, worst = 0, worstWorld = '';
+    OM.phys.WORLDS.forEach(function (w) {
+      var peak = 0;
+      // several instants, because most of these layers move
+      for (var s = 0; s < 6; s++) {
+        var t = w.at + 3 + s * 2.7;
+        g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+        OM.render.backdrop(g, W, H, w.id, t, 0, 0.6,
+                           { atmos: 1, q: OM.visual.q() });
+        var d = g.getImageData(0, OM.phys.CEIL, W, OM.phys.FLOOR - OM.phys.CEIL).data;
+        for (var i = 0; i < d.length; i += 4) if (d[i] > peak) peak = d[i];
+      }
+      out[w.id] = peak;
+      if (peak > worst) { worst = peak; worstWorld = w.id; }
+    });
+    return { per: out, worst: worst, world: worstWorld };
+  });
+  ok('no backdrop ever approaches the brightness of a killing surface',
+     readability.worst < 90,
+     readability.world + ' peaked at ' + readability.worst + '/255');
+  console.log('    (backdrop peak brightness: ' +
+              OM_worlds(readability.per) + ' — geometry is 255)');
 
   /* ---- the character does not outgrow its hitbox ----
      Collision uses R=16 against art drawn at R_VIS=18, and that gap is the

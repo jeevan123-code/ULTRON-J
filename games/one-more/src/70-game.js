@@ -509,7 +509,7 @@
        how far into the escalation this moment is. */
     var vis = OM.visual.sample(r, P);
     var speedFrac = vis.speed;
-    OM.render.backdrop(g, G.W, P.H, r.world.id, r.t, corrupt, speedFrac);
+    OM.render.backdrop(g, G.W, P.H, r.world.id, r.t, corrupt, speedFrac, vis);
     OM.render.speedLines(g, G.W, camX, r.y, speedFrac);
     OM.render.surfaces(g, G.W, camX, r.gen.holes, r.t, speedFrac);
     OM.render.contactLight(g, G.playerScreenX(), r.y, r.coreFlash, vis.q);
