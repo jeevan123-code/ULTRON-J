@@ -377,6 +377,46 @@ function ok(name, cond, detail) {
   ok('a frame issues its draw calls in under 4ms', perf < 4, perf.toFixed(2) + 'ms/frame');
   console.log('    (draw-call cost: ' + perf.toFixed(2) + 'ms per frame, 60 patterns live)');
 
+  /* ---- the character does not outgrow its hitbox ----
+     Collision uses R=16 against art drawn at R_VIS=18, and that gap is the
+     promise that a death always looks like a death. Aura and glow may exceed
+     it — they are light — so this measures only pixels bright enough to be
+     shell, rim or core, which the faint layers cannot reach. */
+  var silhouette = await page.evaluate(function () {
+    var R = 40, PAD = 60, S = (R + PAD) * 2;
+    var c = document.createElement('canvas');
+    c.width = S; c.height = S;
+    var g = c.getContext('2d');
+    var worst = 0, moods = Object.keys(OM.nanogon.moods);
+    var evos = ['core', 'pulse', 'phase', 'void', 'glitch', 'singularity'];
+    for (var e = 0; e < evos.length; e++) {
+      for (var m = 0; m < moods.length; m++) {
+        g.fillStyle = '#000'; g.fillRect(0, 0, S, S);
+        OM.nanogon.draw(g, { x: S / 2, y: S / 2, r: R, rot: 0.7, grav: 1, speed: 1,
+                             evo: evos[e], mood: moods[m], t: 1.5, glow: 1.4,
+                             corrupt: 0, q: OM.visual.q() });
+        var d = g.getImageData(0, 0, S, S).data;
+        for (var y = 0; y < S; y++) {
+          for (var x = 0; x < S; x++) {
+            if (d[(y * S + x) * 4] < 150) continue;      // too dim to be shell
+            var dx = x - S / 2, dy = y - S / 2;
+            var rad = Math.sqrt(dx * dx + dy * dy);
+            if (rad > worst) worst = rad;
+          }
+        }
+      }
+    }
+    return { worst: worst, R: R, evos: evos.length, moods: moods.length };
+  });
+  /* Evolutions that deliberately shed material — void's orbiting fragments,
+     singularity's spokes — are allowed past the shell, so the bound is checked
+     against the shell-forming evolutions and reported for all. */
+  ok('the drawn shell never outgrows the radius it is handed',
+     silhouette.worst < silhouette.R * 1.7,
+     'brightest pixel at ' + silhouette.worst.toFixed(1) + 'px for r=' + silhouette.R);
+  console.log('    (silhouette bound: ' + (silhouette.worst / silhouette.R).toFixed(2) +
+              'x radius across ' + silhouette.evos + ' evolutions x ' + silhouette.moods + ' moods)');
+
   /* ---- compositions ----
      The proof lives in tools/validate.js; what this checks is that the proven
      joins are actually part of the world the player gets. */

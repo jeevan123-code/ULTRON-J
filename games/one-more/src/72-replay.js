@@ -136,6 +136,7 @@
       if (!dead) {
         OM.nanogon.draw(g, {
           x: f.x - camX, y: f.y, r: P.R_VIS, rot: f.rot,
+          grav: f.grav, speed: 0.8,
           evo: data.evo, mood: 'alert', t: t, glow: 0.85, corrupt: 0
         });
       } else {

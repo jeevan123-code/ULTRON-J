@@ -2256,17 +2256,189 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 
+/* ==== src/48-visual.js ==== */
+/* ONE MORE — the visual conductor: design tokens and one escalation signal.
+ *
+ * Two problems this exists to solve.
+ *
+ * The look was spread across forty-odd constants in four files — a glow alpha
+ * here, a trail opacity there, a shake magnitude in a third place — so nothing
+ * could be tuned as a whole and no two systems were guaranteed to agree about
+ * what "intense" meant. Tokens live here now.
+ *
+ * And escalation was sampled independently at four call sites: corruptionAt(t)
+ * for the UI, speedFrac for the streaks, worldAt(t) for the backdrop, threat
+ * for the character. Four clocks drifting apart is how a game ends up looking
+ * busy at one moment and empty at the next. sample() reads them once per frame
+ * and hands every system the same numbers.
+ *
+ * It reports state. It does not decide gameplay: nothing here feeds physics,
+ * collision or generation, and the escalation curves it exposes are the ones
+ * the game already ran on.
+ */
+(function (root) {
+  'use strict';
+  var OM = root.OM || (root.OM = {});
+  var clamp = OM.math.clamp;
+
+  /* ---------- design tokens ----------
+     Monochrome is the whole identity, so the palette is one ink at five
+     weights on one ground. Anything that wants to stand out gets brightness,
+     size, motion or break-up — never hue. */
+  var T = {
+    ground: '#08090c',
+    ink: [255, 255, 255],
+
+    // character
+    bodyWeight: 1.75,          // px, the light half of the silhouette
+    bodyWeightLead: 3.1,       // px, the edge facing the direction of travel
+    rimAlpha: 0.85,            // leading-edge highlight at full speed
+    coreScale: 0.26,           // core radius as a fraction of body radius
+    coreHot: 0.50,             // solid hotspot inside the core gradient
+    auraScale: 3.0,            // aura radius as a multiple of body radius
+    auraAlpha: 0.13,           // aura peak alpha at full glow
+    glowRingAlpha: 0.10,
+    moteCount: 3,
+
+    // world
+    trailAlpha: 0.26,
+    trailAlphaGain: 0.5,       // added by intensity
+    particleDensity: 1,
+    shake: 1,
+    distortion: 1,
+
+    // timing, seconds
+    flipSettle: 17,            // rotation approach rate
+    squashDecay: 11
+  };
+
+  function ink(a) { return 'rgba(255,255,255,' + (a < 0.001 ? 0 : a).toFixed(3) + ')'; }
+
+  /* ---------- quality ----------
+     A weak phone should be able to drop the expensive layers without losing
+     anything it needs to play. Everything gameplay-critical — geometry,
+     surfaces, the character's silhouette and core — is drawn at every tier;
+     only the layers that exist to look expensive scale. */
+  var TIERS = {
+    low:    { aura: 0, motes: 0, rim: 0, particles: 0.5, streaks: 0.5, distortion: 0 },
+    medium: { aura: 0.6, motes: 1, rim: 1, particles: 0.85, streaks: 0.85, distortion: 0.6 },
+    high:   { aura: 1, motes: 1, rim: 1, particles: 1, streaks: 1, distortion: 1 }
+  };
+
+  var V = OM.visual = {
+    tok: T,
+    ink: ink,
+    tiers: TIERS,
+    quality: 'high',
+
+    setQuality: function (q) { V.quality = TIERS[q] ? q : 'high'; },
+    q: function () { return TIERS[V.quality]; },
+
+    /* One read of the run, once per frame, for everybody.
+     *
+     * The channels are deliberately separate rather than collapsed into a
+     * single number, because they mean genuinely different things and a system
+     * usually wants one of them: `speed` is how fast the world is moving,
+     * `threat` is whether something is about to kill you, `instability` is how
+     * far the long-run corruption has come, `atmos` is how much environment
+     * has been earned. `intensity` is the master the escalation reads from,
+     * and it is what a caller should use when it just wants "how far in". */
+    sample: function (run, P) {
+      P = P || OM.phys;
+      if (!run) {
+        return { t: 0, speed: 0, threat: 0, instability: 0, atmos: 0,
+                 intensity: 0, world: 'origin', worldIndex: 0, q: V.q() };
+      }
+      var t = run.t || 0;
+      var speed = clamp(((run.speed || P.BASE_SPEED) - P.BASE_SPEED) / 520, 0, 1);
+      var instability = P.corruptionAt(t);
+      var world = run.world || P.WORLDS[0];
+      var wi = 0;
+      for (var i = 0; i < P.WORLDS.length; i++) if (P.WORLDS[i].id === world.id) wi = i;
+
+      /* Atmosphere is earned by arriving somewhere, not by a clock, so it steps
+         with the world and then eases across the gap to the next one. */
+      var next = P.WORLDS[Math.min(wi + 1, P.WORLDS.length - 1)];
+      var span = Math.max(1, next.at - world.at);
+      var into = wi >= P.WORLDS.length - 1 ? 1 : clamp((t - world.at) / span, 0, 1);
+      var atmos = clamp((wi + into) / (P.WORLDS.length - 1), 0, 1);
+
+      return {
+        t: t,
+        speed: speed,
+        threat: clamp(run.threat || 0, 0, 1),
+        instability: instability,
+        atmos: atmos,
+        /* The master. Weighted so the first minute is carried by speed and
+           arrival, and the back half is carried by things coming apart. */
+        intensity: clamp(atmos * 0.5 + speed * 0.2 + instability * 0.3, 0, 1),
+        world: world.id,
+        worldIndex: wi,
+        q: V.q()
+      };
+    }
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
 /* ==== src/50-nanogon.js ==== */
 /* ONE MORE — the Nanogon.
    Drawn entirely from geometry: no sprites, no atlas, no resolution to be wrong
    at. Nine sides, one bright core, and six evolutions that arrive with your
    level. Everything is white on black; the only expressive channels are size,
    brightness, break-up and motion, which is exactly the constraint that makes
-   it readable at thumbnail size. */
+   it readable at thumbnail size.
+
+   It is built in layers, drawn back to front:
+
+     aura        a soft field, only when there is something to feel
+     glow ring   the shell bleeding light outwards
+     body        the nonagon, weighted towards the direction of travel
+     rim         a bright arc on the leading edge, earned by speed
+     evolution   whatever this level has done to the shell
+     motes       energy shed into orbit
+     core        a gradient, not a disc
+     corruption  the shell tearing on very long runs
+
+   The layering is the point. One outline and one flat circle reads as a
+   wireframe; the same silhouette with falloff, direction and a hot centre
+   reads as an object with light inside it, at the same cost to within a few
+   tenths of a millisecond.
+
+   Nothing here may grow the BODY beyond the radius it is handed. Collision
+   uses R=16 against art at R_VIS=18, and that gap is the promise that a death
+   always looks like a death. Aura, glow and motes are free to exceed it —
+   they are light, not matter — but the shell is not. */
 (function (root) {
   'use strict';
   var OM = root.OM || (root.OM = {});
   var SIDES = 9;
+  var VIS = OM.visual, T = VIS.tok;
+  var ink = VIS.ink;
+
+  /* Gradients are expensive to build and free to reuse, and every one of them
+     is centred on the origin because the character is always drawn translated.
+     That makes them cacheable on the context that owns them — there is more
+     than one canvas in this game, and a gradient belongs to exactly one. */
+  function radial(g, r, stops) {
+    var cache = g.__omGrad || (g.__omGrad = {});
+    var key = stops.key + '|' + Math.round(r);
+    var hit = cache[key];
+    if (hit) return hit;
+    var grd = g.createRadialGradient(0, 0, 0, 0, 0, Math.max(0.01, r));
+    for (var i = 0; i < stops.list.length; i++) grd.addColorStop(stops.list[i][0], stops.list[i][1]);
+    cache[key] = grd;
+    return grd;
+  }
+  /* Tight. A first pass ran the falloff out to twice the core radius and the
+     character turned into a lamp: every mood read as "bright ball" because the
+     bloom swallowed the shell and the size differences with it. The core is a
+     precise hot point with a short skirt; the aura is what carries reach. */
+  var CORE_STOPS = { key: 'core', list: [
+    [0, 'rgba(255,255,255,1)'], [0.30, 'rgba(255,255,255,0.92)'],
+    [0.58, 'rgba(255,255,255,0.34)'], [1, 'rgba(255,255,255,0)'] ] };
+  var AURA_STOPS = { key: 'aura', list: [
+    [0, 'rgba(255,255,255,0.55)'], [0.35, 'rgba(255,255,255,0.18)'],
+    [0.7, 'rgba(255,255,255,0.05)'], [1, 'rgba(255,255,255,0)'] ] };
 
   function poly(g, cx, cy, r, rot, jitter, rng) {
     g.beginPath();
@@ -2277,6 +2449,31 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
     }
     g.closePath();
+  }
+
+  /* ---- L3 the body.
+     One stroke weight all the way round reads as a wireframe. Weighting the
+     edges that face the direction of travel reads as an object with a front,
+     and costs one extra partial stroke rather than a second full one. */
+  function body(g, r, downAngle) {
+    g.lineWidth = T.bodyWeight;
+    poly(g, 0, 0, r, 0);
+    g.stroke();
+    var i0 = Math.round((downAngle / (Math.PI * 2)) * SIDES) - 2;
+    g.lineWidth = T.bodyWeightLead;
+    polyRun(g, r, i0, 4);
+    g.stroke();
+  }
+
+  /* A run of consecutive edges, for weighting one side of the silhouette
+     without drawing the whole shape twice at full weight. */
+  function polyRun(g, r, fromIdx, count) {
+    g.beginPath();
+    for (var i = 0; i <= count; i++) {
+      var a = ((fromIdx + i) / SIDES) * Math.PI * 2;
+      var x = Math.cos(a) * r, y = Math.sin(a) * r;
+      if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+    }
   }
 
   /* Draws one arc-segment ring with gaps — the shared language of the later
@@ -2291,24 +2488,42 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     }
   }
 
+  /* ---------- moods ----------
+     A table, not a chain of ifs. Every state answers the same questions, so a
+     new one cannot accidentally forget to say what its core does, and two of
+     them cannot quietly disagree about what "alert" means.
+
+       core     core radius, as a multiple of the token
+       glowMin  a floor under the glow this state insists on
+       tremble  positional noise, px
+       pulse    how fast the whole shell breathes
+       aura     aura multiplier */
+  var MOODS = {
+    neutral:  { core: 1.00, coreAlpha: 0.80, glowMin: 0,   tremble: 0,   pulse: 3.4, aura: 1.0 },
+    focused:  { core: 0.66, coreAlpha: 1.00, glowMin: 0,   tremble: 0,   pulse: 4.6, aura: 0.8 },
+    excited:  { core: 1.08, coreAlpha: 1.00, glowMin: 0.5, tremble: 0,   pulse: 9.0, aura: 1.2 },
+    alert:    { core: 0.92, coreAlpha: 0.95, glowMin: 0.3, tremble: 0.5, pulse: 22,  aura: 1.1 },
+    near:     { core: 1.45, coreAlpha: 1.00, glowMin: 0.9, tremble: 1.6, pulse: 3.4, aura: 1.7 },
+    success:  { core: 1.30, coreAlpha: 1.00, glowMin: 1.0, tremble: 0,   pulse: 3.0, aura: 2.0 },
+    hurt:     { core: 0.55, coreAlpha: 0.55, glowMin: 0,   tremble: 3.0, pulse: 3.4, aura: 0.5 }
+  };
+
   var N = OM.nanogon = {
-    /* st: {x,y,r,rot,grav,vy,speed,evo,mood,t,glow,corrupt,alpha,scale} */
+    /* st: {x,y,r,rot,grav,evo,mood,t,glow,corrupt,alpha,scale,sx,sy,speed} */
     draw: function (g, st) {
       var r = st.r * (st.scale == null ? 1 : st.scale);
       var evo = st.evo || 'core';
-      var mood = st.mood || 'neutral';
+      var m = MOODS[st.mood] || MOODS.neutral;
       var t = st.t || 0;
       var alpha = st.alpha == null ? 1 : st.alpha;
       var corrupt = st.corrupt || 0;
+      var q = st.q || VIS.q();
+      var speed = st.speed == null ? 0 : st.speed;
 
-      // mood drives core brightness, size and how much the shell trembles
-      var coreScale = 0.30, glow = st.glow || 0, tremble = 0;
-      if (mood === 'focused') { coreScale = 0.25; }
-      else if (mood === 'alert') { coreScale = 0.30 + Math.sin(t * 22) * 0.03; tremble = 0.5; }
-      else if (mood === 'near') { coreScale = 0.40; glow = Math.max(glow, 0.9); tremble = 1.6; }
-      else if (mood === 'success') { coreScale = 0.42; glow = Math.max(glow, 1); }
-      else if (mood === 'hurt') { coreScale = 0.22; tremble = 3; }
-      var pulse = 1 + Math.sin(t * 3.4) * 0.035;
+      var glow = Math.max(st.glow || 0, m.glowMin);
+      var coreScale = T.coreScale * m.core;
+      var tremble = m.tremble;
+      var pulse = 1 + Math.sin(t * m.pulse) * 0.035;
 
       g.save();
       g.globalAlpha = alpha;
@@ -2320,26 +2535,40 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       if (st.sx || st.sy) g.scale(st.sx || 1, st.sy || 1);
       g.rotate(st.rot || 0);
 
-      // outer glow — a couple of cheap wide strokes rather than a shadow blur,
-      // which is the single most expensive thing you can ask a 2D canvas for
+      /* Which way is "down" for this character, in its own rotated frame. The
+         silhouette is weighted towards it and the rim light sits on it, which
+         is what stops a spinning nonagon reading as a spinning nonagon and
+         starts it reading as an object being pulled somewhere. */
+      var down = (st.grav > 0 ? Math.PI / 2 : -Math.PI / 2) - (st.rot || 0);
+
+      // ---- L1 aura: a field, not an outline. Only when there is something to feel.
+      if (q.aura && glow > 0.02) {
+        var aR = r * T.auraScale;
+        g.globalAlpha = alpha * T.auraAlpha * Math.min(1, glow) * m.aura * q.aura;
+        g.fillStyle = radial(g, aR, AURA_STOPS);
+        g.beginPath(); g.arc(0, 0, aR, 0, 6.2832); g.fill();
+        g.globalAlpha = alpha;
+      }
+
+      // ---- L2 glow ring: the shell bleeding outwards. A wide soft stroke rather
+      // than a shadow blur, which is the single most expensive thing a 2D canvas does.
       if (glow > 0.01) {
-        g.strokeStyle = 'rgba(255,255,255,' + (0.10 * glow).toFixed(3) + ')';
+        g.strokeStyle = ink(T.glowRingAlpha * glow);
         g.lineWidth = 9 + glow * 8;
         poly(g, 0, 0, r * 1.06 * pulse, 0);
         g.stroke();
       }
 
       g.lineJoin = 'round';
+      g.lineCap = 'round';
       g.strokeStyle = '#ffffff';
       g.fillStyle = '#ffffff';
 
       if (evo === 'core') {
-        g.lineWidth = 2.4;
-        poly(g, 0, 0, r * pulse, 0); g.stroke();
+        body(g, r * pulse, down);
 
       } else if (evo === 'pulse') {
-        g.lineWidth = 2.4;
-        poly(g, 0, 0, r * pulse, 0); g.stroke();
+        body(g, r * pulse, down);
         var pr = r * (1.25 + (Math.sin(t * 3.1) * 0.5 + 0.5) * 0.5);
         g.globalAlpha = alpha * (0.5 - (pr / r - 1.25) * 0.7);
         g.lineWidth = 1.4;
@@ -2388,7 +2617,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
         g.globalAlpha = alpha;
         g.lineWidth = 2.6;
         poly(g, 0, 0, r * 0.92 * pulse, 0); g.stroke();
-        coreScale = Math.max(coreScale, 0.55);
+        coreScale = Math.max(coreScale, T.coreScale * 1.55);
       }
 
       // corruption tears at the shell on very long runs
@@ -2399,16 +2628,39 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
         g.globalAlpha = alpha;
       }
 
-      // the core
-      g.beginPath();
-      g.arc(0, 0, r * coreScale * pulse, 0, Math.PI * 2);
-      g.fill();
-      if (glow > 0.2) {
-        g.globalAlpha = alpha * 0.25 * glow;
-        g.beginPath();
-        g.arc(0, 0, r * coreScale * 2.1, 0, Math.PI * 2);
-        g.fill();
+      /* ---- L4 rim: a bright arc on the leading edge, earned by speed. Drawn
+         after the shell so it sits on top of whatever the evolution did to it. */
+      if (q.rim && speed > 0.05) {
+        var i0 = Math.round((down / (Math.PI * 2)) * SIDES) - 2;
+        g.globalAlpha = alpha * T.rimAlpha * Math.min(1, speed * 1.4);
+        g.lineWidth = T.bodyWeightLead * 0.8;
+        polyRun(g, r * pulse, i0, 4);
+        g.stroke();
+        g.globalAlpha = alpha;
       }
+
+      /* ---- L6 motes: energy shed into orbit. They live outside the shell, which
+         is allowed — they are light, not matter, and nothing collides with them. */
+      if (q.motes && glow > 0.25) {
+        g.globalAlpha = alpha * 0.5 * Math.min(1, glow);
+        for (var mi = 0; mi < T.moteCount; mi++) {
+          var ma = t * 1.7 + (mi / T.moteCount) * 6.2832;
+          var mr = r * (1.34 + Math.sin(t * 2.3 + mi * 2) * 0.10);
+          var ms = 1.1 + Math.sin(t * 5 + mi) * 0.35;
+          g.beginPath(); g.arc(Math.cos(ma) * mr, Math.sin(ma) * mr, ms, 0, 6.2832); g.fill();
+        }
+        g.globalAlpha = alpha;
+      }
+
+      /* ---- L7 core: a gradient with a solid hotspot, not a flat disc. The
+         falloff is what makes it read as light coming from inside the shell
+         rather than a white circle sitting in front of it. */
+      var cR = r * coreScale * pulse, cSkirt = cR * 1.45;
+      g.globalAlpha = alpha * m.coreAlpha;
+      g.fillStyle = radial(g, cSkirt, CORE_STOPS);
+      g.beginPath(); g.arc(0, 0, cSkirt, 0, 6.2832); g.fill();
+      g.fillStyle = '#ffffff';
+      g.beginPath(); g.arc(0, 0, cR * T.coreHot, 0, 6.2832); g.fill();
       g.restore();
     },
 
@@ -2432,9 +2684,15 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       if (run.sinceNear < 0.35) return 'near';
       if (run.sinceRecord < 1.2) return 'success';
       if (run.threat > 0.6) return 'alert';
+      /* Deep into a fast run with nothing immediately in the way: not focused
+         and not alarmed, just running hot. It is the state a long clean stretch
+         deserves and the one the character never had. */
+      if (run.speedFrac > 0.72 && run.intensity > 0.55) return 'excited';
       if (run.speedFrac > 0.5) return 'focused';
       return 'neutral';
-    }
+    },
+
+    moods: MOODS
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 
@@ -3446,7 +3704,11 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       g.scale(1, -1);
     }
 
-    var speedFrac = clamp((r.speed - P.BASE_SPEED) / 520, 0, 1);
+    /* One read of the run for every visual system in the frame, so the
+       backdrop, the streaks, the trail and the character cannot disagree about
+       how far into the escalation this moment is. */
+    var vis = OM.visual.sample(r, P);
+    var speedFrac = vis.speed;
     OM.render.backdrop(g, G.W, P.H, r.world.id, r.t, corrupt, speedFrac);
     OM.render.speedLines(g, G.W, camX, r.y, speedFrac);
     OM.render.surfaces(g, G.W, camX, r.gen.holes, r.t, speedFrac);
@@ -3465,10 +3727,11 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       OM.nanogon.draw(g, {
         x: G.playerScreenX(), y: r.y, r: P.R_VIS, rot: r.rot,
         sx: 1 - sq * 0.30, sy: 1 + sq * 0.34,
+        grav: r.grav, speed: vis.speed, q: vis.q,
         evo: prog.activeCore(),
         mood: OM.nanogon.moodFor({
           dead: false, sinceNear: r.sinceNear, sinceRecord: r.sinceRecord,
-          threat: r.threat, speedFrac: clamp((r.speed - P.BASE_SPEED) / 500, 0, 1)
+          threat: r.threat, speedFrac: vis.speed, intensity: vis.intensity
         }),
         t: r.t, glow: clamp(0.2 + r.threat * 0.5 + (r.sinceNear < 0.3 ? 0.8 : 0), 0, 1.4),
         corrupt: corrupt
@@ -3642,6 +3905,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     attract.trail.draw(g, prog.data.cosmetics.trail, 0.25, 0);
     OM.nanogon.draw(g, {
       x: px, y: attract.y, r: P.R_VIS * 1.5, rot: attract.rot,
+      grav: attract.grav, speed: 0.35,
       evo: prog.activeCore(), mood: 'neutral', t: t, glow: 0.45, corrupt: 0
     });
   };
@@ -3786,6 +4050,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       if (!dead) {
         OM.nanogon.draw(g, {
           x: f.x - camX, y: f.y, r: P.R_VIS, rot: f.rot,
+          grav: f.grav, speed: 0.8,
           evo: data.evo, mood: 'alert', t: t, glow: 0.85, corrupt: 0
         });
       } else {

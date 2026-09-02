@@ -487,7 +487,11 @@
       g.scale(1, -1);
     }
 
-    var speedFrac = clamp((r.speed - P.BASE_SPEED) / 520, 0, 1);
+    /* One read of the run for every visual system in the frame, so the
+       backdrop, the streaks, the trail and the character cannot disagree about
+       how far into the escalation this moment is. */
+    var vis = OM.visual.sample(r, P);
+    var speedFrac = vis.speed;
     OM.render.backdrop(g, G.W, P.H, r.world.id, r.t, corrupt, speedFrac);
     OM.render.speedLines(g, G.W, camX, r.y, speedFrac);
     OM.render.surfaces(g, G.W, camX, r.gen.holes, r.t, speedFrac);
@@ -506,10 +510,11 @@
       OM.nanogon.draw(g, {
         x: G.playerScreenX(), y: r.y, r: P.R_VIS, rot: r.rot,
         sx: 1 - sq * 0.30, sy: 1 + sq * 0.34,
+        grav: r.grav, speed: vis.speed, q: vis.q,
         evo: prog.activeCore(),
         mood: OM.nanogon.moodFor({
           dead: false, sinceNear: r.sinceNear, sinceRecord: r.sinceRecord,
-          threat: r.threat, speedFrac: clamp((r.speed - P.BASE_SPEED) / 500, 0, 1)
+          threat: r.threat, speedFrac: vis.speed, intensity: vis.intensity
         }),
         t: r.t, glow: clamp(0.2 + r.threat * 0.5 + (r.sinceNear < 0.3 ? 0.8 : 0), 0, 1.4),
         corrupt: corrupt
@@ -683,6 +688,7 @@
     attract.trail.draw(g, prog.data.cosmetics.trail, 0.25, 0);
     OM.nanogon.draw(g, {
       x: px, y: attract.y, r: P.R_VIS * 1.5, rot: attract.rot,
+      grav: attract.grav, speed: 0.35,
       evo: prog.activeCore(), mood: 'neutral', t: t, glow: 0.45, corrupt: 0
     });
   };
