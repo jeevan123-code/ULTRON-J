@@ -2458,6 +2458,116 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     [0, 'rgba(255,255,255,0.55)'], [0.35, 'rgba(255,255,255,0.18)'],
     [0.7, 'rgba(255,255,255,0.05)'], [1, 'rgba(255,255,255,0)'] ] };
 
+  /* ---------- the shell is a solid, not an outline ----------
+   *
+   * A nonagon outline reads as a flat ring however it is lit. The reference is
+   * a faceted sphere: overlapping polygon edges that describe a volume, with
+   * the light inside it. So the shell is now a real polyhedron, rotated in
+   * three dimensions and projected — which costs a matrix multiply per vertex
+   * and buys the one thing brightness could never fake, which is depth.
+   *
+   * An icosahedron, because twelve vertices and thirty edges is the fewest that
+   * still reads as a sphere rather than as a box, and because its silhouette
+   * stays a recognisable near-circle from every angle. That matters: the
+   * character has to be identifiable at thumbnail size and through five
+   * evolutions, and a shape whose outline changes as it turns is not.
+   *
+   * Edges are drawn in four depth buckets rather than one path per edge, so
+   * thirty edges cost four strokes. Far edges are dimmer and thinner. That
+   * gradient IS the volume — remove it and the whole thing collapses back into
+   * a tangle of lines. */
+  var PHI = 1.6180339887;
+  var ICO_V = [], ICO_E = [];
+  (function buildIco() {
+    var raw = [], i, j;
+    [[0, 1, PHI], [0, -1, PHI], [0, 1, -PHI], [0, -1, -PHI],
+     [1, PHI, 0], [-1, PHI, 0], [1, -PHI, 0], [-1, -PHI, 0],
+     [PHI, 0, 1], [-PHI, 0, 1], [PHI, 0, -1], [-PHI, 0, -1]].forEach(function (v) {
+      var L = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+      raw.push([v[0] / L, v[1] / L, v[2] / L]);
+    });
+    ICO_V = raw;
+    /* Edges by distance: on a unit icosahedron the short chord is ~1.051 and
+       the next one up is ~1.70, so any threshold between them finds exactly the
+       thirty real edges without a hand-written table to get wrong. */
+    for (i = 0; i < raw.length; i++) {
+      for (j = i + 1; j < raw.length; j++) {
+        var dx = raw[i][0] - raw[j][0], dy = raw[i][1] - raw[j][1], dz = raw[i][2] - raw[j][2];
+        if (Math.sqrt(dx * dx + dy * dy + dz * dz) < 1.3) ICO_E.push([i, j]);
+      }
+    }
+  })();
+
+  var proj = [];
+  for (var pi = 0; pi < 12; pi++) proj.push([0, 0, 0]);
+
+  /* Project the shell for this frame. Two rotations, both slow: the character
+     is turning, not spinning, and a fast tumble would fight the gameplay
+     rotation the player actually caused. */
+  function project(r, t, wob) {
+    var ay = t * 0.62, ax = t * 0.41 + wob;
+    var cy = Math.cos(ay), sy = Math.sin(ay), cx = Math.cos(ax), sx = Math.sin(ax);
+    for (var i = 0; i < 12; i++) {
+      var v = ICO_V[i];
+      var x1 = v[0] * cy + v[2] * sy, z1 = -v[0] * sy + v[2] * cy;
+      var y2 = v[1] * cx - z1 * sx, z2 = v[1] * sx + z1 * cx;
+      var pp = proj[i];
+      pp[0] = x1 * r; pp[1] = y2 * r; pp[2] = z2;
+    }
+  }
+
+  /* Draw the projected edges in depth buckets. `weight` scales line width and
+     `bright` scales alpha, so an evolution can thin the shell out or fade it
+     without needing its own copy of this loop. */
+  /* At gameplay size the character is 36px across, and thirty edges inside that
+     is a tangle rather than a solid. So the far half of the shell is dropped
+     below a threshold: the same object, drawn with the detail the size can
+     actually carry. The front facets alone still read as a faceted sphere —
+     it is the depth gradient that sells the volume, not the edge count — and
+     the silhouette, which is what identifies the character, is unchanged. */
+  var LOD_R = 24;
+
+  function shell(g, alpha, weight, bright, dash, lod) {
+    var BUCKETS = 4, b, e, first = lod ? 2 : 0;
+    if (dash) g.setLineDash(dash);
+    for (b = first; b < BUCKETS; b++) {
+      var lo = -1 + (2 * b) / BUCKETS, hi = -1 + (2 * (b + 1)) / BUCKETS;
+      var depth = (b + 0.5) / BUCKETS;              // 0 = far, 1 = near
+      g.beginPath();
+      var any = false;
+      for (e = 0; e < ICO_E.length; e++) {
+        var a = proj[ICO_E[e][0]], c = proj[ICO_E[e][1]];
+        var mz = (a[2] + c[2]) / 2;
+        if (mz < lo || mz >= hi) continue;
+        g.moveTo(a[0], a[1]); g.lineTo(c[0], c[1]);
+        any = true;
+      }
+      if (!any) continue;
+      g.globalAlpha = alpha * bright * (0.16 + depth * 0.84);
+      g.lineWidth = weight * (0.45 + depth * 0.75);
+      g.stroke();
+    }
+    if (dash) g.setLineDash([]);
+    g.globalAlpha = alpha;
+  }
+
+  /* Vertex points. The reference has bright nodes where facets meet, and they
+     are what stops the shell reading as a wire ball and start it reading as a
+     structure with joints. Near vertices only — a dot on the far side of a
+     sphere is a dot in the middle of the silhouette, which is just noise. */
+  function nodes(g, alpha, size, lod) {
+    for (var i = 0; i < 12; i++) {
+      var p = proj[i];
+      if (p[2] < (lod ? 0.4 : 0.1)) continue;
+      var d = (p[2] + 1) / 2;
+      g.globalAlpha = alpha * (0.25 + d * 0.75);
+      g.beginPath();
+      g.arc(p[0], p[1], size * (0.55 + d * 0.65), 0, 6.2832);
+      g.fill();
+    }
+    g.globalAlpha = alpha;
+  }
+
   function poly(g, cx, cy, r, rot, jitter, rng) {
     g.beginPath();
     for (var i = 0; i <= SIDES; i++) {
@@ -2467,43 +2577,6 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
     }
     g.closePath();
-  }
-
-  /* ---- L3 the body.
-     One stroke weight all the way round reads as a wireframe. Weighting the
-     edges that face the direction of travel reads as an object with a front,
-     and costs one extra partial stroke rather than a second full one. */
-  function body(g, r, downAngle) {
-    g.lineWidth = T.bodyWeight;
-    poly(g, 0, 0, r, 0);
-    g.stroke();
-    var i0 = Math.round((downAngle / (Math.PI * 2)) * SIDES) - 2;
-    g.lineWidth = T.bodyWeightLead;
-    polyRun(g, r, i0, 4);
-    g.stroke();
-  }
-
-  /* A run of consecutive edges, for weighting one side of the silhouette
-     without drawing the whole shape twice at full weight. */
-  function polyRun(g, r, fromIdx, count) {
-    g.beginPath();
-    for (var i = 0; i <= count; i++) {
-      var a = ((fromIdx + i) / SIDES) * Math.PI * 2;
-      var x = Math.cos(a) * r, y = Math.sin(a) * r;
-      if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
-    }
-  }
-
-  /* Draws one arc-segment ring with gaps — the shared language of the later
-     evolutions, where the shell progressively stops being a solid object. */
-  function brokenRing(g, cx, cy, r, rot, segs, gapFrac) {
-    var span = (Math.PI * 2) / segs;
-    for (var i = 0; i < segs; i++) {
-      var a0 = rot + i * span, a1 = a0 + span * (1 - gapFrac);
-      g.beginPath();
-      g.arc(cx, cy, r, a0, a1);
-      g.stroke();
-    }
   }
 
   /* ---------- moods ----------
@@ -2564,12 +2637,16 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
          starts it reading as an object being pulled somewhere. */
       var down = (st.grav > 0 ? Math.PI / 2 : -Math.PI / 2) - (st.rot || 0);
 
-      // ---- L0 flash: a hard ring leaving the shell, only in the moment
+      /* ---- L0 flash: a hard ring leaving the shell, only in the moment.
+         Circular, like everything outside the shell now — the silhouette is a
+         sphere, and a nine-sided halo around it reads as a second, wrong
+         object rather than as that object's light. */
       if (flash > 0.03) {
         g.globalAlpha = alpha * flash * 0.55;
         g.strokeStyle = '#ffffff';
         g.lineWidth = 1 + flash * 2;
-        poly(g, 0, 0, r * (1.15 + (1 - flash) * 1.5), 0);
+        g.beginPath();
+        g.arc(0, 0, r * (1.15 + (1 - flash) * 1.5), 0, 6.2832);
         g.stroke();
         g.globalAlpha = alpha;
       }
@@ -2588,7 +2665,8 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       if (glow > 0.01) {
         g.strokeStyle = ink(T.glowRingAlpha * glow);
         g.lineWidth = 9 + glow * 8;
-        poly(g, 0, 0, r * 1.06 * pulse, 0);
+        g.beginPath();
+        g.arc(0, 0, r * 1.02 * pulse, 0, 6.2832);
         g.stroke();
       }
 
@@ -2597,38 +2675,63 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       g.strokeStyle = '#ffffff';
       g.fillStyle = '#ffffff';
 
+      /* ---- L3 the shell.
+         Each evolution changes the STRUCTURE, not the brightness. A brighter
+         version of the same object is not a different object, and six of those
+         in a row is a progress bar wearing a costume. */
+      project(r * pulse, t, evo === 'glitch' ? Math.sin(t * 9) * 0.4 : 0);
+      var lod = r < LOD_R;
+
       if (evo === 'core') {
-        body(g, r * pulse, down);
+        shell(g, alpha, 2.0, 1, null, lod);
+        nodes(g, alpha, 1.5, lod);
 
       } else if (evo === 'pulse') {
-        body(g, r * pulse, down);
-        var pr = r * (1.25 + (Math.sin(t * 3.1) * 0.5 + 0.5) * 0.5);
-        g.globalAlpha = alpha * (0.5 - (pr / r - 1.25) * 0.7);
-        g.lineWidth = 1.4;
-        poly(g, 0, 0, pr, 0); g.stroke();
+        // energy circulating: a bright band sweeping around the depth axis
+        shell(g, alpha, 1.9, 0.85, null, lod);
+        nodes(g, alpha, 1.6, lod);
+        var sweep = Math.sin(t * 2.2);
+        g.globalAlpha = alpha * 0.5;
+        g.lineWidth = 2.6;
+        g.beginPath();
+        for (var pe = 0; pe < ICO_E.length; pe++) {
+          var pa = proj[ICO_E[pe][0]], pc = proj[ICO_E[pe][1]];
+          if (Math.abs((pa[2] + pc[2]) / 2 - sweep) > 0.22) continue;
+          g.moveTo(pa[0], pa[1]); g.lineTo(pc[0], pc[1]);
+        }
+        g.stroke();
         g.globalAlpha = alpha;
 
       } else if (evo === 'phase') {
-        g.lineWidth = 2.4;
-        g.setLineDash([r * 0.5, r * 0.34]);
-        g.lineDashOffset = -t * 26;
-        poly(g, 0, 0, r * pulse, 0); g.stroke();
-        g.setLineDash([]);
+        // translucency: the shell stops being continuous
+        shell(g, alpha, 2.0, 0.55, [r * 0.30, r * 0.22], lod);
+        nodes(g, alpha * 0.7, 1.5, lod);
 
       } else if (evo === 'void') {
-        g.lineWidth = 2.6;
-        brokenRing(g, 0, 0, r * pulse, t * 0.5, 5, 0.42);
-        for (var i = 0; i < 5; i++) {                     // shed fragments in orbit
-          var a = t * 1.1 + i * 1.257, rr = r * (1.5 + Math.sin(t * 2 + i) * 0.16);
+        // the interior deepens: near edges only, and the far half goes dark
+        shell(g, alpha, 2.3, 0.9, null, lod);
+        g.globalAlpha = alpha * 0.55;
+        g.fillStyle = '#08090c';
+        g.beginPath(); g.arc(0, 0, r * 0.62, 0, 6.2832); g.fill();
+        g.fillStyle = '#ffffff';
+        g.globalAlpha = alpha;
+        nodes(g, alpha, 1.8, lod);
+        for (var vi = 0; vi < 5; vi++) {                  // shed fragments in orbit
+          var va = t * 1.1 + vi * 1.257, vr = r * (1.5 + Math.sin(t * 2 + vi) * 0.16);
           g.globalAlpha = alpha * 0.55;
-          g.fillRect(Math.cos(a) * rr - 1.5, Math.sin(a) * rr - 1.5, 3, 3);
+          g.fillRect(Math.cos(va) * vr - 1.5, Math.sin(va) * vr - 1.5, 3, 3);
         }
         g.globalAlpha = alpha;
 
       } else if (evo === 'glitch') {
-        g.lineWidth = 2.2;
-        poly(g, 0, 0, r * pulse, 0, r * 0.16, t * 40); g.stroke();
-        for (var s = 0; s < 3; s++) {                     // torn horizontal slices
+        // desynchronisation: the shell is drawn twice, out of step with itself
+        shell(g, alpha, 1.8, 0.75, null, lod);
+        project(r * pulse * 1.04, t + 0.06, Math.sin(t * 9) * 0.4);
+        g.globalAlpha = alpha * 0.4;
+        shell(g, alpha * 0.4, 1.2, 1, null);
+        g.globalAlpha = alpha;
+        nodes(g, alpha, 1.4, lod);
+        for (var sI = 0; sI < 3; sI++) {                  // torn horizontal slices
           var off = (Math.random() - 0.5) * r * 0.9;
           var yy = -r + Math.random() * r * 2;
           g.globalAlpha = alpha * 0.5;
@@ -2637,37 +2740,35 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
         g.globalAlpha = alpha;
 
       } else if (evo === 'singularity') {
-        for (var k = 0; k < SIDES; k++) {                 // it stopped being a shape
-          var ang = t * 0.8 + (k / SIDES) * Math.PI * 2;
-          var len = r * (1.5 + Math.sin(t * 4 + k) * 0.35);
-          g.globalAlpha = alpha * 0.5;
-          g.lineWidth = 1.2;
+        // space bends towards it: the shell pulls the field in around itself
+        for (var k = 0; k < 12; k++) {
+          var sp = proj[k];
+          if (sp[2] < 0) continue;
+          g.globalAlpha = alpha * 0.32;
+          g.lineWidth = 1;
           g.beginPath();
-          g.moveTo(Math.cos(ang) * r * 0.85, Math.sin(ang) * r * 0.85);
-          g.lineTo(Math.cos(ang) * len, Math.sin(ang) * len);
+          g.moveTo(sp[0], sp[1]);
+          g.lineTo(sp[0] * (1.55 + Math.sin(t * 4 + k) * 0.3),
+                   sp[1] * (1.55 + Math.sin(t * 4 + k) * 0.3));
           g.stroke();
         }
         g.globalAlpha = alpha;
-        g.lineWidth = 2.6;
-        poly(g, 0, 0, r * 0.92 * pulse, 0); g.stroke();
+        shell(g, alpha, 2.4, 1, null, lod);
+        nodes(g, alpha, 2.0, lod);
         coreScale = Math.max(coreScale, T.coreScale * 1.55);
-      }
-
-      // corruption tears at the shell on very long runs
-      if (corrupt > 0.02 && Math.random() < corrupt * 0.5) {
-        g.globalAlpha = alpha * 0.8;
-        g.fillRect((Math.random() - 0.5) * r * 2, (Math.random() - 0.5) * r * 2,
-                   r * (0.3 + Math.random() * 0.5), 1.4);
-        g.globalAlpha = alpha;
       }
 
       /* ---- L4 rim: a bright arc on the leading edge, earned by speed. Drawn
          after the shell so it sits on top of whatever the evolution did to it. */
       if (q.rim && speed > 0.05) {
-        var i0 = Math.round((down / (Math.PI * 2)) * SIDES) - 2;
         g.globalAlpha = alpha * T.rimAlpha * Math.min(1, speed * 1.4);
-        g.lineWidth = T.bodyWeightLead * 0.8;
-        polyRun(g, r * pulse, i0, 4);
+        g.lineWidth = T.bodyWeightLead * 0.75;
+        g.lineCap = 'round';
+        g.beginPath();
+        /* Inside the circumradius, not on it. An icosahedron only touches its
+           circumscribed circle at twelve points; an arc drawn out there floats
+           off the object instead of lighting its edge. */
+        g.arc(0, 0, r * pulse * 0.88, down - 0.8, down + 0.8);
         g.stroke();
         g.globalAlpha = alpha;
       }
