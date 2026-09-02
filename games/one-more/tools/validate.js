@@ -26,6 +26,7 @@ require(path.join(SRC, '20-patterns.js'));
    Guarded because --compose is what writes the file: the first run, and any run
    after deleting it, has to be able to start without it. */
 try { require(path.join(SRC, '22-compositions.js')); } catch (e) {}
+require(path.join(SRC, '30-mutations.js'));
 
 var P = OM.phys, PAT = OM.patterns;
 var VERBOSE = process.argv.indexOf('--verbose') >= 0;
@@ -398,22 +399,78 @@ if (insp >= 0) {
   process.exit(0);
 }
 
-/* The speeds the world is actually run at, per pattern.
+/* Every speed the world is ever run at, and which of them each pattern owes a
+ * proof at.
  *
- * Practice runs at one fixed speed below the curve, and only the static half of
- * the library ever spawns there — a time-driven pattern is a different problem
- * at a different speed, which is exactly why it is kept out of that mode. So
- * the practice speed is proven for the patterns that can meet it and skipped
- * for the ones that cannot, rather than being either assumed or ignored.
+ * The envelope is wider than the base curve, and until now the validator only
+ * knew about part of it. Practice pins 335. The curve runs 430 to 998. DRAG
+ * multiplies by 0.84 and SURGE by 1.22 — same mutation class, so they never
+ * stack — which puts the real range the game runs at 361 to 1218. Three of
+ * those numbers had never been checked.
  *
- * Slack is still measured against the top of the base curve. Below it the same
- * pixel band buys more milliseconds, so a slower speed can never be the binding
- * case for a static pattern's budget. */
-var BASE_SPEEDS = [P.speedAt(0), P.speedAt(70), P.speedAt(260)];
-function speedsFor(p) {
-  return isDynamic(p) ? BASE_SPEEDS : [P.PRACTICE_SPEED].concat(BASE_SPEEDS);
+ * STATIC patterns need one survivability check, at the top of that range. Their
+ * geometry is fixed in space and so is the flip arc, so the only thing speed
+ * changes is the flip cooldown: COOLDOWN_S is a fixed number of seconds, so it
+ * covers MORE pixels the faster you go. A line executable at 1218 therefore has
+ * every flip far enough apart to be executable at any slower speed, threading
+ * the identical geometry. One check at the top implies the whole range. The
+ * practice speed is checked anyway — an entire mode rests on it and the solve
+ * costs almost nothing, so it is a fact in the report rather than an inference
+ * a reader has to reconstruct.
+ *
+ * DYNAMIC patterns get no implication in either direction: phase advances
+ * differently over the same stretch of tunnel at every speed, so the problem
+ * changes shape continuously and the envelope has to be sampled.
+ *
+ * Slack budgets are held against the base curve and practice — the speeds a
+ * player lives in. SURGE and DRAG are announced, temporary and deliberate: a
+ * burst 22% tighter is the point of a burst. What a burst may never be is
+ * impossible, which is why survivability covers the whole envelope, and any
+ * pattern that drops under its floor inside a mutation is reported as an
+ * advisory rather than quietly swallowed. */
+var BASE_SPEEDS = [P.speedAt(0), P.speedAt(70), P.speedAt(260), P.speedAt(400)];
+var BUDGET_TOP = P.speedAt(400);
+
+/* The pace multipliers are read off the shipping mutation table rather than
+   copied into this file. A new pace mutation, or a change to SURGE, widens the
+   envelope here automatically — which is the difference between a proof that
+   tracks the game and a proof that used to. */
+var PACE = (function () {
+  var lo = 1, hi = 1, L = OM.mutations.list;
+  for (var i = 0; i < L.length; i++) {
+    if (typeof L[i].speed !== 'number') continue;
+    lo = Math.min(lo, L[i].speed);
+    hi = Math.max(hi, L[i].speed);
+  }
+  return { lo: lo, hi: hi };
+})();
+var MUT_SPEEDS = [P.speedAt(0) * PACE.lo, P.speedAt(400) * PACE.hi];
+var TOP_SPEED = MUT_SPEEDS[1];
+
+function uniq(list) {
+  var out = [];
+  list.forEach(function (v) {
+    for (var i = 0; i < out.length; i++) if (Math.abs(out[i] - v) < 1e-9) return;
+    out.push(v);
+  });
+  return out.sort(function (a, b) { return a - b; });
 }
-var fails = [], warns = [], rows = [];
+
+/* Which speeds a pattern is solved at, and what each solve is for.
+   `budget` speeds have their slack held to the tier floor; `advisory` speeds
+   have it measured and reported but not enforced. */
+function planFor(p) {
+  if (isDynamic(p)) {
+    return { survive: uniq(BASE_SPEEDS.concat(MUT_SPEEDS)),
+             budget: uniq(BASE_SPEEDS),
+             advisory: uniq(MUT_SPEEDS) };
+  }
+  return { survive: uniq([P.PRACTICE_SPEED, TOP_SPEED]),
+           budget: [BUDGET_TOP],
+           advisory: [TOP_SPEED] };
+}
+
+var fails = [], warns = [], tight = [], rows = [];
 var t0Start = Date.now();
 
 /* --only a,b,c validates just those patterns, at full rigour. Tuning one
@@ -426,35 +483,38 @@ if (ONLY && TARGETS.length !== ONLY.length) {
   process.exit(2);
 }
 
+function has(list, v) {
+  for (var i = 0; i < list.length; i++) if (Math.abs(list[i] - v) < 1e-9) return true;
+  return false;
+}
+
 function proveOne(p) {
   var dyn = isDynamic(p);
   var phases = dyn ? [0, 0.17, 0.34, 0.51, 0.68, 0.85] : [0];
-  var allOk = true, failAt = null, minFlips = 99, worstWindow = Infinity;
+  var plan = planFor(p);
+  var allOk = true, failAt = null, minFlips = 99;
+  var worstWindow = Infinity;      // held to the tier floor
+  var worstAny = Infinity;         // includes the mutation speeds; reported only
 
-  var speeds = speedsFor(p);
+  var speeds = uniq(plan.survive.concat(plan.budget, plan.advisory));
   for (var si = 0; si < speeds.length; si++) {
+    var sp = speeds[si];
+    var wantBudget = has(plan.budget, sp), wantAdvisory = has(plan.advisory, sp);
     for (var pi = 0; pi < phases.length; pi++) {
       for (var gi = 0; gi < 2; gi++) {
         var grav = gi ? -1 : 1;
-        var r = solve(p, speeds[si], phases[pi] * 3.7, grav);
+        var r = solve(p, sp, phases[pi] * 3.7, grav);
         if (!r.ok) {
           allOk = false;
-          failAt = { speed: Math.round(speeds[si]), phase: phases[pi], grav: grav, x: r.atX };
+          failAt = { speed: Math.round(sp), phase: phases[pi], grav: grav, x: r.atX };
           si = speeds.length; pi = phases.length; break;
         }
-        /* Where slack has to be measured depends on whether the pattern moves.
-           A static pattern is fixed in space and so is the flip arc, so the
-           survivable band is the same pixels at every speed and the thinnest
-           time window is trivially the fastest one. A moving pattern has no
-           such guarantee: its phase advances differently over the same stretch
-           of tunnel at a different speed, so the band itself changes shape and
-           the worst case can sit anywhere. Those get measured at every speed. */
-        if (si === speeds.length - 1 || dyn) {
-          var line0 = minimize(p, speeds[si], phases[pi] * 3.7, grav, r.lines[0]);
-          minFlips = Math.min(minFlips, line0.length);
-          var w = windowMs(p, speeds[si], phases[pi] * 3.7, grav, r.lines);
-          if (w < worstWindow) worstWindow = w;
-        }
+        if (!wantBudget && !wantAdvisory) continue;
+        var line0 = minimize(p, sp, phases[pi] * 3.7, grav, r.lines[0]);
+        minFlips = Math.min(minFlips, line0.length);
+        var w = windowMs(p, sp, phases[pi] * 3.7, grav, r.lines);
+        if (w < worstAny) worstAny = w;
+        if (wantBudget && w < worstWindow) worstWindow = w;
       }
     }
   }
@@ -465,7 +525,8 @@ function proveOne(p) {
   var exact = minFlips <= 2;
   var floor = exact ? TIER_FLOOR[p.tier] : LB_FLOOR[p.tier];
   return { id: p.id, tier: p.tier, ok: allOk, window: worstWindow, flips: minFlips,
-           dyn: dyn, failAt: failAt, exact: exact, floor: floor };
+           dyn: dyn, failAt: failAt, exact: exact, floor: floor,
+           underMutation: worstAny };
 }
 
 if (process.argv.indexOf('--compose') >= 0) { require('./compose.js')(proveOne); return; }
@@ -475,6 +536,9 @@ TARGETS.forEach(function (p) {
   rows.push(r);
   if (!r.ok) fails.push(r.id + ' @x=' + r.failAt.x + ' (speed ' + r.failAt.speed + ', from ' + (r.failAt.grav > 0 ? 'floor' : 'ceiling') + ')');
   else if (r.window < r.floor) warns.push(r.id + ' ' + Math.round(r.window) + 'ms<' + r.floor);
+  else if (r.underMutation < r.floor) {
+    tight.push(r.id + ' ' + Math.round(r.underMutation) + 'ms<' + r.floor);
+  }
 });
 
 function pad(s, n) { s = String(s); while (s.length < n) s += ' '; return s; }
@@ -491,11 +555,21 @@ rows.forEach(function (r) {
 });
 console.log('  ' + '-'.repeat(69));
 console.log('  * = moving geometry, validated across 6 phase offsets');
-console.log('  slack = timing error the most forgiving line tolerates (moving patterns: worst speed)');
+console.log('  slack = timing error the most forgiving line tolerates, worst speed on the base curve');
+console.log('  survivability is proven across the whole envelope: ' +
+  Math.round(MUT_SPEEDS[0]) + '-' + Math.round(TOP_SPEED) + 'px/s, DRAG to SURGE');
 console.log('  >= marks a lower bound (line needs 3+ flips; space not scanned exhaustively)');
 console.log('  ' + rows.length + (ONLY ? ' selected' : '') + ' patterns / ' + (rows.length - fails.length) +
   ' survivable at every speed, entry side and phase  (' + ((Date.now() - t0Start) / 1000).toFixed(1) + 's)');
 if (warns.length) console.log('  BELOW TIER FLOOR: ' + warns.join(', '));
+/* Not a failure. SURGE and DRAG are announced, temporary and deliberate, so a
+   burst may legitimately be tighter than the budget the base curve owes you.
+   It is printed because "legitimately tighter" and "accidentally brutal" look
+   identical from inside the code, and only a person can tell them apart. */
+if (tight.length) {
+  console.log('  tighter than the floor under SURGE or DRAG, within budget on the base curve:');
+  console.log('    ' + tight.join(', '));
+}
 if (fails.length) { console.log('  UNSURVIVABLE:\n    ' + fails.join('\n    ') + '\n'); process.exit(1); }
 if (warns.length) { console.log('  ' + warns.length + ' pattern(s) tighter than their tier allows.\n'); process.exit(1); }
 console.log('  All patterns fair, every tier within its slack budget.\n');

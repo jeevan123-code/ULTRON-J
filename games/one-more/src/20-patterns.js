@@ -170,7 +170,7 @@
   L.push(pat('t2_double_wide', 2, 1180, [spike('floor', 110, 280, 120), spike('ceil', 620, 280, 120)]));
 
   // TIER 3
-  L.push(pat('t3_gate', 3, 1080, [gate(420, 30, 220, (CEIL + FLOOR) / 2, 34, 0.14, 0)]));
+  L.push(pat('t3_gate', 3, 1080, [gate(420, 30, 234, (CEIL + FLOOR) / 2, 34, 0.14, 0)]));
   L.push(pat('t3_piston_pair', 3, 1300, [
     piston('floor', 200, 100, 330, 0.4, 0.45, 0), piston('ceil', 800, 100, 330, 0.4, 0.45, 0.5)
   ]));
@@ -184,7 +184,7 @@
   ]));
 
   // TIER 4
-  L.push(pat('t4_gate_fast', 4, 1140, [gate(440, 38, 184, (CEIL + FLOOR) / 2, 82, 0.26, 0)]));
+  L.push(pat('t4_gate_fast', 4, 1140, [gate(440, 38, 192, (CEIL + FLOOR) / 2, 82, 0.26, 0)]));
   L.push(pat('t4_piston_zig', 4, 1600, [
     piston('floor', 160, 100, 330, 0.45, 0.45, 0), spike('ceil', 660, 160, 118),
     piston('floor', 1140, 100, 330, 0.45, 0.45, 0.5)
@@ -196,7 +196,7 @@
   L.push(pat('t4_laser_pair', 4, 1480, [
     laser('floor', 240, 90, 0.45, 0.5, 0), laser('ceil', 900, 90, 0.45, 0.5, 0.5)
   ]));
-  L.push(pat('t4_bar_needle', 4, 1700, [bar(120, 160, CEIL + 140, FLOOR - 230)].concat(needle(960, 40, 178))));
+  L.push(pat('t4_bar_needle', 4, 1700, [bar(120, 160, CEIL + 140, FLOOR - 230)].concat(needle(960, 31, 190))));
 
   // TIER 5
   L.push(pat('t5_piston_storm', 5, 2000, [
@@ -209,7 +209,7 @@
   ]));
   L.push(pat('t5_full_house', 5, 2300, [
     spike('floor', 90, 140, 115), bar(500, 160, CEIL + 150, FLOOR - 230),
-    gate(1080, 38, 178, (CEIL + FLOOR) / 2, 82, 0.26, 0.6), spike('ceil', 1700, 140, 115)
+    gate(1080, 29, 186, (CEIL + FLOOR) / 2, 82, 0.26, 0.6), spike('ceil', 1700, 140, 115)
   ]));
   L.push(pat('t5_laser_gauntlet', 5, 2100, [
     laser('floor', 200, 85, 0.48, 0.48, 0), spike('ceil', 700, 140, 115),

@@ -280,6 +280,21 @@ ok('schedule is deterministic per seed', (function () {
 ok('no mutation touches gravity', OM.mutations.list.every(function (m) {
   return m.gravity === undefined && m.gmul === undefined;
 }), 'a gravity mutation would void the fairness proof for every pattern');
+ok('a mutation that changes pace says so in the one field the proof reads',
+   OM.mutations.list.every(function (m) {
+     var declares = typeof m.speed === 'number';
+     return declares === (m.cls === 'pace');
+   }),
+   'the validator derives its speed envelope from these; a pace change hidden ' +
+   'under another name would run at a speed nothing has ever been proven at');
+ok('the pace multipliers bracket the unmutated game', (function () {
+  var lo = 1, hi = 1;
+  OM.mutations.list.forEach(function (m) {
+    if (typeof m.speed !== 'number') return;
+    lo = Math.min(lo, m.speed); hi = Math.max(hi, m.speed);
+  });
+  return lo < 1 && hi > 1 && P.speedAt(0) * lo > 0 && P.speedAt(400) * hi > P.speedAt(400);
+})());
 ok('nothing fires in the first 15 seconds', OM.mutations.schedule(OM.rng(9))[0].at >= 15);
 ok('the same mutation never repeats back to back within a track', (function () {
   // the schedule now merges two tracks, so adjacency in the array is not

@@ -98,7 +98,7 @@ rather than asserted.
 
 ```bash
 npm run validate    # prove every pattern is survivable and fair
-npm test            # 128 unit tests over the pure logic
+npm test            # 130 unit tests over the pure logic
 npm run e2e         # 94 end-to-end checks driven by real taps
 npm run playtest    # play the real game in a real browser with a bot
 npm run build       # bundle to dist/
@@ -111,12 +111,25 @@ space of flip timings — from both entry surfaces, at every speed the pattern c
 spawn at, across six phase offsets for anything that moves. A pattern passes
 only if a surviving line exists in every combination.
 
-Where slack has to be measured depends on whether the pattern moves. Static
-geometry is fixed in space and so is the flip arc, so its survivable band is the
-same pixels at every speed and the thinnest window is trivially the fastest one.
-Moving geometry has no such guarantee — its phase advances differently over the
-same stretch of tunnel — so it is measured at every speed and held to the
-worst.
+**Every speed** means the whole envelope, which is wider than the speed curve.
+Practice pins 335 px/s; the curve runs 430 → 998; DRAG multiplies by 0.84 and
+SURGE by 1.22, so the game actually runs anywhere from 361 to 1218 px/s. Those
+multipliers are read off the shipping mutation table rather than copied here, so
+a new pace mutation widens the proof automatically.
+
+Static patterns need one survivability check, at the top of that range: their
+geometry is fixed in space and so is the flip arc, so the only thing speed
+changes is the flip cooldown — a fixed number of *seconds*, so it covers more
+pixels the faster you go. A line executable at 1218 has every flip far enough
+apart to be executable at any slower speed, threading identical geometry. Moving
+patterns get no such implication in either direction and are sampled across the
+envelope.
+
+Slack budgets are held against the base curve, where a player lives. SURGE and
+DRAG are announced, temporary and deliberate — a burst 22 % tighter is the point
+of a burst — so anything that drops under its floor only inside a mutation is
+printed as an advisory rather than failed, because "legitimately tighter" and
+"accidentally brutal" look identical from inside the code.
 
 It then measures the number that actually matters: take the most forgiving line
 and slide each flip until the run dies. That is how much timing error the
@@ -155,6 +168,16 @@ This tool keeps earning its keep. Three findings that changed the game:
   their first draft at 9–35 ms of slack. They are now narrow, with slow-moving
   openings and approach rails drawn back from each jaw so a thin obstacle still
   telegraphs from a distance.
+- **The validator was proving the wrong top speed.** It sampled up to
+  `speedAt(260)` = 910 px/s while the curve reaches 998 and SURGE reaches 1218,
+  so three of the speeds the game actually runs at had never been checked.
+  Widening the envelope put four patterns under their tier floor at a speed
+  players reach: `t3_gate` 96 ms, `t4_gate_fast` 56 ms, `t4_bar_needle` 48 ms,
+  `t5_full_house` 32 ms. And the fix was not the obvious one — narrowing those
+  gates moved their slack by exactly 0 ms. Once a gate is narrow enough, the
+  binding constraint is the *height* of the opening, because the slow ends of
+  the flip arc are what land in the jaws. Opening each of them by 6–16 px put
+  all four back in budget.
 
 ### `tools/compose.js` — more world, without more hand-authoring
 
@@ -205,10 +228,10 @@ a solver and starts standing in for a person.
 
 ```
 PROFILE   REACTION   RUNS  MEDIAN    BEST      WORLD REACHED
-PERFECT   0ms        11    02:45.01  04:53.26  PULSE
-GOOD      110ms      11    01:18.63  02:25.33  PULSE
-HUMAN     190ms      11    00:37.07  01:07.30  ORIGIN
-SLOPPY    300ms      11    00:15.73  00:38.71  ORIGIN
+PERFECT   0ms        11    03:01.83  04:49.79  COLLAPSE
+GOOD      110ms      11    01:14.13  02:29.84  PULSE
+HUMAN     190ms      11    00:42.57  00:52.56  ORIGIN
+SLOPPY    300ms      11    00:18.35  00:24.80  ORIGIN
 ```
 
 Eleven runs a profile, not five. A PERFECT run lasts minutes and its length has

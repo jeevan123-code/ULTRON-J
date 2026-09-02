@@ -56,6 +56,14 @@ flip. The proof says a pattern is fair. It cannot say a pattern is worth
 spawning, and pretending otherwise is how a library gets bigger without the game
 getting better.
 
+Each tier owes the player a slack budget, measured at the top of the speed
+curve — 998 px/s, not the 910 the validator used to stop at. The gap between
+those two numbers hid four patterns that were out of budget at a speed players
+reach. Under SURGE the game runs tighter still; that is reported but not
+enforced, because an announced, temporary burst is allowed to be harder than the
+budget the base curve owes you. It is not allowed to be impossible, which is why
+survivability is proven across the whole 361–1218 px/s envelope.
+
 Each tier owes the player a slack budget, measured at top speed:
 
 | tier | slack floor | reads as |
