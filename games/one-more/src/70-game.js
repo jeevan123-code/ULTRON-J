@@ -510,6 +510,12 @@
     var vis = OM.visual.sample(r, P);
     var speedFrac = vis.speed;
     OM.render.backdrop(g, G.W, P.H, r.world.id, r.t, corrupt, speedFrac, vis);
+    /* Background structures, then the haze that sits between them and the
+       tunnel. Seeded from the run so a retry and a Daily rebuild the same
+       skyline — a background that drifted would make "the identical world" a
+       lie in the one place the player would actually notice it. */
+    OM.architecture.draw(g, G.W, r.world.id, camX, r.t, r.seed, vis);
+    OM.render.haze(g, G.W, vis);
     OM.render.speedLines(g, G.W, camX, r.y, speedFrac);
     OM.render.surfaces(g, G.W, camX, r.gen.holes, r.t, speedFrac);
     OM.render.contactLight(g, G.playerScreenX(), r.y, r.coreFlash, vis.q);

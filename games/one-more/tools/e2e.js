@@ -454,8 +454,13 @@ function ok(name, cond, detail) {
       for (var s = 0; s < 6; s++) {
         var t = w.at + 3 + s * 2.7;
         g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
-        OM.render.backdrop(g, W, H, w.id, t, 0, 0.6,
-                           { atmos: 1, q: OM.visual.q() });
+        /* The whole environment, not just the backdrop: architecture is now
+           the larger half of it, and a guard that measured only the layer it
+           was written for would pass while the frame got brighter behind it. */
+        var vs = { atmos: 1, q: OM.visual.q() };
+        OM.render.backdrop(g, W, H, w.id, t, 0, 0.6, vs);
+        OM.architecture.draw(g, W, w.id, t * 700, t, 12345, vs);
+        OM.render.haze(g, W, vs);
         var d = g.getImageData(0, OM.phys.CEIL, W, OM.phys.FLOOR - OM.phys.CEIL).data;
         for (var i = 0; i < d.length; i += 4) if (d[i] > peak) peak = d[i];
       }
@@ -469,6 +474,31 @@ function ok(name, cond, detail) {
      readability.world + ' peaked at ' + readability.worst + '/255');
   console.log('    (backdrop peak brightness: ' +
               OM_worlds(readability.per) + ' — geometry is 255)');
+
+  /* ---- the skyline is a function of the seed ----
+     A Daily has to be identical for everyone and a retry identical to the run
+     it repeats. The architecture is placed by hashing (seed, plane, slot)
+     precisely so that holds, which is worth proving rather than asserting. */
+  var skyline = await page.evaluate(function () {
+    var W = 700, H = OM.phys.H;
+    function paint(seed, camX) {
+      var c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      var g = c.getContext('2d');
+      g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+      OM.architecture.draw(g, W, 'collapse', camX, 40, seed,
+                           { atmos: 1, q: OM.visual.q() });
+      var d = g.getImageData(0, 0, W, H).data, sum = 0, lit = 0;
+      for (var i = 0; i < d.length; i += 4) { sum += d[i] * (i % 7919); lit += d[i] > 4 ? 1 : 0; }
+      return { sig: sum, lit: lit };
+    }
+    var a = paint(4242, 9000), b = paint(4242, 9000), c = paint(4243, 9000);
+    return { same: a.sig === b.sig, differs: a.sig !== c.sig, lit: a.lit };
+  });
+  ok('the same seed builds the same skyline', skyline.same);
+  ok('a different seed builds a different one', skyline.differs);
+  ok('and there is actually something out there', skyline.lit > 400,
+     skyline.lit + ' lit pixels');
 
   /* ---- the character does not outgrow its hitbox ----
      Collision uses R=16 against art drawn at R_VIS=18, and that gap is the

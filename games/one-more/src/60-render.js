@@ -153,6 +153,35 @@
       return atmos;
     },
 
+    /* ---- haze ----
+       Atmospheric perspective, and the thing that stops the architecture from
+       looking like it is stuck to the same pane of glass as the tunnel. It sits
+       between the two, densest in the middle band where the structures are, and
+       clears at the surfaces so the geometry the player reads never goes
+       through it. */
+    haze: function (g, W, vis) {
+      var amount = vis ? (0.35 + vis.atmos * 0.65) : 0.5;
+      var q = (vis && vis.q) || OM.visual.q();
+      if (!q.aura) return;
+      var cache = g.__omGrad || (g.__omGrad = {});
+      if (!cache.haze) {
+        var hg = g.createLinearGradient(0, CEIL, 0, FLOOR);
+        hg.addColorStop(0, 'rgba(8,9,12,0)');
+        /* A veil, not a curtain. The first pass ran this at 0.55 and it erased
+           the architecture it exists to sit in front of — separation is the
+           job, not concealment. */
+        hg.addColorStop(0.42, 'rgba(8,9,12,0.30)');
+        hg.addColorStop(0.58, 'rgba(8,9,12,0.30)');
+        hg.addColorStop(1, 'rgba(8,9,12,0)');
+        cache.haze = hg;
+      }
+      g.save();
+      g.globalAlpha = amount;
+      g.fillStyle = cache.haze;
+      g.fillRect(0, CEIL, W, FLOOR - CEIL);
+      g.restore();
+    },
+
     /* ---- contact light ----
        The character is the only light source in the game, so the surfaces it
        passes should know about it. This brightens a short span of whichever
