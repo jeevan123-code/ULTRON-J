@@ -448,18 +448,33 @@ function ok(name, cond, detail) {
     c.width = W; c.height = H;
     var g = c.getContext('2d');
     var out = {}, worst = 0, worstWorld = '';
+    var names = Object.keys(OM.dream.events);
+    /* One pass = one frame the game can actually produce: the full environment
+       for that world plus at most one dream event at one instant. Earlier
+       versions stacked four events at six instants each and reported 86 against
+       a ceiling of 90 — a number that measured nothing real and would have
+       failed on the next small change. */
+    var passes = [{ ev: -1, k: 0 }];
+    for (var e = 0; e < names.length; e++) {
+      for (var kk = 0.15; kk < 1; kk += 0.17) passes.push({ ev: e, k: kk });
+    }
     OM.phys.WORLDS.forEach(function (w) {
       var peak = 0;
-      // several instants, because most of these layers move
-      for (var s = 0; s < 6; s++) {
-        var t = w.at + 3 + s * 2.7;
-        g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
-        /* The whole environment, not just the backdrop: architecture is now
-           the larger half of it, and a guard that measured only the layer it
-           was written for would pass while the frame got brighter behind it. */
+      /* A world that never dreams is not measured with dreams in it. The table
+         is read from the shipping module rather than restated here, so the two
+         cannot disagree about which worlds those are. */
+      var dreams = (OM.dream.byWorld[w.id] || 0) > 0;
+      for (var pi = 0; pi < (dreams ? passes.length : 1); pi++) {
+        var t = w.at + 3 + (pi % 6) * 2.7;
         var vs = { atmos: 1, q: OM.visual.q() };
+        g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
         OM.render.backdrop(g, W, H, w.id, t, 0, 0.6, vs);
         OM.architecture.draw(g, W, w.id, t * 700, t, 12345, vs);
+        if (passes[pi].ev >= 0) {
+          g.save(); g.strokeStyle = '#ffffff';
+          OM.dream.events[names[passes[pi].ev]].draw(g, W, H, passes[pi].k, 4242 + pi);
+          g.restore();
+        }
         OM.render.haze(g, W, vs);
         var d = g.getImageData(0, OM.phys.CEIL, W, OM.phys.FLOOR - OM.phys.CEIL).data;
         for (var i = 0; i < d.length; i += 4) if (d[i] > peak) peak = d[i];
@@ -474,6 +489,115 @@ function ok(name, cond, detail) {
      readability.world + ' peaked at ' + readability.worst + '/255');
   console.log('    (backdrop peak brightness: ' +
               OM_worlds(readability.per) + ' — geometry is 255)');
+
+  /* ---- the run sculpture ----
+     The claim is that it is built from the path rather than from summary
+     statistics, which means two runs with the same totals but different shapes
+     must produce different objects. That is the whole difference between this
+     and a bar chart in fancy dress, so it is what gets tested. */
+  var sculpt = await page.evaluate(function () {
+    var P = OM.phys;
+    function ghost(n, flipEvery, amp) {
+      var y = [], gg = [], dx = [], cur = 1;
+      for (var i = 0; i < n; i++) {
+        if (i % flipEvery === 0 && i > 0) cur = 1 - cur;
+        gg.push(cur); dx.push(18);
+        var u = (i % flipEvery) / flipEvery, a = cur ? u : 1 - u;
+        y.push(P.CEIL + (P.FLOOR - P.CEIL) * (0.5 + (a - 0.5) * amp));
+      }
+      return { r: 24, x0: 0, dx: dx, y: y, g: gg };
+    }
+    function sig(s) {
+      var v = 0;
+      for (var i = 0; i < s.pts.length; i++) {
+        v += (s.pts[i][0] * 7919 + s.pts[i][1] * 104729 + s.pts[i][2] * 15485863);
+      }
+      return Math.round(v * 1000);
+    }
+    var hug = OM.sculpture.build(ghost(480, 240, 0.15));
+    var cross = OM.sculpture.build(ghost(480, 40, 0.9));
+    return {
+      none: OM.sculpture.build(null) === null,
+      tiny: OM.sculpture.build({ r: 24, x0: 0, dx: [1], y: [300], g: [1] }) === null,
+      flips: OM.sculpture.build(ghost(480, 40, 0.9)).flips.length,
+      expected: Math.floor(480 / 40) - 1,
+      differs: sig(hug) !== sig(cross),
+      stable: sig(hug) === sig(OM.sculpture.build(ghost(480, 240, 0.15)))
+    };
+  });
+  ok('no run, no sculpture', sculpt.none && sculpt.tiny,
+     'a figure built from four samples would be a claim about nothing');
+  ok('every flip in the path is marked', sculpt.flips === sculpt.expected,
+     sculpt.flips + ' found, ' + sculpt.expected + ' in the path');
+  ok('two different runs make two different objects', sculpt.differs,
+     'if they matched, it would be summary statistics wearing a shape');
+  ok('and the same run always makes the same one', sculpt.stable);
+
+  await page.evaluate(function () {
+    var P = OM.phys, y = [], gg = [], dx = [], cur = 1;
+    for (var i = 0; i < 400; i++) {
+      if (i % 30 === 0 && i > 0) cur = 1 - cur;
+      gg.push(cur); dx.push(18);
+      y.push(P.CEIL + (P.FLOOR - P.CEIL) * (cur ? 0.8 : 0.2));
+    }
+    OM.progress.data.ghost = { r: 24, x0: 0, dx: dx, y: y, g: gg };
+    OM.ui.showRecords();
+  });
+  ok('the records screen shows your best run as an object',
+     await page.isVisible('#rec-sculpt'));
+  await page.waitForFunction('document.getElementById("rec-sculpt").width > 0',
+                             null, { timeout: 4000 }).catch(function () {});
+  ok('and it is actually drawing', await page.evaluate(function () {
+    var c = document.getElementById('rec-sculpt');
+    if (!c || !c.width) return false;
+    var d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, lit = 0;
+    for (var i = 3; i < d.length; i += 4) if (d[i] > 20) lit++;
+    return lit > 200;
+  }));
+  await page.evaluate(function () { OM.ui.show('menu'); });
+
+  /* ---- the sky never interrupts ----
+     Spectacle that fires while you are threading a needle is not a reward, it
+     is an obstacle nothing proved. The director's own calm test is the thing
+     under test here: it is fed states that are explicitly dangerous and must
+     refuse every one of them, however long it has been waiting. */
+  var director = await page.evaluate(function () {
+    var d = OM.dream.Director(OM.rng(7));
+    var vis = { world: 'nightmare' };
+    function state(o) {
+      var base = { dead: false, t: 400, threat: 0, sinceNear: 9, sinceFlip: 9 };
+      for (var k in o) base[k] = o[k];
+      return base;
+    }
+    var dangerous = [
+      state({ threat: 0.8 }),            // something lethal is close
+      state({ sinceNear: 0.3 }),         // just grazed one
+      state({ sinceFlip: 0.1 }),         // mid-commitment
+      state({ dead: true }),             // dying
+      state({ t: 12 })                   // still learning the rule
+    ];
+    var refused = 0;
+    for (var i = 0; i < dangerous.length; i++) {
+      d.active = null; d.since = 9999;
+      for (var n = 0; n < 400; n++) d.update(1 / 60, dangerous[i], vis);
+      if (!d.active) refused++;
+    }
+    // and it does eventually fire when the window is genuinely quiet
+    d.active = null; d.since = 9999;
+    var fired = 0;
+    for (var m = 0; m < 4000 && !d.active; m++) d.update(1 / 60, state({}), vis);
+    fired = d.active ? 1 : 0;
+    // origin never dreams at all
+    d.active = null; d.since = 9999;
+    for (var o = 0; o < 4000; o++) d.update(1 / 60, state({}), { world: 'origin' });
+    return { refused: refused, cases: dangerous.length, fired: fired, origin: !d.active };
+  });
+  ok('an event never fires into a dangerous window',
+     director.refused === director.cases,
+     director.refused + ' of ' + director.cases + ' refused');
+  ok('but it does fire when the window is quiet', director.fired === 1);
+  ok('the first world never dreams', director.origin,
+     'a spectacle while somebody is learning the rule teaches them things happen for no reason');
 
   /* ---- the skyline is a function of the seed ----
      A Daily has to be identical for everyone and a retry identical to the run

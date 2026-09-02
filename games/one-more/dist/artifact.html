@@ -129,6 +129,12 @@ html, body {
   font: inherit; font-size: 10px; letter-spacing: .12em; padding: 5px 9px; cursor: pointer; }
 .qual button[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); }
 
+/* The sculpture gets room. It is the one thing on this screen that rewards
+   looking rather than reading. */
+.sculpt { position: relative; width: 100%; aspect-ratio: 1 / 1; max-height: 260px;
+  border: 1px solid var(--line); margin: 10px 0 6px; background: var(--bg); overflow: hidden; }
+.sculpt canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 6px; padding: 0; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 10px;
   letter-spacing: .14em; color: var(--dim); }
@@ -3232,6 +3238,283 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
   OM.fx = { Pool: Pool, Trail: Trail, death: death, Screen: Screen };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 
+/* ==== src/56-dream.js ==== */
+/* ONE MORE — the dream engine and its director.
+ *
+ * A long run goes visually flat. The worlds escalate, but between arrivals
+ * nothing happens that the player has not already seen sixty seconds of, and
+ * "more particles" is not an event. So the background occasionally does
+ * something: an enormous ring passes through it, the frame cracks, a tunnel
+ * opens and recedes, something vast rises behind the world and sinks again.
+ *
+ * The director is the important half. Spectacle that fires at random is
+ * spectacle that fires while you are threading a needle, and a visual event
+ * that arrives at the wrong moment is not a reward, it is an obstacle the
+ * validator never proved. So an event needs a quiet window: nothing close,
+ * nothing recently grazed, not dead, and enough time since the last one. The
+ * check is cheap and it runs before the roll, never after.
+ *
+ * Three rules hold for every event here, and they are what separate this from
+ * decoration that got out of hand:
+ *
+ *   Nothing draws in front of gameplay geometry. Events render with the
+ *   backdrop, before the surfaces and obstacles, so the thing that can kill
+ *   you is always on top of the thing that cannot.
+ *
+ *   Nothing changes the controls, the physics, or the world layout. An event
+ *   is something the player sees, never something they have to survive.
+ *
+ *   Nothing exceeds the environment's brightness ceiling. The e2e guard that
+ *   holds the backdrop under the geometry covers these too.
+ */
+(function (root) {
+  'use strict';
+  var OM = root.OM || (root.OM = {});
+  var P = OM.phys;
+  var CEIL = P.CEIL, FLOOR = P.FLOOR;
+  var clamp = OM.math.clamp;
+
+  /* Each event is a function of its own progress, 0 → 1. They own no state,
+     which is what lets the director start, stop and skip them freely. */
+  var EVENTS = {
+    /* A ring the size of the sky, passing through. The signature event: it is
+       the one that makes the tunnel look like a detail inside something. */
+    loop: {
+      dur: 5.5, weight: 4,
+      draw: function (g, W, H, k, seed) {
+        var band = FLOOR - CEIL, mid = (CEIL + FLOOR) / 2;
+        var x = W * (1.25 - k * 1.7);
+        var s = band * (1.6 + Math.sin(k * Math.PI) * 0.9);
+        var a = Math.sin(k * Math.PI) * 0.09;
+        g.globalAlpha = a;
+        g.lineWidth = 1.6;
+        g.beginPath(); g.ellipse(x, mid, s, s * 0.62, 0, 0, 6.2832); g.stroke();
+        g.globalAlpha = a * 0.6;
+        g.beginPath(); g.ellipse(x, mid, s * 0.82, s * 0.51, 0, 0, 6.2832); g.stroke();
+      }
+    },
+    /* The frame opens into depth. Concentric rings receding to a point, which
+       reads as the tunnel briefly having somewhere else to go. */
+    tunnel: {
+      dur: 4.2, weight: 3,
+      draw: function (g, W, H, k, seed) {
+        var band = FLOOR - CEIL, mid = (CEIL + FLOOR) / 2;
+        var cx = W * 0.62, a = Math.sin(k * Math.PI);
+        for (var i = 0; i < 9; i++) {
+          var f = ((i / 9) + k * 1.4) % 1;
+          var s = band * 0.06 + f * f * band * 1.5;
+          g.globalAlpha = a * 0.085 * (1 - f);
+          g.lineWidth = 1.2;
+          g.beginPath(); g.ellipse(cx, mid, s, s * 0.7, 0, 0, 6.2832); g.stroke();
+        }
+      }
+    },
+    /* The frame cracks. Straight, sudden, and gone — the only event that
+       arrives faster than it leaves. */
+    fracture: {
+      dur: 2.4, weight: 3,
+      draw: function (g, W, H, k, seed) {
+        var band = FLOOR - CEIL, mid = (CEIL + FLOOR) / 2;
+        var a = k < 0.12 ? k / 0.12 : Math.pow(1 - (k - 0.12) / 0.88, 1.6);
+        g.globalAlpha = a * 0.13;
+        g.lineWidth = 1.1;
+        for (var i = 0; i < 7; i++) {
+          var h = ((seed + i * 7919) % 1000) / 1000;
+          var ox = h * W, oy = mid + (((seed + i * 104729) % 1000) / 1000 - 0.5) * band;
+          var ang = (((seed + i * 15485863) % 1000) / 1000 - 0.5) * 2.4;
+          var L = band * (0.5 + h * 1.1);
+          g.beginPath();
+          g.moveTo(ox - Math.cos(ang) * L, oy - Math.sin(ang) * L);
+          g.lineTo(ox + Math.cos(ang) * L * 0.6, oy + Math.sin(ang) * L * 0.6);
+          g.stroke();
+        }
+      }
+    },
+    /* Something vast rises behind the world, and goes back down. It never
+       arrives and it never explains itself, which is the point. */
+    giant: {
+      dur: 7, weight: 2,
+      draw: function (g, W, H, k, seed) {
+        var band = FLOOR - CEIL;
+        var rise = Math.sin(k * Math.PI);
+        var s = band * 2.2;
+        var cx = W * (0.2 + ((seed % 100) / 100) * 0.6);
+        var cy = FLOOR + s * 0.95 - rise * s * 0.55;
+        g.globalAlpha = rise * 0.075;
+        g.lineWidth = 1.5;
+        g.beginPath(); g.arc(cx, cy, s, 0, 6.2832); g.stroke();
+        for (var i = 1; i <= 4; i++) {
+          var yy = cy - s + (2 * s * i) / 5;
+          var rr = Math.sqrt(Math.max(0, s * s - (yy - cy) * (yy - cy)));
+          g.globalAlpha = rise * 0.05;
+          g.beginPath(); g.ellipse(cx, yy, rr, rr * 0.16, 0, 0, 6.2832); g.stroke();
+        }
+      }
+    }
+  };
+
+  var NAMES = Object.keys(EVENTS);
+  var TOTAL = NAMES.reduce(function (s, n) { return s + EVENTS[n].weight; }, 0);
+
+  /* Worlds that may dream, and how often. Origin never does: a player in their
+     first forty seconds is learning a rule, and a spectacle then teaches them
+     that things happen for no reason. */
+  var BY_WORLD = {
+    origin: 0, pulse: 26, void: 22, collapse: 18, nightmare: 15
+  };
+
+  OM.dream = {
+    events: EVENTS,
+    byWorld: BY_WORLD,
+
+    Director: function (rng) {
+      var d = {
+        active: null, k: 0, since: 999, seed: 0, fired: 0,
+        /* Never inside the first half-minute, whatever the world says. */
+        MIN_T: 30
+      };
+
+      /* A quiet window. Threat is the renderer's own reading of what is close
+         and lethal, so this is the same number the character uses to decide it
+         is alarmed — if the Nanogon is worried, the sky stays still. */
+      d.calm = function (run) {
+        return !run.dead && run.t > d.MIN_T &&
+               run.threat < 0.22 && run.sinceNear > 1.5 && run.sinceFlip > 0.5;
+      };
+
+      d.update = function (dt, run, vis) {
+        d.since += dt;
+        if (d.active) {
+          d.k += dt / EVENTS[d.active].dur;
+          if (d.k >= 1) { d.active = null; d.k = 0; d.since = 0; }
+          return;
+        }
+        var every = BY_WORLD[vis.world] || 0;
+        if (!every || !d.calm(run)) return;
+        if (d.since < every) return;
+        /* Poisson-ish: once past the cooldown, a small chance per second, so
+           two runs through the same stretch do not get the same schedule. */
+        if (rng.next() > dt * 0.5) return;
+        var pick = rng.next() * TOTAL, acc = 0;
+        for (var i = 0; i < NAMES.length; i++) {
+          acc += EVENTS[NAMES[i]].weight;
+          if (pick <= acc) { d.active = NAMES[i]; break; }
+        }
+        d.active = d.active || NAMES[0];
+        d.k = 0;
+        d.seed = Math.floor(rng.next() * 1000000);
+        d.fired++;
+      };
+
+      d.draw = function (g, W, H) {
+        if (!d.active) return;
+        g.save();
+        g.strokeStyle = '#ffffff';
+        EVENTS[d.active].draw(g, W, H, clamp(d.k, 0, 1), d.seed);
+        g.restore();
+      };
+
+      return d;
+    }
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
+/* ==== src/58-sculpture.js ==== */
+/* ONE MORE — the run sculpture.
+ *
+ * Every run already records its own shape. The ghost is world-x, y and gravity
+ * at 24Hz for the whole run — the thing that makes racing your record possible
+ * — and nothing has ever looked at it as a shape rather than as a replay.
+ *
+ * So: wind the run into an object. Progress becomes angle, so a longer run is
+ * more turns. Height rises with time. Radius is where you were in the tunnel,
+ * which means the silhouette is a portrait of how you played: someone who hugs
+ * one surface makes a narrow cone, someone who crosses constantly makes a wide
+ * flared coil, and a run that started cautious and ended frantic opens out as
+ * it rises. Flips are marked where they happened.
+ *
+ * It is built from the real path, not from summary statistics. A sculpture
+ * derived from "47 flips, 12 near misses" would be a bar chart in fancy dress
+ * and every run with the same totals would look identical. This one cannot
+ * lie about a run because it IS the run.
+ */
+(function (root) {
+  'use strict';
+  var OM = root.OM || (root.OM = {});
+  var P = OM.phys;
+
+  var MAX_PTS = 200;        // enough to describe a seven-minute run, cheap to draw
+  var TURNS = 3.2;
+
+  OM.sculpture = {
+    /* ghost: { r, x0, dx[], y[], g[] } — the format the recorder already
+       writes, so this costs nothing extra to store. */
+    build: function (ghost) {
+      if (!ghost || !ghost.y || ghost.y.length < 8) return null;
+      var n = ghost.y.length;
+      var step = Math.max(1, Math.floor(n / MAX_PTS));
+      var pts = [], flips = [], last = ghost.g[0];
+      var band = P.FLOOR - P.CEIL;
+      for (var i = 0; i < n; i += step) {
+        var u = i / (n - 1);
+        var yn = (ghost.y[i] - P.CEIL) / band;          // 0 ceiling, 1 floor
+        var ang = u * TURNS * 6.2832;
+        var rad = 0.34 + (yn - 0.5) * 0.62;
+        pts.push([Math.cos(ang) * rad, (u - 0.5) * 1.55, Math.sin(ang) * rad]);
+        if (ghost.g[i] !== last) { flips.push(pts.length - 1); last = ghost.g[i]; }
+      }
+      return { pts: pts, flips: flips, n: n, secs: n / (ghost.r || 24) };
+    },
+
+    /* Orthographic, tilted, and rotating slowly — the same language as the
+       character, because they are the same kind of object: a wire figure whose
+       depth is carried by how bright its far side is. */
+    draw: function (g, W, H, s, t) {
+      if (!s) return;
+      var cx = W / 2, cy = H / 2, scale = Math.min(W, H) * 0.44;
+      var ay = t * 0.35, tilt = 0.42;
+      var cyy = Math.cos(ay), syy = Math.sin(ay);
+      var cxx = Math.cos(tilt), sxx = Math.sin(tilt);
+      var pr = [], i, p;
+      for (i = 0; i < s.pts.length; i++) {
+        p = s.pts[i];
+        var x1 = p[0] * cyy + p[2] * syy, z1 = -p[0] * syy + p[2] * cyy;
+        var y2 = p[1] * cxx - z1 * sxx, z2 = p[1] * sxx + z1 * cxx;
+        pr.push([cx + x1 * scale, cy + y2 * scale, z2]);
+      }
+      g.save();
+      g.lineCap = 'round';
+      g.lineJoin = 'round';
+      g.strokeStyle = '#ffffff';
+      g.fillStyle = '#ffffff';
+      /* Depth buckets again: one path per bucket rather than per segment, so a
+         two-hundred point figure costs four strokes. */
+      for (var b = 0; b < 4; b++) {
+        var lo = -1.2 + (2.4 * b) / 4, hi = -1.2 + (2.4 * (b + 1)) / 4;
+        var depth = (b + 0.5) / 4;
+        g.beginPath();
+        var open = false;
+        for (i = 1; i < pr.length; i++) {
+          var mz = (pr[i - 1][2] + pr[i][2]) / 2;
+          if (mz < lo || mz >= hi) { open = false; continue; }
+          if (!open) { g.moveTo(pr[i - 1][0], pr[i - 1][1]); open = true; }
+          g.lineTo(pr[i][0], pr[i][1]);
+        }
+        g.globalAlpha = 0.14 + depth * 0.66;
+        g.lineWidth = 0.7 + depth * 1.5;
+        g.stroke();
+      }
+      for (i = 0; i < s.flips.length; i++) {
+        p = pr[s.flips[i]];
+        if (!p || p[2] < -0.1) continue;
+        g.globalAlpha = 0.35 + ((p[2] + 1.2) / 2.4) * 0.55;
+        g.beginPath(); g.arc(p[0], p[1], 1.7, 0, 6.2832); g.fill();
+      }
+      g.restore();
+    }
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
 /* ==== src/60-render.js ==== */
 /* ONE MORE — world rendering.
    Black ground, white geometry, grey for anything that is not gameplay. The
@@ -3837,6 +4120,9 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       gen: OM.Generator(OM.rng(seed ^ 0x9e3779b9), { pool: pool, startX: mode === 'nightmare' ? 620 : undefined }),
       tBias: tBias, family: family,
       sched: fixed ? [] : MUT.schedule(OM.rng(seed ^ 0x85ebca6b)),
+      /* Its own stream, so whether the sky does something never shifts the
+         mutation schedule or the world layout by a single call. */
+      dream: OM.dream.Director(OM.rng(seed ^ 0xc2b2ae35)),
       fixed: fixed,
       t: 0, px: 0, speed: fixed || P.speedAt(tBias > 100 ? 200 : 0),
       y: P.FLOOR - P.R, vy: 0, grav: 1, grounded: true,
@@ -4148,6 +4434,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     r.replay.sample(dt, r);
 
     // rotation eases toward the flip target — instant response, visible follow-through
+    r.dream.update(dt, r, OM.visual.sample(r, P));
     r.rotKick = OM.math.approach(r.rotKick, 0, 9, dt);
     r.coreFlash = Math.max(0, r.coreFlash - dt * 3.6);
     r.rot = OM.math.approach(r.rot, r.rotTarget + r.rotKick, 17, dt);
@@ -4217,6 +4504,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
        skyline — a background that drifted would make "the identical world" a
        lie in the one place the player would actually notice it. */
     OM.architecture.draw(g, G.W, r.world.id, camX, r.t, r.seed, vis);
+    r.dream.draw(g, G.W, P.H);
     OM.render.haze(g, G.W, vis);
     OM.render.speedLines(g, G.W, camX, r.y, speedFrac);
     OM.render.surfaces(g, G.W, camX, r.gen.holes, r.t, speedFrac);
@@ -4684,6 +4972,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
 
   UI.show = function (name) {
     if (replay && name !== 'result') replay.stop();
+    if (name !== 'records') stopSculpture();
     for (var k in screens) screens[k].classList.toggle('on', k === name);
     UI.screen = name;
     $('pause-btn').classList.toggle('on', name === null);
@@ -5005,6 +5294,43 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     if (rd.kind === 'weakness') UI.lastFamily = rd.family;
   }
 
+  /* ---------- run sculpture ----------
+     On the records screen, not the results screen. The one metric that matters
+     after a death is how fast the player gets to the next run, and a second
+     animated canvas between them and the ONE MORE button buys atmosphere with
+     the only currency this game refuses to spend. Here it is something to come
+     and look at instead. */
+  var sculptRaf = 0, sculptT = 0;
+  function stopSculpture() {
+    if (sculptRaf) { root.cancelAnimationFrame(sculptRaf); sculptRaf = 0; }
+  }
+  function startSculpture() {
+    var cv = $('rec-sculpt');
+    if (!cv) return;
+    var s = OM.sculpture.build(prog.data.ghost);
+    if (!s) { cv.parentNode.hidden = true; return; }
+    cv.parentNode.hidden = false;
+    var g = cv.getContext('2d');
+    var last = 0;
+    stopSculpture();
+    function frame(now) {
+      if (UI.screen !== 'records') { sculptRaf = 0; return; }
+      var dt = last ? Math.min(0.05, (now - last) / 1000) : 0;
+      last = now;
+      sculptT += dt;
+      var rect = cv.getBoundingClientRect();
+      var dpr = Math.min(root.devicePixelRatio || 1, 2);
+      var w = Math.max(1, Math.round(rect.width * dpr));
+      var h = Math.max(1, Math.round(rect.height * dpr));
+      if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.clearRect(0, 0, rect.width, rect.height);
+      OM.sculpture.draw(g, rect.width, rect.height, s, sculptT);
+      sculptRaf = root.requestAnimationFrame(frame);
+    }
+    sculptRaf = root.requestAnimationFrame(frame);
+  }
+
   /* ---------- records ---------- */
   UI.showRecords = function () {
     var d = prog.data, li = prog.levelInfo();
@@ -5065,6 +5391,11 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     $('rec-body').innerHTML =
       '<h3>THE READ</h3>' + readBlock +
       sparkline(OM.analysis.history()) +
+      '<h3>YOUR BEST RUN, AS AN OBJECT</h3>' +
+      '<div class="sculpt"><canvas id="rec-sculpt"></canvas></div>' +
+      '<p class="muted small" style="text-align:left;margin:0 0 6px">' +
+      'Wound from the path you actually took: height is time, radius is where ' +
+      'you were in the tunnel, and every mark is a flip.</p>' +
       weaknessChart() +
       (famRows ? '<h3>DEATHS BY KIND</h3><div class="list">' + famRows + '</div>' : '') +
       '<div class="split"><div><span class="lbl">BEST RUN</span><span class="val">' +
@@ -5102,6 +5433,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       '<p class="muted small">Everything here is measured from your own runs and stored on this device. ' +
       'There is no server yet, so nothing here is a global leaderboard and nothing is compared to other players.</p>';
     UI.show('records');
+    startSculpture();
   };
 
   function row(k, v) { return '<div class="item"><b>' + k + '</b><span>' + v + '</span></div>'; }

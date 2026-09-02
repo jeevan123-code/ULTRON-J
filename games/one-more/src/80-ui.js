@@ -64,6 +64,7 @@
 
   UI.show = function (name) {
     if (replay && name !== 'result') replay.stop();
+    if (name !== 'records') stopSculpture();
     for (var k in screens) screens[k].classList.toggle('on', k === name);
     UI.screen = name;
     $('pause-btn').classList.toggle('on', name === null);
@@ -385,6 +386,43 @@
     if (rd.kind === 'weakness') UI.lastFamily = rd.family;
   }
 
+  /* ---------- run sculpture ----------
+     On the records screen, not the results screen. The one metric that matters
+     after a death is how fast the player gets to the next run, and a second
+     animated canvas between them and the ONE MORE button buys atmosphere with
+     the only currency this game refuses to spend. Here it is something to come
+     and look at instead. */
+  var sculptRaf = 0, sculptT = 0;
+  function stopSculpture() {
+    if (sculptRaf) { root.cancelAnimationFrame(sculptRaf); sculptRaf = 0; }
+  }
+  function startSculpture() {
+    var cv = $('rec-sculpt');
+    if (!cv) return;
+    var s = OM.sculpture.build(prog.data.ghost);
+    if (!s) { cv.parentNode.hidden = true; return; }
+    cv.parentNode.hidden = false;
+    var g = cv.getContext('2d');
+    var last = 0;
+    stopSculpture();
+    function frame(now) {
+      if (UI.screen !== 'records') { sculptRaf = 0; return; }
+      var dt = last ? Math.min(0.05, (now - last) / 1000) : 0;
+      last = now;
+      sculptT += dt;
+      var rect = cv.getBoundingClientRect();
+      var dpr = Math.min(root.devicePixelRatio || 1, 2);
+      var w = Math.max(1, Math.round(rect.width * dpr));
+      var h = Math.max(1, Math.round(rect.height * dpr));
+      if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.clearRect(0, 0, rect.width, rect.height);
+      OM.sculpture.draw(g, rect.width, rect.height, s, sculptT);
+      sculptRaf = root.requestAnimationFrame(frame);
+    }
+    sculptRaf = root.requestAnimationFrame(frame);
+  }
+
   /* ---------- records ---------- */
   UI.showRecords = function () {
     var d = prog.data, li = prog.levelInfo();
@@ -445,6 +483,11 @@
     $('rec-body').innerHTML =
       '<h3>THE READ</h3>' + readBlock +
       sparkline(OM.analysis.history()) +
+      '<h3>YOUR BEST RUN, AS AN OBJECT</h3>' +
+      '<div class="sculpt"><canvas id="rec-sculpt"></canvas></div>' +
+      '<p class="muted small" style="text-align:left;margin:0 0 6px">' +
+      'Wound from the path you actually took: height is time, radius is where ' +
+      'you were in the tunnel, and every mark is a flip.</p>' +
       weaknessChart() +
       (famRows ? '<h3>DEATHS BY KIND</h3><div class="list">' + famRows + '</div>' : '') +
       '<div class="split"><div><span class="lbl">BEST RUN</span><span class="val">' +
@@ -482,6 +525,7 @@
       '<p class="muted small">Everything here is measured from your own runs and stored on this device. ' +
       'There is no server yet, so nothing here is a global leaderboard and nothing is compared to other players.</p>';
     UI.show('records');
+    startSculpture();
   };
 
   function row(k, v) { return '<div class="item"><b>' + k + '</b><span>' + v + '</span></div>'; }

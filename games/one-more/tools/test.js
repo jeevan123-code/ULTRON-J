@@ -22,6 +22,8 @@ require(path.join(SRC, '25-generator.js'));
 require(path.join(SRC, '30-mutations.js'));
 require(path.join(SRC, '48-visual.js'));
 require(path.join(SRC, '52-architecture.js'));
+require(path.join(SRC, '56-dream.js'));
+require(path.join(SRC, '58-sculpture.js'));
 require(path.join(SRC, '32-analysis.js'));
 require(path.join(SRC, '35-progress.js'));
 require(path.join(SRC, '40-ghost.js'));

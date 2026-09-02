@@ -135,6 +135,9 @@
       gen: OM.Generator(OM.rng(seed ^ 0x9e3779b9), { pool: pool, startX: mode === 'nightmare' ? 620 : undefined }),
       tBias: tBias, family: family,
       sched: fixed ? [] : MUT.schedule(OM.rng(seed ^ 0x85ebca6b)),
+      /* Its own stream, so whether the sky does something never shifts the
+         mutation schedule or the world layout by a single call. */
+      dream: OM.dream.Director(OM.rng(seed ^ 0xc2b2ae35)),
       fixed: fixed,
       t: 0, px: 0, speed: fixed || P.speedAt(tBias > 100 ? 200 : 0),
       y: P.FLOOR - P.R, vy: 0, grav: 1, grounded: true,
@@ -446,6 +449,7 @@
     r.replay.sample(dt, r);
 
     // rotation eases toward the flip target — instant response, visible follow-through
+    r.dream.update(dt, r, OM.visual.sample(r, P));
     r.rotKick = OM.math.approach(r.rotKick, 0, 9, dt);
     r.coreFlash = Math.max(0, r.coreFlash - dt * 3.6);
     r.rot = OM.math.approach(r.rot, r.rotTarget + r.rotKick, 17, dt);
@@ -515,6 +519,7 @@
        skyline — a background that drifted would make "the identical world" a
        lie in the one place the player would actually notice it. */
     OM.architecture.draw(g, G.W, r.world.id, camX, r.t, r.seed, vis);
+    r.dream.draw(g, G.W, P.H);
     OM.render.haze(g, G.W, vis);
     OM.render.speedLines(g, G.W, camX, r.y, speedFrac);
     OM.render.surfaces(g, G.W, camX, r.gen.holes, r.t, speedFrac);
