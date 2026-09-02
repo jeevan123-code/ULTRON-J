@@ -24,7 +24,7 @@ You move forward automatically. The only thing you control is which way is down.
 ## What is in it
 
 **Core** — gravity-flip survival, 60 hand-authored obstacle patterns across five
-difficulty tiers built from eight obstacle types, plus 41 proven compositions
+difficulty tiers built from ten obstacle types, plus 41 proven compositions
 of them, a procedural generator, a difficulty director, five worlds you arrive
 at by surviving rather than by choosing, nine mutations that rewrite one rule at
 a time, near-miss and perfect-switch detection, instant restart.
@@ -98,8 +98,8 @@ rather than asserted.
 
 ```bash
 npm run validate    # prove every pattern is survivable and fair
-npm test            # 130 unit tests over the pure logic
-npm run e2e         # 94 end-to-end checks driven by real taps
+npm test            # 136 unit tests over the pure logic
+npm run e2e         # 116 end-to-end checks driven by real taps
 npm run playtest    # play the real game in a real browser with a bot
 npm run build       # bundle to dist/
 ```
@@ -143,7 +143,7 @@ t3_gate *             3     1      105ms     pass
 t4_needle_tight       4     2      62ms      pass
 t5_gate_pair *        5     2      53ms      pass
 
-101 patterns / 101 survivable at every speed, entry side and phase
+107 patterns / 107 survivable at every speed, entry side and phase
 All patterns fair, every tier within its slack budget.
 ```
 

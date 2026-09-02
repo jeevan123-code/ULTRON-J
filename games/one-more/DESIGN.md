@@ -138,6 +138,32 @@ value ramps up and starts tearing at the backdrop, the character's shell and
 eventually the interface itself — the timer jitters, a glyph swaps. Long runs
 should feel like territory you are not supposed to be in.
 
+## 6b. Why there is no crusher
+
+A full-height gap obstacle — two jaws closing on the middle — can only be
+crossed mid-flip, so its slack is how far the flip may shift before the player
+is outside the opening. At the tunnel's midpoint the player moves 3.12 px
+vertically for every px horizontally, so a gap of G px tolerates a shift of
+G / 6.24 px.
+
+At top speed that arithmetic is brutal:
+
+| gap | flip may shift | in time |
+|---|---|---|
+| 256 px | 41 px | 41 ms |
+| 368 px | 59 px | 59 ms |
+| 480 px | 77 px | 77 ms |
+| **576 px** (the entire tunnel) | 92 px | **93 ms** |
+
+Tier 3 owes the player 100 ms. **No full-height gap can ever reach it**, even
+with no jaws at all. Measured patterns land near 68 % of that ceiling once the
+crossing width and the worst phase offset are paid for, which put a genuinely
+threatening crusher at 32 ms against a floor of 100.
+
+So the mechanic does not fit the geometry, and it was cut rather than tuned
+into something that passes by barely moving. The same arithmetic is why every
+needle in the library is tier 4 or 5, and why none of them will ever be tier 3.
+
 ## 7. The read
 
 The differentiator is not that the game is hard. It is that it pays attention.

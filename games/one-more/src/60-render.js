@@ -429,6 +429,44 @@
         }
         break;
       }
+      case 'rotor': {
+        var ra = PAT.rotorAngle(o, t);
+        var pvx = sx + o.w / 2, pvy = o.side === 'floor' ? FLOOR : CEIL;
+        var dir = o.side === 'floor' ? -1 : 1;
+        // the sweep, drawn faint: the arm's whole reachable arc, always visible
+        g.globalAlpha *= 0.16;
+        g.lineWidth = 1.4;
+        g.beginPath();
+        g.arc(pvx, pvy, o.len, dir > 0 ? -Math.PI / 2 - o.swing : Math.PI / 2 - o.swing,
+              dir > 0 ? -Math.PI / 2 + o.swing : Math.PI / 2 + o.swing);
+        g.stroke();
+        g.globalAlpha /= 0.16;
+        g.save();
+        g.translate(pvx, pvy);
+        g.rotate(dir > 0 ? ra : -ra);
+        // the arm itself, drawn a shade wider than the cells that kill
+        mass(g, -o.thick * 0.62, dir > 0 ? -o.len : 0, o.thick * 1.24, o.len);
+        g.fillStyle = '#fff';
+        g.fillRect(-o.thick * 0.62, dir > 0 ? -o.len : o.len - 5, o.thick * 1.24, 5);
+        g.restore();
+        g.fillStyle = '#fff';                       // housing: a fixed address
+        g.fillRect(pvx - o.thick, o.side === 'floor' ? FLOOR - 9 : CEIL, o.thick * 2, 9);
+        break;
+      }
+      case 'orbit': {
+        var op = PAT.orbitPos(o, t, [0, 0]);
+        var ocx = sx + o.w / 2, ocy = o.cy;
+        g.globalAlpha *= 0.18;                      // the path, so it is a rule
+        g.lineWidth = 1.3;
+        g.beginPath(); g.arc(ocx, ocy, o.rad, 0, 6.2832); g.stroke();
+        g.globalAlpha /= 0.18;
+        var oX = ocx + (op[0] - (o.x + o.w / 2)), oY = op[1];
+        mass(g, oX - o.size / 2, oY - o.size / 2, o.size, o.size);
+        g.fillStyle = '#fff';
+        g.fillRect(oX - o.size / 2, oY - o.size / 2, o.size, 4);
+        g.fillRect(oX - o.size / 2, oY + o.size / 2 - 4, o.size, 4);
+        break;
+      }
       case 'gate': {
         var gc = PAT.gateCenter(o, t);
         mass(g, sx, CEIL, o.w, (gc - o.half) - CEIL);

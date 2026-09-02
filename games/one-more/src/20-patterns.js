@@ -41,6 +41,64 @@
   function gate(dx, w, half, cy, amp, rate, phase) {
     return { t: 'gate', dx: dx, w: w, half: half, cy: cy, amp: amp, rate: rate, phase: phase || 0 };
   }
+  /* ---- two obstacles that ask something the other eight do not ----
+   *
+   * The set had translation (mover), blinking (laser), extension (piston) and a
+   * sliding opening (gate). What it had no example of was rotation, circular
+   * travel, or a gap that closes rather than moves. Those are different reads,
+   * not different shapes: a rotor is answered by watching an angle, an orbit by
+   * predicting a curve, a crusher by judging whether a shrinking hole is still
+   * a hole by the time you reach it.
+   *
+   * Every one of them obeys the same two rules the rest do. Their collision is
+   * strictly inside their art, so nothing dies to a pixel it visibly cleared.
+   * And their motion is drawn before it matters — a sweep guide, an orbit ring,
+   * a pair of rails — because an obstacle whose rule you learn by dying to it
+   * is not difficult, it is unfair. */
+
+  /* A wiper. Anchored to a surface, sweeping through the tunnel and back, so
+     the question is which side of the arm you are on when you arrive. */
+  function rotor(side, dx, len, thick, rate, swing, phase) {
+    var w = 2 * len * Math.sin(swing) + thick * 2;
+    return { t: 'rotor', side: side, dx: dx, w: w, len: len, thick: thick,
+             rate: rate, swing: swing, phase: phase || 0 };
+  }
+  function rotorAngle(o, t) {
+    return Math.sin((o.phase + t * o.rate) * Math.PI * 2) * o.swing;
+  }
+
+  /* A block on a circle. The one obstacle whose position is not a function of
+     one axis, which is exactly what makes it a different problem. */
+  function orbit(dx, rad, cy, size, rate, phase) {
+    return { t: 'orbit', dx: dx, w: rad * 2 + size, rad: rad, cy: cy, size: size,
+             rate: rate, phase: phase || 0 };
+  }
+  function orbitPos(o, t, into) {
+    var a = (o.phase + t * o.rate) * Math.PI * 2;
+    into[0] = o.x + o.w / 2 + Math.cos(a) * o.rad;
+    into[1] = o.cy + Math.sin(a) * o.rad;
+    return into;
+  }
+
+  /* A third one was built here and cut: a CRUSHER, two jaws closing on the
+     middle and opening again. It cannot be fair in this tunnel, and the
+     arithmetic says so before any playtesting does.
+     
+     A full-height gap can only be crossed mid-flip, so its slack is how far the
+     flip may shift before the player is outside the opening. At the tunnel's
+     midpoint the player is moving 3.12px vertically per px horizontally, so a
+     gap of G pixels tolerates a shift of G/6.24 px — and at top speed a gap the
+     size of the ENTIRE TUNNEL, 576px, which is to say no obstacle at all, works
+     out at 93ms. Tier 3 owes the player 100. Measured patterns land around 68%
+     of that ceiling once the crossing width and the worst phase are paid for,
+     which puts a genuinely threatening crusher at roughly 32ms against a floor
+     of 100.
+     
+     So the mechanic does not fit the geometry, and the only versions that pass
+     are ones whose jaws barely move — a needle that breathes, which the library
+     already has better examples of. The same arithmetic is why every needle in
+     here is tier 4 or 5 and why none of them will ever be tier 3. */
+
   function pat(id, tier, len, items) { return { id: id, tier: tier, len: len, items: items }; }
 
   /* A "needle" is the signature moment: floor and ceiling both close in at the
@@ -211,6 +269,45 @@
     spike('floor', 90, 140, 115), bar(500, 160, CEIL + 150, FLOOR - 230),
     gate(1080, 29, 186, (CEIL + FLOOR) / 2, 82, 0.26, 0.6), spike('ceil', 1700, 140, 115)
   ]));
+  /* ---- the three new reads ----
+     Authored loose, then tightened. One of those changes was a defect and the
+     rest were judgement, and it is worth being clear which was which.
+
+     The defect: the rotor's collision cells started one cell out from the
+     pivot, leaving a 47px hole at the surface it is anchored to. A player
+     resting there passed clean through an arm that visibly swept over them,
+     which breaks the one rule the whole collision layer exists to keep.
+
+     The judgement: the arms were lengthened and the orbits enlarged and paired.
+     Nothing in the proof demanded it — every one of them cleared its tier floor
+     as first written. It was because a lone orbiting block almost never
+     coincides with a player crossing at a fixed speed, so it read as scenery.
+     An orbit earns its place as the moving half of a pair: something static
+     takes one surface and the orbit decides whether the other is available yet.
+
+     What did NOT drive any of it, despite briefly looking like it should: the
+     flip counts. A pattern reporting zero means the easiest entry surface needs
+     no input, which is true of t1_block, t1_floor and t3_laser too. */
+  L.push(pat('t2_rotor', 2, 1200, [rotor('floor', 300, 470, 26, 0.16, 0.85, 0)]));
+  L.push(pat('t3_rotor_ceil', 3, 1250, [rotor('ceil', 320, 480, 24, 0.21, 0.95, 0.35)]));
+  L.push(pat('t4_rotor_pair', 4, 2000, [
+    rotor('floor', 260, 460, 24, 0.19, 0.85, 0),
+    rotor('ceil', 1100, 460, 24, 0.19, 0.85, 0.5)
+  ]));
+  L.push(pat('t2_orbit', 2, 1500, [
+    orbit(280, 250, (CEIL + FLOOR) / 2, 56, 0.24, 0),
+    block('floor', 900, 190, 150)
+  ]));
+  L.push(pat('t3_orbit_bar', 3, 1700, [
+    orbit(300, 250, (CEIL + FLOOR) / 2, 56, 0.3, 0.25),
+    bar(1000, 170, CEIL + 150, FLOOR - 210)
+  ]));
+  L.push(pat('t4_orbit_spike', 4, 2000, [
+    orbit(260, 255, (CEIL + FLOOR) / 2, 52, 0.28, 0),
+    spike('floor', 1150, 190, 118),
+    spike('ceil', 1560, 190, 118)
+  ]));
+
   L.push(pat('t5_laser_gauntlet', 5, 2100, [
     laser('floor', 200, 85, 0.48, 0.48, 0), spike('ceil', 700, 140, 115),
     laser('ceil', 1180, 85, 0.48, 0.48, 0.5), spike('floor', 1680, 140, 115)
@@ -257,10 +354,40 @@
           out.push({ x: o.x, y: o.side === 'ceil' ? CEIL : FLOOR - o.h, w: o.w, h: o.h, o: o });
         }
         break;
+      case 'rotor': {
+        /* A rotated rectangle has no honest axis-aligned form, so the arm is
+           carried as a chain of squares along its spine. The union is slightly
+           inside the drawn arm — scalloped at the edges rather than bulging —
+           which keeps collision more forgiving than the art, the same way the
+           spike inset does. */
+        var ra = rotorAngle(o, t);
+        var pxr = o.x + o.w / 2, pyr = o.side === 'floor' ? FLOOR : CEIL;
+        var dxr = Math.sin(ra), dyr = (o.side === 'floor' ? -1 : 1) * Math.cos(ra);
+        var cells = Math.max(2, Math.ceil(o.len / (o.thick * 0.85)));
+        var half = o.thick / 2;
+        /* From the pivot, not from one cell out. The first version started at
+           ci=1 and left a 47px hole at the surface, so a player resting there
+           passed under an arm that visibly swept through them. An arm anchored
+           to a surface has to take that surface away — that is the entire
+           decision it asks for. */
+        for (var ci = 0; ci < cells; ci++) {
+          var f = (ci / (cells - 1)) * o.len;
+          out.push({ x: pxr + dxr * f - half, y: pyr + dyr * f - half,
+                     w: o.thick, h: o.thick, o: o });
+        }
+        break;
+      }
+      case 'orbit': {
+        var op = orbitPos(o, t, ORBIT_TMP);
+        var oh = o.size / 2;
+        out.push({ x: op[0] - oh, y: op[1] - oh, w: o.size, h: o.size, o: o });
+        break;
+      }
       // 'hole' has no solid geometry — it removes a surface instead.
     }
     return out;
   }
+  var ORBIT_TMP = [0, 0];
 
   function moverY(o, t) {
     var y = o.cy + Math.sin(o.phase + t * o.rate * Math.PI * 2) * o.amp;
@@ -293,7 +420,8 @@
      Defined here, next to the patterns, because both the game and the validator
      have to agree on the answer — two implementations of this would be two
      opinions about which patterns are proven. */
-  var DYNAMIC_TYPES = { mover: 1, laser: 1, piston: 1, gate: 1 };
+  var DYNAMIC_TYPES = { mover: 1, laser: 1, piston: 1, gate: 1,
+                        rotor: 1, orbit: 1 };
   function isDynamic(p) {
     for (var i = 0; i < p.items.length; i++) if (DYNAMIC_TYPES[p.items[i].t]) return true;
     return false;
@@ -320,6 +448,8 @@
       OM.patterns.staticList = L.filter(function (p) { return !isDynamic(p); });
     },
     rectsOf: rectsOf,
+    rotorAngle: rotorAngle,
+    orbitPos: orbitPos,
     moverY: moverY,
     pistonExt: pistonExt,
     gateCenter: gateCenter,

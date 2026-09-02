@@ -53,6 +53,7 @@
   var FAMILY = {
     spike: 'timing', block: 'timing', bar: 'commitment',
     mover: 'prediction', gate: 'prediction', piston: 'prediction', laser: 'prediction',
+    rotor: 'prediction', orbit: 'prediction',
     void: 'nerve'
   };
   var FAMILY_COPY = {
@@ -459,7 +460,7 @@
      different selection, never different rules. */
   var FAMILY_TYPES = {
     timing: { spike: 1, block: 1 },
-    prediction: { mover: 1, laser: 1, piston: 1, gate: 1 },
+    prediction: { mover: 1, laser: 1, piston: 1, gate: 1, rotor: 1, orbit: 1 },
     commitment: { bar: 1, block: 1 },
     nerve: { hole: 1 }
   };

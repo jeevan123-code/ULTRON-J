@@ -60,7 +60,8 @@
 
   var CAUSE_LABEL = {
     spike: 'SPIKES', block: 'A BLOCK', bar: 'A BAR', mover: 'A MOVER',
-    laser: 'A LASER', piston: 'A PISTON', gate: 'A GATE', void: 'THE VOID'
+    laser: 'A LASER', piston: 'A PISTON', gate: 'A GATE', void: 'THE VOID',
+    rotor: 'A ROTOR', orbit: 'AN ORBIT'
   };
   OM.causeLabel = function (c) { return CAUSE_LABEL[c] || 'SOMETHING'; };
 
