@@ -386,6 +386,23 @@
     if (rd.kind === 'weakness') UI.lastFamily = rd.family;
   }
 
+  /* The archive. Firsts only, in the order they happened, with the run that
+     earned each one. It says nothing until there is something to say — a list
+     of empty slots is a chore list, and this is meant to be a history. */
+  function archiveBlock() {
+    var a = prog.archive();
+    if (!a.length) return '';
+    var rows = a.map(function (m) {
+      var when = new Date(m.at);
+      var stamp = when.getFullYear() + '-' +
+        ('0' + (when.getMonth() + 1)).slice(-2) + '-' + ('0' + when.getDate()).slice(-2);
+      return '<div class="mark"><b>' + m.name + '</b>' +
+             '<span>' + m.line + '</span>' +
+             '<i>' + stamp + (m.t ? ' \u00b7 ' + OM.fmtTime(m.t, 2) : '') + '</i></div>';
+    }).join('');
+    return '<h3>ARCHIVE</h3><div class="archive">' + rows + '</div>';
+  }
+
   /* ---------- run sculpture ----------
      On the records screen, not the results screen. The one metric that matters
      after a death is how fast the player gets to the next run, and a second
@@ -482,6 +499,7 @@
 
     $('rec-body').innerHTML =
       '<h3>THE READ</h3>' + readBlock +
+      archiveBlock() +
       sparkline(OM.analysis.history()) +
       '<h3>YOUR BEST RUN, AS AN OBJECT</h3>' +
       '<div class="sculpt"><canvas id="rec-sculpt"></canvas></div>' +

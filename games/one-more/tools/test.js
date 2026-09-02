@@ -966,6 +966,67 @@ ok('practice banks its own record and nothing else', (function () {
   return res.xp === 0 && res.record === true && d.practice === 300 &&
          d.xp === xp && d.best === best && d.runs === runs && d.totalTime === total;
 })(), 'xp is paid by the second, so a slower speed must not be the fastest way to level');
+/* ---- the archive ----
+   These commit real runs, which moves the personal best, and the record tests
+   below assert on exactly that. So they put it back: a test that quietly
+   changes shared state for the ones after it is worse than no test. */
+function withBest(fn) {
+  var d = OM.progress.data;
+  var b = d.best, at = d.bestAt, nm = d.nightmare;
+  try { return fn(d); } finally { d.best = b; d.bestAt = at; d.nightmare = nm; }
+}
+ok('a milestone is written once and never revised', withBest(function (d) {
+  d.marks = {};
+  OM.progress.commitRun({ mode: 'endless', time: 75, cause: 'spike', nearMiss: 0,
+    perfect: 0, flips: 9, world: P.WORLDS[0], ghost: null });
+  var first = JSON.parse(JSON.stringify(d.marks.first_min));
+  OM.progress.commitRun({ mode: 'endless', time: 400, cause: 'spike', nearMiss: 0,
+    perfect: 0, flips: 9, world: P.WORLDS[0], ghost: null });
+  return d.marks.first_min.t === first.t && d.marks.first_min.at === first.at;
+}), 'a milestone that moved would not be a milestone');
+ok('a run records the firsts it actually earned', withBest(function (d) {
+  d.marks = {};
+  var res = OM.progress.commitRun({ mode: 'nightmare', time: 320, cause: 'spike',
+    nearMiss: 0, perfect: 0, flips: 9, world: P.WORLDS[4], ghost: null });
+  return res.marks.indexOf('first_run') >= 0 &&
+         res.marks.indexOf('first_min') >= 0 &&
+         res.marks.indexOf('five_min') >= 0 &&
+         res.marks.indexOf('first_nightmare') >= 0 &&
+         res.marks.indexOf('w_nightmare') >= 0 &&
+         res.marks.indexOf('first_daily') < 0;
+}));
+ok('and none it did not', withBest(function (d) {
+  d.marks = {};
+  var res = OM.progress.commitRun({ mode: 'endless', time: 9, cause: 'spike',
+    nearMiss: 0, perfect: 0, flips: 2, world: P.WORLDS[0], ghost: null });
+  return res.marks.length === 1 && res.marks[0] === 'first_run';
+}));
+ok('every world has a milestone, and none is orphaned', (function () {
+  var ids = {};
+  OM.progress.marks.forEach(function (m) { ids[m.id] = 1; });
+  for (var i = 1; i < P.WORLDS.length; i++) {
+    if (!ids['w_' + P.WORLDS[i].id]) return false;
+  }
+  for (var k in ids) {
+    if (k.indexOf('w_') !== 0) continue;
+    var found = false;
+    for (var j = 0; j < P.WORLDS.length; j++) if ('w_' + P.WORLDS[j].id === k) found = true;
+    if (!found) return false;
+  }
+  return true;
+})(), 'adding a world must add its milestone, and cannot leave one behind');
+ok('the archive reads in the order things happened', (function () {
+  var d = OM.progress.data;
+  d.marks = { five_min: { at: 300, t: 301 }, first_run: { at: 100, t: 4 },
+              w_pulse: { at: 200, t: 60 } };
+  var a = OM.progress.archive();
+  return a.length === 3 && a[0].id === 'first_run' && a[2].id === 'five_min';
+})());
+ok('an empty archive is empty, not a list of blanks', (function () {
+  OM.progress.data.marks = {};
+  return OM.progress.archive().length === 0;
+})());
+
 ok('a worse run does not overwrite the record', (function () {
   OM.progress.commitRun({
     mode: 'endless', time: 10, cause: 'spike', nearMiss: 0, perfect: 0, flips: 3,

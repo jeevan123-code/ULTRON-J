@@ -20,6 +20,11 @@
     cosmetics: { core: 'auto', trail: 'line', death: 'shatter' },
     achievements: [],
     seen: { tutorial: false },
+    /* The archive. Milestones, each written exactly once, with the run that
+       earned it and when. Kept as a flat map rather than a list so recording
+       one is idempotent — a milestone that could fire twice is a milestone
+       that will, on some replay path nobody thought about. */
+    marks: {},
     settings: { sound: true, music: true, shake: true, haptics: true, reduced: false, quality: 'high' },
     ghost: null,          // best endless run, for racing your own record
     ghostTime: 0,
@@ -141,6 +146,54 @@
     return got;
   }
 
+  /* ---- the archive ----
+   *
+   * A game about surviving one more time has no ending to remember, so the
+   * things worth keeping are the firsts: the first time you lasted a minute,
+   * the first time you saw each world, the first Nightmare, the first Trial
+   * that worked. They cost one line each and they are the only record of a
+   * player's own history the game holds.
+   *
+   * Every entry is written once and never revised. A milestone that moved
+   * would not be a milestone. */
+  var MARKS = [
+    { id: 'first_run', name: 'THE FIRST RUN', line: 'You tapped once and the world moved.' },
+    { id: 'first_min', name: 'ONE MINUTE', line: 'Sixty seconds without touching anything.' },
+    { id: 'first_daily', name: 'THE SAME WORLD AS EVERYONE', line: 'Your first Daily Challenge.' },
+    { id: 'first_trial', name: 'FACING IT', line: 'You drilled the thing that keeps killing you.' },
+    { id: 'first_nightmare', name: 'NO WARNINGS', line: 'You went where the run ends and kept going.' },
+    { id: 'w_pulse', name: 'PULSE', line: 'The world started breathing.' },
+    { id: 'w_void', name: 'VOID', line: 'Most of it stopped being visible.' },
+    { id: 'w_collapse', name: 'COLLAPSE', line: 'Reality stopped being stable.' },
+    { id: 'w_nightmare', name: 'NIGHTMARE', line: 'You arrived somewhere that does not want you.' },
+    { id: 'five_min', name: 'FIVE MINUTES', line: 'A run long enough to be a story.' }
+  ];
+  var MARK_BY_ID = {};
+  for (var mi = 0; mi < MARKS.length; mi++) MARK_BY_ID[MARKS[mi].id] = MARKS[mi];
+
+  function mark(id, r) {
+    if (!MARK_BY_ID[id] || save.marks[id]) return false;
+    save.marks[id] = { at: Date.now(), t: r ? Math.round(r.time * 100) / 100 : 0 };
+    return true;
+  }
+
+  /* Which firsts this run earned. Worlds come from the run's own world table
+     rather than a second copy of it here, so adding a world adds its milestone
+     and cannot forget to. */
+  function markRun(r) {
+    var got = [];
+    if (mark('first_run', r)) got.push('first_run');
+    if (r.time >= 60 && mark('first_min', r)) got.push('first_min');
+    if (r.time >= 300 && mark('five_min', r)) got.push('five_min');
+    if (r.mode === 'daily' && mark('first_daily', r)) got.push('first_daily');
+    if (r.mode === 'trial' && mark('first_trial', r)) got.push('first_trial');
+    if (r.mode === 'nightmare' && mark('first_nightmare', r)) got.push('first_nightmare');
+    if (r.world && MARK_BY_ID['w_' + r.world.id] && mark('w_' + r.world.id, r)) {
+      got.push('w_' + r.world.id);
+    }
+    return got;
+  }
+
   /* ---- recording a run ---- */
   function commitRun(r) {
     var beforeLevel = levelInfo(save.xp).level;
@@ -194,10 +247,11 @@
       }
     }
     save.xp += xp;
+    var newMarks = markRun(r);
     touch();
     var got = checkAchievements();
     flush();
-    return { xp: xp, record: record, achievements: got,
+    return { xp: xp, record: record, achievements: got, marks: newMarks,
              levelUp: levelInfo(save.xp).level > beforeLevel, level: levelInfo(save.xp).level };
   }
 
@@ -223,6 +277,19 @@
     dailyStreak: dailyStreak,
     nightmareUnlocked: function () { return save.best >= 120; },
     achievements: ACH,
+    marks: MARKS,
+    /* The archive in the order it was earned, which is the order it happened
+       and the only order it makes sense to read. */
+    archive: function () {
+      var out = [];
+      for (var i = 0; i < MARKS.length; i++) {
+        var got = save.marks[MARKS[i].id];
+        if (got) out.push({ id: MARKS[i].id, name: MARKS[i].name, line: MARKS[i].line,
+                            at: got.at, t: got.t });
+      }
+      out.sort(function (a, b) { return a.at - b.at; });
+      return out;
+    },
     cores: CORES, trails: TRAILS, deaths: DEATHS,
     unlockedCores: function () { return unlockedIn(CORES, levelInfo(save.xp).level); },
     unlockedTrails: function () { return unlockedIn(TRAILS, levelInfo(save.xp).level); },

@@ -127,6 +127,16 @@ html, body {
   font: inherit; font-size: 10px; letter-spacing: .12em; padding: 5px 9px; cursor: pointer; }
 .qual button[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); }
 
+/* The archive. A history, so it is set as a column of moments rather than a
+   table of rows — the date is the quietest thing in each entry because the
+   thing that happened matters more than when. */
+.archive { margin: 0 0 16px; }
+.mark { border-left: 1px solid var(--line); padding: 6px 0 6px 12px; margin-bottom: 8px; text-align: left; }
+.mark b { display: block; font-size: 10px; letter-spacing: .22em; }
+.mark span { display: block; font-size: 11px; color: var(--dim); margin-top: 2px; }
+.mark i { display: block; font-style: normal; font-size: 10px; color: var(--faint);
+  font-family: var(--mono); margin-top: 3px; }
+
 /* The sculpture gets room. It is the one thing on this screen that rewards
    looking rather than reading. */
 .sculpt { position: relative; width: 100%; aspect-ratio: 1 / 1; max-height: 260px;

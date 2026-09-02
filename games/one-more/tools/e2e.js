@@ -490,6 +490,28 @@ function ok(name, cond, detail) {
   console.log('    (backdrop peak brightness: ' +
               OM_worlds(readability.per) + ' — geometry is 255)');
 
+  /* ---- the archive ---- */
+  await page.evaluate(function () {
+    OM.progress.data.marks = {};
+    OM.ui.showRecords();
+  });
+  ok('an archive with nothing in it shows nothing',
+     await page.evaluate(function () {
+       return document.querySelectorAll('#rec-body .mark').length === 0;
+     }), 'a list of empty slots is a chore list, not a history');
+  await page.evaluate(function () {
+    OM.progress.commitRun({ mode: 'endless', time: 72, cause: 'spike', nearMiss: 1,
+      perfect: 0, flips: 11, world: OM.phys.WORLDS[1], ghost: null });
+    OM.ui.showRecords();
+  });
+  ok('a first shows up in the archive once it happens',
+     await page.evaluate(function () {
+       return document.querySelectorAll('#rec-body .mark').length >= 3;
+     }));
+  ok('and each entry carries what earned it',
+     (await page.textContent('#rec-body')).indexOf('ONE MINUTE') >= 0);
+  await page.evaluate(function () { OM.ui.show('menu'); });
+
   /* ---- the run sculpture ----
      The claim is that it is built from the path rather than from summary
      statistics, which means two runs with the same totals but different shapes
@@ -545,8 +567,16 @@ function ok(name, cond, detail) {
   });
   ok('the records screen shows your best run as an object',
      await page.isVisible('#rec-sculpt'));
-  await page.waitForFunction('document.getElementById("rec-sculpt").width > 0',
-                             null, { timeout: 4000 }).catch(function () {});
+  /* Wait for paint, not for size. A canvas is 300x150 the moment it exists, so
+     `width > 0` was true before a single frame had run and the check below was
+     reading an empty buffer. */
+  await page.waitForFunction(function () {
+    var c = document.getElementById('rec-sculpt');
+    if (!c || !c.width) return false;
+    var d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    for (var i = 3; i < d.length; i += 4) if (d[i] > 20) return true;
+    return false;
+  }, null, { timeout: 6000 }).catch(function () {});
   ok('and it is actually drawing', await page.evaluate(function () {
     var c = document.getElementById('rec-sculpt');
     if (!c || !c.width) return false;
