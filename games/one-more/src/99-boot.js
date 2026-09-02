@@ -12,6 +12,7 @@
     var s = OM.progress.data.settings;
     OM.audio.setMuted(!s.sound);
     OM.audio.setMusic(s.music && s.sound);
+    OM.visual.setQuality(s.quality);
 
     /* ---------- input ----------
        pointerdown, not click: it fires on touch-down rather than touch-up,

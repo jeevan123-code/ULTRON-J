@@ -20,7 +20,7 @@
     cosmetics: { core: 'auto', trail: 'line', death: 'shatter' },
     achievements: [],
     seen: { tutorial: false },
-    settings: { sound: true, music: true, shake: true, haptics: true, reduced: false },
+    settings: { sound: true, music: true, shake: true, haptics: true, reduced: false, quality: 'high' },
     ghost: null,          // best endless run, for racing your own record
     ghostTime: 0,
     dailyGhost: null      // {key, data} — only today's, so storage stays flat

@@ -178,6 +178,32 @@
     var cb = $('menu-challenge');
     cb.hidden = UI.challenge == null;
 
+    /* A1 — lead with the read.
+       The menu used to open on a tagline explaining the control, which every
+       returning player has already understood. What it knows about them is the
+       only thing on this screen they cannot get anywhere else, so once there is
+       a read, that is what the menu says. It never invents one: below the
+       evidence gate this stays hidden and the tagline carries the screen, which
+       is also the correct behaviour on somebody's first ever launch.
+
+       Monochrome throughout, per the visual identity — the panel earns its
+       prominence from position and the rule down its left edge, not from an
+       accent. */
+    var mr = $('menu-read');
+    var mrd = OM.analysis.read(), mhb = OM.analysis.habit();
+    if (mhb) {
+      mr.hidden = false;
+      mr.innerHTML = '<b>' + mhb.headline + '</b><span>' + mhb.count + ' of your last ' +
+        mhb.n + ' deaths, ' + mhb.mult.toFixed(1) + '\u00d7 what your own flip rate ' +
+        'explains.</span>';
+    } else if (mrd.kind === 'weakness') {
+      mr.hidden = false;
+      mr.innerHTML = '<b>' + mrd.headline + '</b><span>' + mrd.line + ' ' +
+        Math.round(mrd.share * 100) + '% of your last ' + mrd.n + ' deaths.</span>';
+    } else {
+      mr.hidden = true;
+    }
+
     var pb = $('menu-practice');
     if (d.runs >= 5) {
       pb.hidden = false;
@@ -580,10 +606,22 @@
       ['sound', 'Sound effects'], ['music', 'Music'],
       ['shake', 'Screen shake'], ['haptics', 'Haptics'], ['reduced', 'Reduced motion']
     ];
+    /* Visual quality is a real choice, not an auto-detected one. A frame-rate
+       probe on the first run guesses from whatever the device happened to be
+       doing that second, and guesses wrong on the exact phones that most need
+       it right. Every tier draws the geometry, the surfaces, the character's
+       silhouette and its core — only the layers that exist to look expensive
+       scale — so nobody loses anything they need to play. */
+    var QUAL = [['high', 'Full'], ['medium', 'Reduced'], ['low', 'Minimal']];
     $('set-body').innerHTML = items.map(function (it) {
       return '<div class="toggle"><span>' + it[1] + '</span>' +
              '<button data-set="' + it[0] + '" aria-pressed="' + !!s[it[0]] + '"></button></div>';
     }).join('') +
+    '<div class="toggle"><span>Visual effects</span><span class="qual">' +
+      QUAL.map(function (qq) {
+        return '<button data-qual="' + qq[0] + '" aria-pressed="' +
+               (s.quality === qq[0]) + '">' + qq[1] + '</button>';
+      }).join('') + '</span></div>' +
     '<p class="muted small" style="margin-top:22px">ONE MORE stores your records in this browser. Nothing is uploaded.</p>' +
     '<button class="btn small" id="wipe" style="margin-top:8px">ERASE ALL DATA</button>';
 
@@ -599,6 +637,20 @@
         OM.audio.play('ui');
       });
     }
+    var qbtns = $('set-body').querySelectorAll('[data-qual]');
+    for (var qi = 0; qi < qbtns.length; qi++) {
+      qbtns[qi].addEventListener('click', function () {
+        s.quality = this.getAttribute('data-qual');
+        OM.visual.setQuality(s.quality);
+        for (var k = 0; k < qbtns.length; k++) {
+          qbtns[k].setAttribute('aria-pressed',
+            String(qbtns[k].getAttribute('data-qual') === s.quality));
+        }
+        prog.touch(); prog.flush();
+        OM.audio.play('ui');
+      });
+    }
+
     var wipe = $('wipe'), armed = false;
     wipe.addEventListener('click', function () {
       if (!armed) { armed = true; wipe.textContent = 'TAP AGAIN TO CONFIRM'; return; }

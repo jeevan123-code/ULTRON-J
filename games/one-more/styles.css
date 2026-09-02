@@ -110,6 +110,23 @@ html, body {
 
 /* Legend for the weakness history. Monochrome, so the swatch has to sit right
    next to its label — there is no colour to carry the mapping across a gap. */
+/* The read, on the menu. Tighter than the results-screen panel — it is a
+   standing fact about the player, not the verdict on a run — and it sits above
+   the buttons because it is the reason to press one. */
+/* The menu sits over a live attract loop on purpose, which means the tunnel's
+   own surface line can run straight through this text. A soft ground under the
+   words, fading out to the right, keeps them legible without putting a solid
+   card between the player and the game running behind it. */
+.menuread { margin: 0 0 18px; padding: 8px 0 8px 14px;
+  background: linear-gradient(90deg, rgba(8,9,12,0.86) 0%, rgba(8,9,12,0.72) 70%, rgba(8,9,12,0) 100%); }
+.menuread b { font-size: 10px; letter-spacing: .24em; }
+.menuread span { font-size: 11px; }
+
+.qual { display: inline-flex; gap: 6px; }
+.qual button { background: none; border: 1px solid var(--line); color: var(--dim);
+  font: inherit; font-size: 10px; letter-spacing: .12em; padding: 5px 9px; cursor: pointer; }
+.qual button[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); }
+
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 6px; padding: 0; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; font-size: 10px;
   letter-spacing: .14em; color: var(--dim); }

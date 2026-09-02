@@ -380,6 +380,62 @@ function ok(name, cond, detail) {
   ok('a frame issues its draw calls in under 4ms', perf < 4, perf.toFixed(2) + 'ms/frame');
   console.log('    (draw-call cost: ' + perf.toFixed(2) + 'ms per frame, 60 patterns live)');
 
+  /* ---- the menu leads with the read ---- */
+  await page.evaluate(function () {
+    OM.game.state = 'idle'; OM.game.run = null;
+    OM.analysis.clear();
+    OM.ui.show('menu');
+  });
+  ok('a menu with nothing to say says nothing',
+     await page.isHidden('#menu-read'),
+     'inventing a read on a first launch would break the one rule the layer has');
+  await page.evaluate(function () {
+    for (var i = 0; i < 22; i++) {
+      OM.analysis.record({ time: 25, cause: 'mover', mode: 'endless', context: {} });
+    }
+    OM.ui.show('menu');
+  });
+  ok('once there is a read, the menu leads with it',
+     await page.isVisible('#menu-read'));
+  ok('and it is the read, not a restatement of the controls',
+     (await page.textContent('#menu-read')).indexOf('% of your last') >= 0,
+     await page.textContent('#menu-read'));
+  await page.evaluate(function () { OM.analysis.clear(); OM.ui.show('menu'); });
+
+  /* ---- quality tiers ----
+     The promise is that a lower tier costs you nothing you need to play, so
+     the check is that geometry and the character's core survive at Minimal. */
+  var tiers = await page.evaluate(function () {
+    var out = {};
+    ['high', 'medium', 'low'].forEach(function (name) {
+      OM.visual.setQuality(name);
+      var q = OM.visual.q();
+      var W = 260, S = 260;
+      var c = document.createElement('canvas');
+      c.width = W; c.height = S;
+      var g = c.getContext('2d');
+      g.fillStyle = '#000'; g.fillRect(0, 0, W, S);
+      OM.nanogon.draw(g, { x: W / 2, y: S / 2, r: 40, rot: 0, grav: 1, speed: 1,
+                           evo: 'core', mood: 'neutral', t: 1, glow: 1, q: q });
+      var d = g.getImageData(0, 0, W, S).data, lit = 0, peak = 0;
+      for (var i = 0; i < d.length; i += 4) {
+        if (d[i] > 8) lit++;
+        if (d[i] > peak) peak = d[i];
+      }
+      out[name] = { lit: lit, peak: peak };
+    });
+    OM.visual.setQuality('high');
+    return out;
+  });
+  ok('every quality tier still draws a solid character',
+     tiers.low.peak > 250 && tiers.medium.peak > 250 && tiers.high.peak > 250,
+     JSON.stringify(tiers));
+  ok('a lower tier actually costs less to draw',
+     tiers.low.lit < tiers.medium.lit && tiers.medium.lit < tiers.high.lit,
+     JSON.stringify(tiers));
+  console.log('    (lit pixels by tier: low ' + tiers.low.lit + ', medium ' +
+              tiers.medium.lit + ', high ' + tiers.high.lit + ')');
+
   /* ---- the environment never competes with the geometry ----
      The visual priority is Nanogon, then whatever can kill you, then the
      surfaces, then the atmosphere. Backdrops are where that gets lost: one
