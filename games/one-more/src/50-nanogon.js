@@ -137,8 +137,13 @@
       var q = st.q || VIS.q();
       var speed = st.speed == null ? 0 : st.speed;
 
+      /* A flash is not a mood. It is a single event the shell cannot produce on
+         its own — a perfect switch, a graze — and it decays in under a third of
+         a second, so it rides on top of whatever state the character is in
+         rather than replacing it. */
+      var flash = st.flash || 0;
       var glow = Math.max(st.glow || 0, m.glowMin);
-      var coreScale = T.coreScale * m.core;
+      var coreScale = T.coreScale * (m.core + flash * 0.55);
       var tremble = m.tremble;
       var pulse = 1 + Math.sin(t * m.pulse) * 0.035;
 
@@ -157,6 +162,16 @@
          is what stops a spinning nonagon reading as a spinning nonagon and
          starts it reading as an object being pulled somewhere. */
       var down = (st.grav > 0 ? Math.PI / 2 : -Math.PI / 2) - (st.rot || 0);
+
+      // ---- L0 flash: a hard ring leaving the shell, only in the moment
+      if (flash > 0.03) {
+        g.globalAlpha = alpha * flash * 0.55;
+        g.strokeStyle = '#ffffff';
+        g.lineWidth = 1 + flash * 2;
+        poly(g, 0, 0, r * (1.15 + (1 - flash) * 1.5), 0);
+        g.stroke();
+        g.globalAlpha = alpha;
+      }
 
       // ---- L1 aura: a field, not an outline. Only when there is something to feel.
       if (q.aura && glow > 0.02) {

@@ -138,7 +138,7 @@
       fixed: fixed,
       t: 0, px: 0, speed: fixed || P.speedAt(tBias > 100 ? 200 : 0),
       y: P.FLOOR - P.R, vy: 0, grav: 1, grounded: true,
-      rot: 0, rotTarget: 0,
+      rot: 0, rotTarget: 0, rotKick: 0, coreFlash: 0,
       squash: 0, wasGrounded: true, lastVy: 0, marks: [],
       flips: 0, nearMiss: 0, perfect: 0,
       sinceFlip: 99, sinceNear: 99, sinceRecord: 99, deadFor: 0,
@@ -169,6 +169,12 @@
       r.flips++;
       r.sinceFlip = 0;
       r.rotTarget += Math.PI;
+      /* Overshoot, not anticipation. A wind-up before the turn would be the one
+         thing this game cannot afford — the tap has to move the character on
+         the same frame it arrives. So the snap is on the far side: the rotation
+         runs past its target and settles back, which reads as weight without
+         costing a millisecond of response. */
+      r.rotKick = 0.30;
       G.screen.kick(3.5);
       r.squash = -0.45;                        // stretch along the new direction
       var fx = G.playerScreenX();
@@ -217,8 +223,17 @@
           r.nearMiss++;
           r.sinceNear = 0;
           var perfect = r.sinceFlip < P.PERFECT_WINDOW;
-          if (perfect) { r.perfect++; OM.audio.play('perfect'); G.screen.slow = 0.55; }
-          else OM.audio.play('near');
+          if (perfect) {
+            r.perfect++; OM.audio.play('perfect'); G.screen.slow = 0.55;
+            /* The moment the game is proudest of, so it gets its own shape: a
+               ring that leaves the character rather than debris that falls off
+               it, and a core flash the shell cannot produce on its own. */
+            G.pool.spawn(G.playerScreenX(), r.y, 0, 0, 0.42, P.R_VIS * 1.3, 3);
+            r.coreFlash = 1;
+          } else {
+            OM.audio.play('near');
+            r.coreFlash = Math.max(r.coreFlash, 0.55);
+          }
           G.screen.kick(perfect ? 7 : 3);
           OM.bus.emit('run:near', { perfect: perfect, clear: Math.sqrt(d2) - R });
         }
@@ -431,7 +446,9 @@
     r.replay.sample(dt, r);
 
     // rotation eases toward the flip target — instant response, visible follow-through
-    r.rot = OM.math.approach(r.rot, r.rotTarget, 17, dt);
+    r.rotKick = OM.math.approach(r.rotKick, 0, 9, dt);
+    r.coreFlash = Math.max(0, r.coreFlash - dt * 3.6);
+    r.rot = OM.math.approach(r.rot, r.rotTarget + r.rotKick, 17, dt);
 
     // adaptive music: intensity from survival, silence when a record is in reach
     var closeToBest = r.target > 12 && !r.beat && (r.target - r.t) < 6 && (r.target - r.t) > 0;
@@ -495,6 +512,7 @@
     OM.render.backdrop(g, G.W, P.H, r.world.id, r.t, corrupt, speedFrac);
     OM.render.speedLines(g, G.W, camX, r.y, speedFrac);
     OM.render.surfaces(g, G.W, camX, r.gen.holes, r.t, speedFrac);
+    OM.render.contactLight(g, G.playerScreenX(), r.y, r.coreFlash, vis.q);
     drawMarks(g, r, camX);
     OM.render.obstacles(g, G.W, camX, r.gen.obstacles, r.t, {
       fade: mods.fade, strobe: mods.strobe, vision: mods.vision, playerX: G.playerScreenX()
@@ -502,7 +520,11 @@
 
     drawGhost(g, r, camX);
 
-    G.trail.draw(g, prog.data.cosmetics.trail, clamp(r.t / 150, 0, 1), corrupt);
+    /* The trail's job is to make speed legible without a speedometer, so it is
+       driven by how fast the world is actually moving and only topped up by how
+       long you have been in it. */
+    G.trail.draw(g, prog.data.cosmetics.trail,
+                 clamp(vis.speed * 0.75 + vis.intensity * 0.25, 0, 1), corrupt);
     G.pool.draw(g);
 
     if (!r.dead) {
@@ -516,7 +538,8 @@
           dead: false, sinceNear: r.sinceNear, sinceRecord: r.sinceRecord,
           threat: r.threat, speedFrac: vis.speed, intensity: vis.intensity
         }),
-        t: r.t, glow: clamp(0.2 + r.threat * 0.5 + (r.sinceNear < 0.3 ? 0.8 : 0), 0, 1.4),
+        flash: r.coreFlash,
+        t: r.t, glow: clamp(0.2 + r.threat * 0.5 + r.coreFlash * 0.9, 0, 1.6),
         corrupt: corrupt
       });
     }

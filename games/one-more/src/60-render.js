@@ -70,6 +70,48 @@
       }
     },
 
+    /* ---- contact light ----
+       The character is the only light source in the game, so the surfaces it
+       passes should know about it. This brightens a short span of whichever
+       surface it is closest to, falling off with distance, plus a sharper
+       kick on a perfect switch.
+
+       It is a horizontal gradient drawn in a translated frame, which means the
+       gradient is always centred on the origin and can be cached like every
+       other one. Two fills a frame, and only when the character is close
+       enough to a surface for the eye to expect a response. */
+    contactLight: function (g, px, py, flash, q) {
+      if (q && !q.aura) return;                  // an expensive nicety, first to go
+      var toFloor = FLOOR - py, toCeil = py - CEIL;
+      var near = Math.min(toFloor, toCeil);
+      var reach = 190;
+      if (near > reach && flash < 0.05) return;
+      var side = toFloor < toCeil ? 1 : -1;
+      var y = side > 0 ? FLOOR : CEIL;
+      var prox = Math.max(0, 1 - near / reach);
+      var a = prox * prox * 0.5 + flash * 0.35;
+      if (a < 0.012) return;
+
+      var cache = g.__omGrad || (g.__omGrad = {});
+      var grd = cache.contact;
+      if (!grd) {
+        grd = g.createLinearGradient(-260, 0, 260, 0);
+        grd.addColorStop(0, 'rgba(255,255,255,0)');
+        grd.addColorStop(0.5, 'rgba(255,255,255,1)');
+        grd.addColorStop(1, 'rgba(255,255,255,0)');
+        cache.contact = grd;
+      }
+      g.save();
+      g.translate(px, y);
+      g.globalAlpha = Math.min(0.55, a);
+      g.globalCompositeOperation = 'lighter';
+      g.fillStyle = grd;
+      g.fillRect(-260, side > 0 ? -2 : -1, 520, 3);
+      g.globalAlpha = Math.min(0.3, a * 0.5);
+      g.fillRect(-260, side > 0 ? 1 : -14, 520, 13);
+      g.restore();
+    },
+
     /* Speed streaks. An earlier version scattered these across the whole tunnel
        at fixed heights, which read as scratches on the screen rather than as
        motion — the eye reads a static y as dirt. These re-seed their height on

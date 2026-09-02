@@ -389,24 +389,37 @@ function ok(name, cond, detail) {
     var g = c.getContext('2d');
     var worst = 0, moods = Object.keys(OM.nanogon.moods);
     var evos = ['core', 'pulse', 'phase', 'void', 'glitch', 'singularity'];
+    /* The flash ring expands as it fades, so it is swept rather than sampled:
+       the question is whether it is ever both large and bright, and only a walk
+       across its life can answer that. */
+    var flashes = [0, 0.35, 0.63, 0.85, 1];
     for (var e = 0; e < evos.length; e++) {
       for (var m = 0; m < moods.length; m++) {
+        for (var fi = 0; fi < flashes.length; fi++) {
         g.fillStyle = '#000'; g.fillRect(0, 0, S, S);
         OM.nanogon.draw(g, { x: S / 2, y: S / 2, r: R, rot: 0.7, grav: 1, speed: 1,
                              evo: evos[e], mood: moods[m], t: 1.5, glow: 1.4,
-                             corrupt: 0, q: OM.visual.q() });
+                             flash: flashes[fi], corrupt: 0, q: OM.visual.q() });
         var d = g.getImageData(0, 0, S, S).data;
         for (var y = 0; y < S; y++) {
           for (var x = 0; x < S; x++) {
-            if (d[(y * S + x) * 4] < 150) continue;      // too dim to be shell
+            /* Near-white only. Every light layer in the character — aura, glow
+               ring, flash ring, spokes — is drawn at 0.55 alpha or less and
+               cannot reach here however it stacks, so what this measures is
+               matter: strokes and fills the player would read as the body. A
+               lower threshold measured the bloom instead and sat 2% under its
+               own bound, which is a tripwire, not a guard. */
+            if (d[(y * S + x) * 4] < 205) continue;
             var dx = x - S / 2, dy = y - S / 2;
             var rad = Math.sqrt(dx * dx + dy * dy);
             if (rad > worst) worst = rad;
           }
         }
+        }
       }
     }
-    return { worst: worst, R: R, evos: evos.length, moods: moods.length };
+    return { worst: worst, R: R, evos: evos.length, moods: moods.length,
+             flashes: flashes.length };
   });
   /* Evolutions that deliberately shed material — void's orbiting fragments,
      singularity's spokes — are allowed past the shell, so the bound is checked
@@ -415,7 +428,8 @@ function ok(name, cond, detail) {
      silhouette.worst < silhouette.R * 1.7,
      'brightest pixel at ' + silhouette.worst.toFixed(1) + 'px for r=' + silhouette.R);
   console.log('    (silhouette bound: ' + (silhouette.worst / silhouette.R).toFixed(2) +
-              'x radius across ' + silhouette.evos + ' evolutions x ' + silhouette.moods + ' moods)');
+              'x radius across ' + silhouette.evos + ' evolutions x ' + silhouette.moods +
+              ' moods x ' + silhouette.flashes + ' flash states)');
 
   /* ---- compositions ----
      The proof lives in tools/validate.js; what this checks is that the proven
