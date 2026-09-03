@@ -396,11 +396,31 @@
       var when = new Date(m.at);
       var stamp = when.getFullYear() + '-' +
         ('0' + (when.getMonth() + 1)).slice(-2) + '-' + ('0' + when.getDate()).slice(-2);
-      return '<div class="mark"><b>' + m.name + '</b>' +
+      return '<div class="mark"><canvas class="glyph" data-glyph="' + m.id + '"></canvas>' +
+             '<b>' + m.name + '</b>' +
              '<span>' + m.line + '</span>' +
              '<i>' + stamp + (m.t ? ' \u00b7 ' + OM.fmtTime(m.t, 2) : '') + '</i></div>';
     }).join('');
     return '<h3>ARCHIVE</h3><div class="archive">' + rows + '</div>';
+  }
+
+  /* Each archive entry carries its own mark, generated from its id so it is the
+     same everywhere and forever. They are never explained. */
+  function paintGlyphs() {
+    var list = doc.querySelectorAll('#rec-body .glyph');
+    var dpr = Math.min(root.devicePixelRatio || 1, 2);
+    for (var i = 0; i < list.length; i++) {
+      var cv = list[i], id = cv.getAttribute('data-glyph');
+      var rect = cv.getBoundingClientRect();
+      var w = Math.max(1, Math.round(rect.width * dpr));
+      var h = Math.max(1, Math.round(rect.height * dpr));
+      if (!w || !h) continue;
+      cv.width = w; cv.height = h;
+      var g = cv.getContext('2d');
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      OM.glyphs.draw(g, id, rect.width / 2, rect.height / 2,
+                     Math.min(rect.width, rect.height) * 0.36, 0.5);
+    }
   }
 
   /* ---------- run sculpture ----------
@@ -543,6 +563,7 @@
       '<p class="muted small">Everything here is measured from your own runs and stored on this device. ' +
       'There is no server yet, so nothing here is a global leaderboard and nothing is compared to other players.</p>';
     UI.show('records');
+    paintGlyphs();
     startSculpture();
   };
 

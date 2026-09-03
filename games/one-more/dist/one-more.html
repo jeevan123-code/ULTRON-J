@@ -141,7 +141,10 @@ html, body {
    table of rows — the date is the quietest thing in each entry because the
    thing that happened matters more than when. */
 .archive { margin: 0 0 16px; }
-.mark { border-left: 1px solid var(--line); padding: 6px 0 6px 12px; margin-bottom: 8px; text-align: left; }
+.mark { position: relative; border-left: 1px solid var(--line); padding: 6px 44px 6px 12px;
+  margin-bottom: 8px; text-align: left; min-height: 40px; }
+.mark .glyph { position: absolute; right: 2px; top: 50%; transform: translateY(-50%);
+  width: 34px; height: 34px; display: block; }
 .mark b { display: block; font-size: 10px; letter-spacing: .22em; }
 .mark span { display: block; font-size: 11px; color: var(--dim); margin-top: 2px; }
 .mark i { display: block; font-style: normal; font-size: 10px; color: var(--faint);
@@ -222,7 +225,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
 }
 
 </style>
-<!-- build 679e9ac2727c -->
+<!-- build b31772f9170c -->
 </head>
 <body>
 <div id="app">
@@ -2114,7 +2117,15 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     { id: 'w_void', name: 'VOID', line: 'Most of it stopped being visible.' },
     { id: 'w_collapse', name: 'COLLAPSE', line: 'Reality stopped being stable.' },
     { id: 'w_nightmare', name: 'NIGHTMARE', line: 'You arrived somewhere that does not want you.' },
-    { id: 'five_min', name: 'FIVE MINUTES', line: 'A run long enough to be a story.' }
+    { id: 'five_min', name: 'FIVE MINUTES', line: 'A run long enough to be a story.' },
+    /* Sightings. Written the moment one is seen rather than when the run ends,
+       because a player who sees THE OBSERVER and then dies two seconds later
+       still saw it. The lines do not explain anything; the game does not know
+       what these are either. */
+    { id: 'saw_observer', name: 'THE OBSERVER', line: 'Something the size of a moon, made of the same geometry as you.' },
+    { id: 'saw_white_sun', name: 'THE WHITE SUN', line: 'A light that had never been there before.' },
+    { id: 'saw_second', name: 'THE SECOND', line: 'Someone else was doing this too, a long way off.' },
+    { id: 'saw_the_room', name: 'THE ROOM', line: 'For a few seconds the tunnel had walls, and an end.' }
   ];
   var MARK_BY_ID = {};
   for (var mi = 0; mi < MARKS.length; mi++) MARK_BY_ID[MARKS[mi].id] = MARKS[mi];
@@ -2128,6 +2139,15 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
   /* Which firsts this run earned. Worlds come from the run's own world table
      rather than a second copy of it here, so adding a world adds its milestone
      and cannot forget to. */
+  /* A sighting is recorded immediately and flushed, not banked until the run
+     ends — dying right after seeing one must not erase having seen it. */
+  function markSighting(id) {
+    if (!mark('saw_' + id, null)) return false;
+    touch();
+    flush();
+    return true;
+  }
+
   function markRun(r) {
     var got = [];
     if (mark('first_run', r)) got.push('first_run');
@@ -2226,6 +2246,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     nightmareUnlocked: function () { return save.best >= 120; },
     achievements: ACH,
     marks: MARKS,
+    markSighting: markSighting,
     /* The archive in the order it was earned, which is the order it happened
        and the only order it makes sense to read. */
     archive: function () {
@@ -3253,6 +3274,82 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 
+/* ==== src/54-glyphs.js ==== */
+/* ONE MORE — the glyphs.
+ *
+ * A set of marks that look like they mean something, generated rather than
+ * drawn, so they share a family resemblance without any of them being a
+ * picture of anything. Each one is a ring, a few chords across it and a few
+ * points on it, chosen by hashing its name — which makes them consistent
+ * forever, identical for every player, and free to store.
+ *
+ * They are never explained. The game shows one when something rare has
+ * happened and lets that sit. Nothing about a glyph gates anything, nothing
+ * about them has to be solved, and a player who never wonders about them loses
+ * nothing at all — which is the only honest way to put a mystery in a game
+ * whose actual subject is a tap.
+ */
+(function (root) {
+  'use strict';
+  var OM = root.OM || (root.OM = {});
+
+  function hash(str, salt) {
+    var h = 2166136261 ^ (salt | 0);
+    for (var i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = (h * 16777619) >>> 0;
+    }
+    return h / 4294967296;
+  }
+
+  OM.glyphs = {
+    /* Deterministic from the name. Two calls with the same id anywhere in the
+       game — the archive, a results screen, a wall in the background — draw the
+       identical mark, which is what makes them read as a writing system rather
+       than as noise. */
+    draw: function (g, id, x, y, r, alpha) {
+      var chords = 2 + Math.floor(hash(id, 1) * 3);
+      var dots = 1 + Math.floor(hash(id, 2) * 3);
+      var open = hash(id, 3) > 0.55;
+      var tilt = hash(id, 4) * Math.PI;
+      g.save();
+      g.translate(x, y);
+      g.rotate(tilt);
+      g.globalAlpha = alpha == null ? 1 : alpha;
+      g.strokeStyle = '#ffffff';
+      g.fillStyle = '#ffffff';
+      g.lineWidth = Math.max(0.8, r * 0.075);
+      g.lineCap = 'round';
+
+      g.beginPath();
+      if (open) {
+        var a0 = hash(id, 5) * 6.2832;
+        g.arc(0, 0, r, a0, a0 + 4.4);
+      } else {
+        g.arc(0, 0, r, 0, 6.2832);
+      }
+      g.stroke();
+
+      for (var c = 0; c < chords; c++) {
+        var s = hash(id, 10 + c) * 6.2832;
+        var e = s + 1.4 + hash(id, 20 + c) * 3.2;
+        g.beginPath();
+        g.moveTo(Math.cos(s) * r, Math.sin(s) * r);
+        g.lineTo(Math.cos(e) * r, Math.sin(e) * r);
+        g.stroke();
+      }
+      for (var d = 0; d < dots; d++) {
+        var da = hash(id, 30 + d) * 6.2832;
+        var dr = r * (0.3 + hash(id, 40 + d) * 0.7);
+        g.beginPath();
+        g.arc(Math.cos(da) * dr, Math.sin(da) * dr, Math.max(1, r * 0.11), 0, 6.2832);
+        g.fill();
+      }
+      g.restore();
+    }
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+
 /* ==== src/55-fx.js ==== */
 /* ONE MORE — trails, particles, death effects and screen response.
    All of it is pooled and all of it is monochrome. The rule from the art
@@ -3573,6 +3670,96 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
     }
   };
 
+  /* ---- the rare tier ----
+   *
+   * These are not events, they are sightings. A player should be able to run
+   * for an hour and never see one, and the first time they do they should not
+   * be certain it happened. So they are slow, quiet, far away, and they never
+   * repeat within a run.
+   *
+   * They are seeded from the run like everything else, which means a Daily
+   * shows the same sighting to everyone who plays it that day and a retried
+   * seed shows it again. That is the honest consequence of a deterministic
+   * world, and a better one than a private die-roll: two people can compare
+   * notes and find they saw the same thing. */
+  var RARE = {
+    /* Something the size of a moon, made of the same geometry as you. */
+    observer: {
+      dur: 11, weight: 3, name: 'THE OBSERVER',
+      draw: function (g, W, H, k, seed) {
+        var band = FLOOR - CEIL, mid = (CEIL + FLOOR) / 2;
+        var a = Math.sin(k * Math.PI);
+        var s = band * 1.9, cx = W * 0.5, cy = mid - band * 0.1;
+        g.globalAlpha = a * 0.055;
+        g.lineWidth = 1.4;
+        g.beginPath(); g.arc(cx, cy, s, 0, 6.2832); g.stroke();
+        for (var i = 0; i < 9; i++) {
+          var t1 = (i / 9) * 6.2832, t2 = ((i * 4) % 9 / 9) * 6.2832;
+          g.beginPath();
+          g.moveTo(cx + Math.cos(t1) * s, cy + Math.sin(t1) * s);
+          g.lineTo(cx + Math.cos(t2) * s, cy + Math.sin(t2) * s);
+          g.stroke();
+        }
+        g.globalAlpha = a * 0.10;                 // the core, unmistakably a core
+        g.beginPath(); g.arc(cx, cy, band * 0.05, 0, 6.2832); g.fill();
+      }
+    },
+    /* A light that has never been there before, and will not be again. */
+    white_sun: {
+      dur: 13, weight: 2, name: 'THE WHITE SUN',
+      draw: function (g, W, H, k, seed) {
+        var band = FLOOR - CEIL, a = Math.sin(k * Math.PI);
+        var cx = W * 0.78, cy = FLOOR + band * 0.9 - a * band * 1.15;
+        var s = band * 0.42;
+        for (var i = 5; i >= 1; i--) {
+          g.globalAlpha = a * 0.016 * i;
+          g.beginPath(); g.arc(cx, cy, s * (0.5 + i * 0.24), 0, 6.2832); g.fill();
+        }
+        g.globalAlpha = a * 0.09;
+        g.beginPath(); g.arc(cx, cy, s * 0.5, 0, 6.2832); g.fill();
+      }
+    },
+    /* Someone else is doing this too, a long way off, and slightly ahead. */
+    second: {
+      dur: 9, weight: 3, name: 'THE SECOND',
+      draw: function (g, W, H, k, seed) {
+        var band = FLOOR - CEIL, a = Math.sin(k * Math.PI);
+        var x = W * (1.15 - k * 0.55);
+        var y = CEIL - band * 0.28 + Math.sin(k * 9) * band * 0.16;
+        g.globalAlpha = a * 0.10;
+        g.lineWidth = 1.2;
+        g.beginPath(); g.arc(x, y, 13, 0, 6.2832); g.stroke();
+        g.beginPath(); g.arc(x, y, 3.2, 0, 6.2832); g.fill();
+        g.globalAlpha = a * 0.05;                 // its trail, going the same way
+        g.beginPath(); g.moveTo(x + 16, y); g.lineTo(x + 190, y + 8); g.stroke();
+      }
+    },
+    /* For a few seconds the tunnel has walls, and an end. */
+    the_room: {
+      dur: 8, weight: 2, name: 'THE ROOM',
+      draw: function (g, W, H, k, seed) {
+        var band = FLOOR - CEIL, mid = (CEIL + FLOOR) / 2;
+        var a = Math.sin(k * Math.PI);
+        g.globalAlpha = a * 0.085;
+        g.lineWidth = 1.5;
+        var w = band * 1.5, h = band * 0.92;
+        g.strokeRect(W * 0.5 - w / 2, mid - h / 2, w, h);
+        g.strokeRect(W * 0.5 - w * 0.34, mid - h * 0.34, w * 0.68, h * 0.68);
+        for (var c = 0; c < 4; c++) {             // corners joined to the inner box
+          var sx2 = W * 0.5 + (c % 2 ? 1 : -1) * w / 2;
+          var sy2 = mid + (c < 2 ? -1 : 1) * h / 2;
+          g.beginPath();
+          g.moveTo(sx2, sy2);
+          g.lineTo(W * 0.5 + (c % 2 ? 1 : -1) * w * 0.34,
+                   mid + (c < 2 ? -1 : 1) * h * 0.34);
+          g.stroke();
+        }
+      }
+    }
+  };
+  var RARE_NAMES = Object.keys(RARE);
+  var RARE_TOTAL = RARE_NAMES.reduce(function (s, n) { return s + RARE[n].weight; }, 0);
+
   var NAMES = Object.keys(EVENTS);
   var TOTAL = NAMES.reduce(function (s, n) { return s + EVENTS[n].weight; }, 0);
 
@@ -3585,13 +3772,20 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
 
   OM.dream = {
     events: EVENTS,
+    rare: RARE,
     byWorld: BY_WORLD,
 
     Director: function (rng) {
       var d = {
         active: null, k: 0, since: 999, seed: 0, fired: 0,
+        isRare: false, seen: {}, onRare: null,
         /* Never inside the first half-minute, whatever the world says. */
-        MIN_T: 30
+        MIN_T: 30,
+        /* A sighting needs a run that has gone somewhere. Two minutes in, and
+           at most one of each per run — the second time you see a thing it
+           stops being a sighting and becomes a feature. */
+        RARE_T: 120,
+        RARE_CHANCE: 0.06
       };
 
       /* A quiet window. Threat is the renderer's own reading of what is close
@@ -3605,8 +3799,8 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       d.update = function (dt, run, vis) {
         d.since += dt;
         if (d.active) {
-          d.k += dt / EVENTS[d.active].dur;
-          if (d.k >= 1) { d.active = null; d.k = 0; d.since = 0; }
+          d.k += dt / (d.isRare ? RARE[d.active] : EVENTS[d.active]).dur;
+          if (d.k >= 1) { d.active = null; d.isRare = false; d.k = 0; d.since = 0; }
           return;
         }
         var every = BY_WORLD[vis.world] || 0;
@@ -3615,12 +3809,31 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
         /* Poisson-ish: once past the cooldown, a small chance per second, so
            two runs through the same stretch do not get the same schedule. */
         if (rng.next() > dt * 0.5) return;
+
+        /* A sighting, occasionally, instead of an event. Same quiet window and
+           the same draw path — the only differences are how rare it is, how
+           long it lasts, and that it is remembered. */
+        if (run.t > d.RARE_T && rng.next() < d.RARE_CHANCE) {
+          var rpick = rng.next() * RARE_TOTAL, racc = 0, chosen = null;
+          for (var ri = 0; ri < RARE_NAMES.length; ri++) {
+            racc += RARE[RARE_NAMES[ri]].weight;
+            if (rpick <= racc && !d.seen[RARE_NAMES[ri]]) { chosen = RARE_NAMES[ri]; break; }
+          }
+          if (chosen) {
+            d.active = chosen; d.isRare = true; d.seen[chosen] = true;
+            d.k = 0; d.seed = Math.floor(rng.next() * 1000000); d.fired++;
+            if (d.onRare) d.onRare(chosen);
+            return;
+          }
+        }
+
         var pick = rng.next() * TOTAL, acc = 0;
         for (var i = 0; i < NAMES.length; i++) {
           acc += EVENTS[NAMES[i]].weight;
           if (pick <= acc) { d.active = NAMES[i]; break; }
         }
         d.active = d.active || NAMES[0];
+        d.isRare = false;
         d.k = 0;
         d.seed = Math.floor(rng.next() * 1000000);
         d.fired++;
@@ -3630,7 +3843,8 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
         if (!d.active) return;
         g.save();
         g.strokeStyle = '#ffffff';
-        EVENTS[d.active].draw(g, W, H, clamp(d.k, 0, 1), d.seed);
+        g.fillStyle = '#ffffff';
+        (d.isRare ? RARE[d.active] : EVENTS[d.active]).draw(g, W, H, clamp(d.k, 0, 1), d.seed);
         g.restore();
       };
 
@@ -4380,7 +4594,17 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       sched: fixed ? [] : MUT.schedule(OM.rng(seed ^ 0x85ebca6b)),
       /* Its own stream, so whether the sky does something never shifts the
          mutation schedule or the world layout by a single call. */
-      dream: OM.dream.Director(OM.rng(seed ^ 0xc2b2ae35)),
+      dream: (function () {
+        var dd = OM.dream.Director(OM.rng(seed ^ 0xc2b2ae35));
+        /* Practice and Trials are drills, not expeditions: a sighting there
+           would be the game handing out its rarest moment during homework. */
+        if (mode === 'endless' || mode === 'daily' || mode === 'nightmare') {
+          dd.onRare = function (id) {
+            if (prog.markSighting(id)) OM.bus.emit('run:sighting', id);
+          };
+        }
+        return dd;
+      })(),
       fixed: fixed,
       t: 0, px: 0, speed: fixed || P.speedAt(tBias > 100 ? 200 : 0),
       y: P.FLOOR - P.R, vy: 0, grav: 1, grounded: true,
@@ -5563,11 +5787,31 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       var when = new Date(m.at);
       var stamp = when.getFullYear() + '-' +
         ('0' + (when.getMonth() + 1)).slice(-2) + '-' + ('0' + when.getDate()).slice(-2);
-      return '<div class="mark"><b>' + m.name + '</b>' +
+      return '<div class="mark"><canvas class="glyph" data-glyph="' + m.id + '"></canvas>' +
+             '<b>' + m.name + '</b>' +
              '<span>' + m.line + '</span>' +
              '<i>' + stamp + (m.t ? ' \u00b7 ' + OM.fmtTime(m.t, 2) : '') + '</i></div>';
     }).join('');
     return '<h3>ARCHIVE</h3><div class="archive">' + rows + '</div>';
+  }
+
+  /* Each archive entry carries its own mark, generated from its id so it is the
+     same everywhere and forever. They are never explained. */
+  function paintGlyphs() {
+    var list = doc.querySelectorAll('#rec-body .glyph');
+    var dpr = Math.min(root.devicePixelRatio || 1, 2);
+    for (var i = 0; i < list.length; i++) {
+      var cv = list[i], id = cv.getAttribute('data-glyph');
+      var rect = cv.getBoundingClientRect();
+      var w = Math.max(1, Math.round(rect.width * dpr));
+      var h = Math.max(1, Math.round(rect.height * dpr));
+      if (!w || !h) continue;
+      cv.width = w; cv.height = h;
+      var g = cv.getContext('2d');
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      OM.glyphs.draw(g, id, rect.width / 2, rect.height / 2,
+                     Math.min(rect.width, rect.height) * 0.36, 0.5);
+    }
   }
 
   /* ---------- run sculpture ----------
@@ -5710,6 +5954,7 @@ h3 { font-size: 11px; letter-spacing: .24em; color: var(--faint); font-weight: 6
       '<p class="muted small">Everything here is measured from your own runs and stored on this device. ' +
       'There is no server yet, so nothing here is a global leaderboard and nothing is compared to other players.</p>';
     UI.show('records');
+    paintGlyphs();
     startSculpture();
   };
 

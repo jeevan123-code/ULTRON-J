@@ -137,7 +137,17 @@
       sched: fixed ? [] : MUT.schedule(OM.rng(seed ^ 0x85ebca6b)),
       /* Its own stream, so whether the sky does something never shifts the
          mutation schedule or the world layout by a single call. */
-      dream: OM.dream.Director(OM.rng(seed ^ 0xc2b2ae35)),
+      dream: (function () {
+        var dd = OM.dream.Director(OM.rng(seed ^ 0xc2b2ae35));
+        /* Practice and Trials are drills, not expeditions: a sighting there
+           would be the game handing out its rarest moment during homework. */
+        if (mode === 'endless' || mode === 'daily' || mode === 'nightmare') {
+          dd.onRare = function (id) {
+            if (prog.markSighting(id)) OM.bus.emit('run:sighting', id);
+          };
+        }
+        return dd;
+      })(),
       fixed: fixed,
       t: 0, px: 0, speed: fixed || P.speedAt(tBias > 100 ? 200 : 0),
       y: P.FLOOR - P.R, vy: 0, grav: 1, grounded: true,

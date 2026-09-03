@@ -249,6 +249,37 @@ best comes within six seconds it strips to a bare heartbeat. Going quiet is the
 loudest thing the soundtrack can do at that moment, and it costs nothing to
 build.
 
+## 10b. Things the game never explains
+
+Four sightings sit on top of the dream director: a shape the size of a moon
+made of your own geometry, a light that has never been there before, someone
+else doing this a long way off, and eight seconds where the tunnel has walls
+and an end. They need a run two minutes deep and a quiet window, they fire at
+six percent, and each happens at most once in a run. A player can run for an
+hour and never see one, and the first time they do they should not be certain
+it happened.
+
+They are seeded from the run, like everything else. So a Daily shows the same
+sighting to everyone who plays it that day, and a retried seed shows it again.
+That is the honest consequence of a deterministic world and a better outcome
+than a private die-roll: two people can compare notes and find they saw the
+same thing.
+
+Practice and Trials never fire them. Those are drills, and handing out the
+rarest moment in the game during homework is how you spend it for nothing.
+
+A sighting is written and flushed the instant it happens rather than banked
+until the run ends, because dying two seconds later must not erase having seen
+it. Its archive entry names it and says one line about it, and the line does
+not explain anything — the game does not know what these are either.
+
+The glyphs are the same idea in the archive. Every entry carries a mark built
+by hashing its id into a ring, a few chords and a few points, so it is the same
+mark on every device forever with nothing to ship. Nothing about them gates
+anything, nothing has to be solved, and a player who never wonders about them
+loses nothing at all. That is the only honest way to put a mystery in a game
+whose actual subject is a tap.
+
 ## 11. What is deliberately missing
 
 Real-time multiplayer, chat, clans, battle passes, multiple currencies,

@@ -166,7 +166,15 @@
     { id: 'w_void', name: 'VOID', line: 'Most of it stopped being visible.' },
     { id: 'w_collapse', name: 'COLLAPSE', line: 'Reality stopped being stable.' },
     { id: 'w_nightmare', name: 'NIGHTMARE', line: 'You arrived somewhere that does not want you.' },
-    { id: 'five_min', name: 'FIVE MINUTES', line: 'A run long enough to be a story.' }
+    { id: 'five_min', name: 'FIVE MINUTES', line: 'A run long enough to be a story.' },
+    /* Sightings. Written the moment one is seen rather than when the run ends,
+       because a player who sees THE OBSERVER and then dies two seconds later
+       still saw it. The lines do not explain anything; the game does not know
+       what these are either. */
+    { id: 'saw_observer', name: 'THE OBSERVER', line: 'Something the size of a moon, made of the same geometry as you.' },
+    { id: 'saw_white_sun', name: 'THE WHITE SUN', line: 'A light that had never been there before.' },
+    { id: 'saw_second', name: 'THE SECOND', line: 'Someone else was doing this too, a long way off.' },
+    { id: 'saw_the_room', name: 'THE ROOM', line: 'For a few seconds the tunnel had walls, and an end.' }
   ];
   var MARK_BY_ID = {};
   for (var mi = 0; mi < MARKS.length; mi++) MARK_BY_ID[MARKS[mi].id] = MARKS[mi];
@@ -180,6 +188,15 @@
   /* Which firsts this run earned. Worlds come from the run's own world table
      rather than a second copy of it here, so adding a world adds its milestone
      and cannot forget to. */
+  /* A sighting is recorded immediately and flushed, not banked until the run
+     ends — dying right after seeing one must not erase having seen it. */
+  function markSighting(id) {
+    if (!mark('saw_' + id, null)) return false;
+    touch();
+    flush();
+    return true;
+  }
+
   function markRun(r) {
     var got = [];
     if (mark('first_run', r)) got.push('first_run');
@@ -278,6 +295,7 @@
     nightmareUnlocked: function () { return save.best >= 120; },
     achievements: ACH,
     marks: MARKS,
+    markSighting: markSighting,
     /* The archive in the order it was earned, which is the order it happened
        and the only order it makes sense to read. */
     archive: function () {

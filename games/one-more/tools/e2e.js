@@ -490,6 +490,91 @@ function ok(name, cond, detail) {
   console.log('    (backdrop peak brightness: ' +
               OM_worlds(readability.per) + ' — geometry is 255)');
 
+  /* ---- sightings ----
+     The rarest thing the game does, so the rules around it get checked rather
+     than assumed: never in a drill, never twice in a run, never before the run
+     has gone somewhere, and remembered the instant it happens rather than when
+     the run ends — dying two seconds later must not erase having seen it. */
+  var sighting = await page.evaluate(function () {
+    var out = {};
+    var d = OM.dream.Director(OM.rng(3));
+    var seen = [];
+    d.onRare = function (id) { seen.push(id); };
+    var vis = { world: 'nightmare' };
+    function state(t) {
+      return { dead: false, t: t, threat: 0, sinceNear: 9, sinceFlip: 9 };
+    }
+    // never before the run has gone somewhere
+    for (var i = 0; i < 20000; i++) { d.since = 9999; d.update(1 / 60, state(60), vis); }
+    out.earlyNone = seen.length === 0;
+    // eventually, deep into a quiet run
+    for (i = 0; i < 200000 && seen.length < 2; i++) {
+      d.since = 9999;
+      if (!d.active) d.update(1 / 60, state(400), vis);
+      else d.update(1 / 60, state(400), vis);
+    }
+    out.fires = seen.length >= 1;
+    // never the same one twice in one run
+    var dup = {}, twice = false;
+    seen.forEach(function (id) { if (dup[id]) twice = true; dup[id] = 1; });
+    out.noRepeat = !twice;
+    out.names = seen.slice(0, 4);
+    return out;
+  });
+  ok('no sighting before a run has gone somewhere', sighting.earlyNone);
+  ok('a sighting does happen, deep into a quiet run', sighting.fires,
+     JSON.stringify(sighting.names));
+  ok('and never the same one twice in one run', sighting.noRepeat,
+     'the second time you see a thing it stops being a sighting');
+
+  ok('a drill never hands out the rarest moment in the game',
+     await page.evaluate(function () {
+       OM.game.state = 'idle';
+       OM.game.start('practice', {});
+       var p = !OM.game.run.dream.onRare;
+       OM.game.start('trial', { family: 'timing' });
+       var tr = !OM.game.run.dream.onRare;
+       OM.game.start('endless', {});
+       var e = !!OM.game.run.dream.onRare;
+       OM.game.state = 'idle'; OM.game.run = null;
+       return p && tr && e;
+     }));
+
+  ok('a sighting is remembered the moment it happens', await page.evaluate(function () {
+    OM.progress.data.marks = {};
+    var wrote = OM.progress.markSighting('observer');
+    var again = OM.progress.markSighting('observer');
+    return wrote && !again && !!OM.progress.data.marks.saw_observer;
+  }), 'dying two seconds later must not erase having seen it');
+
+  ok('every rare event has an archive entry, and none is orphaned',
+     await page.evaluate(function () {
+       var ids = {};
+       OM.progress.marks.forEach(function (m) { ids[m.id] = 1; });
+       var names = Object.keys(OM.dream.rare);
+       for (var i = 0; i < names.length; i++) if (!ids['saw_' + names[i]]) return false;
+       for (var k in ids) {
+         if (k.indexOf('saw_') !== 0) continue;
+         if (!OM.dream.rare[k.slice(4)]) return false;
+       }
+       return true;
+     }));
+
+  ok('a glyph is the same mark every time it is drawn', await page.evaluate(function () {
+    function paint(id) {
+      var c = document.createElement('canvas');
+      c.width = 64; c.height = 64;
+      var g = c.getContext('2d');
+      g.fillStyle = '#000'; g.fillRect(0, 0, 64, 64);
+      OM.glyphs.draw(g, id, 32, 32, 22, 1);
+      var d = g.getImageData(0, 0, 64, 64).data, v = 0;
+      for (var i = 0; i < d.length; i += 4) v += d[i] * (i % 7919);
+      return v;
+    }
+    return paint('saw_observer') === paint('saw_observer') &&
+           paint('saw_observer') !== paint('saw_second');
+  }), 'they read as a writing system only if the same name always draws the same mark');
+
   /* ---- the archive ---- */
   await page.evaluate(function () {
     OM.progress.data.marks = {};
